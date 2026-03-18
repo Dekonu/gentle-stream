@@ -1,9 +1,16 @@
 /**
  * Ingest Agent
  *
- * Fetches articles in small batches (2 at a time) to stay well within
- * token limits. Uses a per-minute token tracker so it never hits the
- * 30k input tokens/min rate limit. Writes untagged articles to the DB.
+ * Fetches one article per API call to avoid truncation, using real token
+ * usage from each response to decide whether to request another immediately
+ * or wait out the 65-second rate-limit window first.
+ *
+ * Flow per article:
+ *   1. Check token budget — wait if exhausted
+ *   2. Request exactly 1 article (web search + write JSON)
+ *   3. Read response.usage.input_tokens and add to window counter
+ *   4. Parse and insert article
+ *   5. If budget remains, go to 1 immediately; otherwise wait then go to 1
  */
 
 import type { Category } from "../constants";
@@ -13,34 +20,46 @@ import { insertArticles } from "../db/articles";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 
-// ─── Per-minute token budget tracker ──────────────────────────────────────────
-// Anthropic free tier: 30,000 input tokens / minute.
-// We stay safely under by tracking usage and pausing when close.
-const TOKEN_LIMIT_PER_MIN = 25000; // conservative buffer below the 30k hard limit
-const TOKENS_PER_REQUEST  = 1500;  // estimated input tokens per 2-article request
+// ─── Token budget ─────────────────────────────────────────────────────────────
+// Anthropic free tier: 30,000 input tokens/min.
+// We stay under by tracking real usage from response.usage.input_tokens.
+const TOKEN_LIMIT_PER_WINDOW = 25_000; // conservative buffer below 30k hard limit
+const WINDOW_MS = 65_000;              // 65s window (slight overrun for safety)
 
-let tokenWindowStart = Date.now();
-let tokensUsedThisWindow = 0;
+let windowStart = Date.now();
+let tokensUsedInWindow = 0;
 
-async function acquireTokenBudget(): Promise<void> {
+/**
+ * Record real token usage and wait if the window is exhausted.
+ * Must be called AFTER a successful API response with its real input_tokens.
+ */
+async function recordUsageAndWaitIfNeeded(inputTokens: number): Promise<void> {
   const now = Date.now();
-  const windowAge = now - tokenWindowStart;
+  const elapsed = now - windowStart;
 
-  // Reset window every 65 seconds (slight overrun so we're never on the edge)
-  if (windowAge >= 65_000) {
-    tokenWindowStart = now;
-    tokensUsedThisWindow = 0;
+  // Reset window if it's expired
+  if (elapsed >= WINDOW_MS) {
+    windowStart = now;
+    tokensUsedInWindow = 0;
+    console.log("[IngestAgent] Token window reset");
   }
 
-  if (tokensUsedThisWindow + TOKENS_PER_REQUEST > TOKEN_LIMIT_PER_MIN) {
-    const waitMs = 65_000 - windowAge + 500; // wait out the remainder of the window
-    console.log(`[IngestAgent] Rate-limit budget reached — waiting ${Math.round(waitMs / 1000)}s`);
+  tokensUsedInWindow += inputTokens;
+  console.log(
+    `[IngestAgent] Tokens used this window: ${tokensUsedInWindow}/${TOKEN_LIMIT_PER_WINDOW}`
+  );
+
+  // If next request would breach the limit, wait out the remainder of the window
+  if (tokensUsedInWindow >= TOKEN_LIMIT_PER_WINDOW) {
+    const remaining = WINDOW_MS - (Date.now() - windowStart);
+    const waitMs = Math.max(remaining + 500, 0);
+    console.log(
+      `[IngestAgent] Budget exhausted — waiting ${Math.round(waitMs / 1000)}s for window reset`
+    );
     await new Promise((r) => setTimeout(r, waitMs));
-    tokenWindowStart = Date.now();
-    tokensUsedThisWindow = 0;
+    windowStart = Date.now();
+    tokensUsedInWindow = 0;
   }
-
-  tokensUsedThisWindow += TOKENS_PER_REQUEST;
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -51,11 +70,16 @@ interface IngestResult {
   error?: string;
 }
 
+interface ClaudeUsage {
+  input_tokens: number;
+  output_tokens: number;
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Ingest articles for one category in batches of 2.
- * Total articles = INGEST_BATCH_SIZE (default 10), fetched over multiple small calls.
+ * Ingest articles for one category, one article per API call.
+ * Uses real token counts to decide when to pause vs continue immediately.
  */
 export async function runIngestAgent(
   category: Category,
@@ -64,80 +88,81 @@ export async function runIngestAgent(
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
 
-  const BATCH = 2;
   const allInserted: StoredArticle[] = [];
   const seenHeadlines: string[] = [];
 
-  for (let fetched = 0; fetched < total; fetched += BATCH) {
-    await acquireTokenBudget();
+  console.log(`[IngestAgent] Starting ingest for "${category}", target: ${total} articles`);
 
+  for (let i = 0; i < total; i++) {
     try {
-      const articles = await fetchBatch(apiKey, category, BATCH, seenHeadlines);
+      const { article, usage } = await fetchOneArticle(apiKey, category, seenHeadlines);
 
-      if (articles.length === 0) {
-        console.warn(`[IngestAgent] Empty batch for "${category}" — stopping early`);
-        break;
-      }
-
-      const toInsert = articles.map((a) => ({
-        ...a,
+      // Store the article
+      const toInsert = {
+        ...article,
         category,
         tags: [],
         sentiment: "uplifting" as const,
         emotions: [],
         locale: "global",
-        readingTimeSecs: estimateReadingTime(a.body),
+        readingTimeSecs: estimateReadingTime(article.body),
         qualityScore: 0.5,
-      }));
+      };
 
-      const inserted = await insertArticles(toInsert);
-      allInserted.push(...inserted);
-      seenHeadlines.push(...articles.map((a) => a.headline));
+      const [inserted] = await insertArticles([toInsert]);
+      allInserted.push(inserted);
+      seenHeadlines.push(article.headline);
 
       console.log(
-        `[IngestAgent] "${category}" — batch done, total so far: ${allInserted.length}/${total}`
+        `[IngestAgent] "${category}" article ${i + 1}/${total} inserted: "${article.headline.slice(0, 50)}"`
       );
+
+      // Update token budget with real usage — will wait here if needed
+      await recordUsageAndWaitIfNeeded(usage.input_tokens);
+
     } catch (e) {
-      console.error(`[IngestAgent] Batch error for "${category}":`, e);
-      // Don't abort the whole run — skip this batch and continue
+      console.error(`[IngestAgent] Error on article ${i + 1} for "${category}":`, e);
+      // On error, wait a beat before retrying the slot
+      await new Promise((r) => setTimeout(r, 3000));
     }
   }
+
+  console.log(
+    `[IngestAgent] "${category}" complete: ${allInserted.length}/${total} articles inserted`
+  );
 
   return { category, inserted: allInserted };
 }
 
 /**
- * Run ingest across ALL categories sequentially to avoid hammering the API.
+ * Run ingest across ALL categories sequentially.
  */
 export async function runFullIngest(): Promise<IngestResult[]> {
   const { CATEGORIES } = await import("../constants");
   const results: IngestResult[] = [];
-
   for (const cat of CATEGORIES) {
-    const result = await runIngestAgent(cat as Category);
-    results.push(result);
+    results.push(await runIngestAgent(cat as Category));
   }
-
   return results;
 }
 
-// ─── Core fetch (2 articles per call) ─────────────────────────────────────────
+// ─── Core fetch — exactly 1 article per call ──────────────────────────────────
 
-async function fetchBatch(
+async function fetchOneArticle(
   apiKey: string,
   category: string,
-  count: number,
-  avoidHeadlines: string[]
-): Promise<RawArticle[]> {
-  const avoid = avoidHeadlines.slice(-6).join("; ");
-  const avoidClause = avoid ? ` Do not repeat: ${avoid}.` : "";
+  seenHeadlines: string[]
+): Promise<{ article: RawArticle; usage: ClaudeUsage }> {
+  const avoid = seenHeadlines.slice(-5).join("; ");
+  const avoidClause = avoid ? ` Do not repeat these stories: ${avoid}.` : "";
 
+  // Tight prompt — 1 object, no array wrapper needed, clear schema
   const prompt =
-    `Search the web for ${count} real, recent, uplifting news stories in: "${category}". ` +
+    `Search the web for 1 real, recent, uplifting news story in: "${category}". ` +
     `Positive only — no deaths, crimes, or disasters.${avoidClause}\n\n` +
-    `Return ONLY a raw JSON array — no preamble, no explanation, no markdown fences:\n` +
-    `[{"headline":"string","subheadline":"string","byline":"By Name","location":"City, Country",` +
-    `"category":"${category}","body":"3 paragraphs separated by \\n\\n","pullQuote":"string","imagePrompt":"string"}]`;
+    `Return ONLY a single raw JSON object — no array, no markdown, no preamble:\n` +
+    `{"headline":"string","subheadline":"string","byline":"By Name","location":"City, Country",` +
+    `"category":"${category}","body":"paragraph1\\n\\nparagraph2\\n\\nparagraph3","pullQuote":"string","imagePrompt":"string"}`;
 
   const makeRequest = async (attempt: number): Promise<Response> => {
     const res = await fetch(ANTHROPIC_API_URL, {
@@ -150,15 +175,15 @@ async function fetchBatch(
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 2048, // 2 articles is comfortably under 2k output tokens
+        max_tokens: 1024, // 1 article easily fits in 1024 output tokens
         tools: [{ type: "web_search_20250305", name: "web_search" }],
         messages: [{ role: "user", content: prompt }],
       }),
     });
 
     if (res.status === 429 && attempt < 3) {
-      const wait = (attempt + 1) * 10_000;
-      console.log(`[IngestAgent] 429 — retrying in ${wait / 1000}s`);
+      const wait = (attempt + 1) * 12_000;
+      console.log(`[IngestAgent] 429 rate limit — retrying in ${wait / 1000}s`);
       await new Promise((r) => setTimeout(r, wait));
       return makeRequest(attempt + 1);
     }
@@ -173,12 +198,13 @@ async function fetchBatch(
   }
 
   const data = await response.json();
+  const usage: ClaudeUsage = data.usage ?? { input_tokens: 1500, output_tokens: 500 };
 
   if (data.stop_reason === "max_tokens") {
-    console.warn("[IngestAgent] max_tokens hit — response truncated. Attempting partial parse.");
+    console.warn("[IngestAgent] max_tokens hit even for single article — attempting recovery");
   }
 
-  // Collect ALL text blocks (web search produces multiple content blocks)
+  // Collect all text blocks
   const blocks: Array<{ type: string; text?: string }> = data.content ?? [];
   const combinedText = blocks
     .filter((b) => b.type === "text" && b.text)
@@ -186,43 +212,68 @@ async function fetchBatch(
     .join("\n");
 
   if (!combinedText) {
-    console.error("[IngestAgent] No text blocks. Full response:", JSON.stringify(data));
+    console.error("[IngestAgent] No text blocks. Response:", JSON.stringify(data));
     throw new Error("No text blocks in Claude response");
   }
 
-  // Strip any preamble before the JSON array
-  const start = combinedText.indexOf("[");
-  if (start === -1) {
-    console.error("[IngestAgent] No '[' found in:\n", combinedText.slice(0, 300));
-    throw new Error("No JSON array in response");
-  }
-
-  // If response was truncated, find the last complete object
-  let jsonSlice = combinedText.slice(start);
-  const end = jsonSlice.lastIndexOf("]");
-
-  if (end === -1) {
-    // Truncated — try to recover by closing the array after the last complete object
-    const lastCompleteObj = jsonSlice.lastIndexOf("}");
-    if (lastCompleteObj === -1) throw new Error("Response too truncated to recover");
-    jsonSlice = jsonSlice.slice(0, lastCompleteObj + 1) + "]";
-    console.warn("[IngestAgent] Truncated response — recovered partial array");
-  } else {
-    jsonSlice = jsonSlice.slice(0, end + 1);
-  }
-
-  // Strip markdown fences if Claude added them anyway
-  jsonSlice = jsonSlice.replace(/```json|```/g, "").trim();
-
-  try {
-    return JSON.parse(jsonSlice) as RawArticle[];
-  } catch (e) {
-    console.error("[IngestAgent] JSON parse failed:\n", jsonSlice.slice(0, 400));
-    throw new Error(`JSON parse error: ${e instanceof Error ? e.message : String(e)}`);
-  }
+  const article = parseArticleFromText(combinedText, category);
+  return { article, usage };
 }
 
-// ─── Utilities ────────────────────────────────────────────────────────────────
+// ─── Parser ───────────────────────────────────────────────────────────────────
+
+function parseArticleFromText(text: string, category: string): RawArticle {
+  const cleaned = text.replace(/```json|```/g, "").trim();
+
+  // Try a single object first (our preferred format)
+  const objStart = cleaned.indexOf("{");
+  const objEnd = cleaned.lastIndexOf("}");
+
+  // Also handle if Claude wrapped it in an array anyway
+  const arrStart = cleaned.indexOf("[");
+  const arrEnd = cleaned.lastIndexOf("]");
+
+  let parsed: RawArticle | RawArticle[] | null = null;
+
+  // Prefer object, fall back to array
+  if (objStart !== -1 && objEnd !== -1) {
+    try {
+      parsed = JSON.parse(cleaned.slice(objStart, objEnd + 1));
+    } catch {
+      // fall through to array attempt
+    }
+  }
+
+  if (!parsed && arrStart !== -1 && arrEnd !== -1) {
+    try {
+      const arr = JSON.parse(cleaned.slice(arrStart, arrEnd + 1));
+      parsed = Array.isArray(arr) ? arr[0] : arr;
+    } catch {
+      // fall through
+    }
+  }
+
+  if (!parsed) {
+    console.error("[IngestAgent] Could not parse JSON from:\n", cleaned.slice(0, 400));
+    throw new Error("JSON parse failed — no valid object or array found");
+  }
+
+  const article = Array.isArray(parsed) ? parsed[0] : parsed;
+
+  // Ensure required fields have fallbacks
+  return {
+    headline: article.headline ?? "Untitled",
+    subheadline: article.subheadline ?? "",
+    byline: article.byline ?? "By Staff Reporter",
+    location: article.location ?? "Global",
+    category: (article.category ?? category) as RawArticle["category"],
+    body: article.body ?? "",
+    pullQuote: article.pullQuote ?? "",
+    imagePrompt: article.imagePrompt ?? "",
+  };
+}
+
+// ─── Utility ──────────────────────────────────────────────────────────────────
 
 function estimateReadingTime(body: string): number {
   return Math.round((body.split(/\s+/).length / 200) * 60);

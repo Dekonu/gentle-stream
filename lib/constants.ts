@@ -30,7 +30,7 @@ export const LAYOUT_COUNT = 3;
 export const STOCK_THRESHOLD = 20;
 
 /** How many articles the ingest agent produces per run */
-export const INGEST_BATCH_SIZE = 6; // fetched 2 at a time
+export const INGEST_BATCH_SIZE = 6; // fetched 1 at a time, token-aware
 
 /** Articles expire after this many days */
 export const ARTICLE_TTL_DAYS = 7;
