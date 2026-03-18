@@ -131,22 +131,29 @@ async function main() {
     console.log(`📥 Ingesting ALL categories — ${countArg} articles each\n`);
     separator();
 
-    const results = await Promise.allSettled(
-      CATEGORIES.map(async (cat) => {
-        const t = Date.now();
-        if (!runIngestAgent) throw new Error("runIngestAgent not loaded");
+    // Run categories sequentially to guarantee we never fetch multiple articles
+    // concurrently (avoids rate-limit spikes across categories).
+    let succeeded = 0;
+    for (const cat of CATEGORIES) {
+      const t = Date.now();
+      if (!runIngestAgent) throw new Error("runIngestAgent not loaded");
+
+      try {
         const result = await runIngestAgent(cat as Category, countArg);
         const duration = formatDuration(Date.now() - t);
         if (result.error) {
           console.log(`  ❌ ${cat.padEnd(28)} error: ${result.error}`);
         } else {
-          console.log(`  ✓  ${cat.padEnd(28)} ${result.inserted.length} articles  (${duration})`);
+          console.log(
+            `  ✓  ${cat.padEnd(28)} ${result.inserted.length} articles  (${duration})`
+          );
+          succeeded += 1;
         }
-        return result;
-      })
-    );
-
-    const succeeded = results.filter((r) => r.status === "fulfilled").length;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.log(`  ❌ ${cat.padEnd(28)} error: ${msg}`);
+      }
+    }
     console.log();
     separator();
     console.log(`  Ingest complete: ${succeeded}/${CATEGORIES.length} categories succeeded`);

@@ -160,6 +160,8 @@ async function fetchOneArticle(
   const prompt =
     `Search the web for 1 real, recent, uplifting news story in: "${category}". ` +
     `Positive only — no deaths, crimes, or disasters.${avoidClause}\n\n` +
+    `IMPORTANT: Write the body in plain prose. Do NOT include any citation markup, ` +
+    `<cite> tags, reference numbers, or source links inside the text.\n\n` +
     `Return ONLY a single raw JSON object — no array, no markdown, no preamble:\n` +
     `{"headline":"string","subheadline":"string","byline":"By Name","location":"City, Country",` +
     `"category":"${category}","body":"paragraph1\\n\\nparagraph2\\n\\nparagraph3","pullQuote":"string","imagePrompt":"string"}`;
@@ -260,16 +262,16 @@ function parseArticleFromText(text: string, category: string): RawArticle {
 
   const article = Array.isArray(parsed) ? parsed[0] : parsed;
 
-  // Ensure required fields have fallbacks
+  // Strip any <cite> tags Claude injects from web search citations
   return {
-    headline: article.headline ?? "Untitled",
-    subheadline: article.subheadline ?? "",
-    byline: article.byline ?? "By Staff Reporter",
-    location: article.location ?? "Global",
-    category: (article.category ?? category) as RawArticle["category"],
-    body: article.body ?? "",
-    pullQuote: article.pullQuote ?? "",
-    imagePrompt: article.imagePrompt ?? "",
+    headline:    stripCitations(article.headline    ?? "Untitled"),
+    subheadline: stripCitations(article.subheadline ?? ""),
+    byline:      article.byline    ?? "By Staff Reporter",
+    location:    article.location  ?? "Global",
+    category:    (article.category ?? category) as RawArticle["category"],
+    body:        stripCitations(article.body        ?? ""),
+    pullQuote:   stripCitations(article.pullQuote   ?? ""),
+    imagePrompt: stripCitations(article.imagePrompt ?? ""),
   };
 }
 
@@ -277,4 +279,15 @@ function parseArticleFromText(text: string, category: string): RawArticle {
 
 function estimateReadingTime(body: string): number {
   return Math.round((body.split(/\s+/).length / 200) * 60);
+}
+
+/**
+ * Strip <cite index="...">...</cite> tags that Claude injects when web search
+ * citations leak into the generated article text. Also removes bare </cite>.
+ */
+function stripCitations(text: string): string {
+  return text
+    .replace(/<cite[^>]*>/gi, "")
+    .replace(/<\/cite>/gi, "")
+    .trim();
 }

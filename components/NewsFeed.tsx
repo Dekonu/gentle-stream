@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useInView } from "react-intersection-observer";
 import Masthead from "./Masthead";
 import CategoryBar from "./CategoryBar";
 import NewsSection from "./NewsSection";
@@ -10,7 +9,6 @@ import ErrorBanner from "./ErrorBanner";
 import type { Category } from "@/lib/constants";
 import type { Article, NewsSection as NewsSectionType } from "@/lib/types";
 
-// ── Lightweight anonymous user ID persisted in localStorage ──────────────────
 function getOrCreateUserId(): string {
   if (typeof window === "undefined") return "anonymous";
   const key = "gnd_user_id";
@@ -22,6 +20,24 @@ function getOrCreateUserId(): string {
   return id;
 }
 
+// Strip any <cite ...>...</cite> or bare </cite> tags that leak from Claude
+function stripCiteTags(text: string): string {
+  return text
+    .replace(/<cite[^>]*>/gi, "")
+    .replace(/<\/cite>/gi, "")
+    .trim();
+}
+
+function cleanArticle(article: Article): Article {
+  return {
+    ...article,
+    body: stripCiteTags(article.body ?? ""),
+    pullQuote: stripCiteTags(article.pullQuote ?? ""),
+    subheadline: stripCiteTags(article.subheadline ?? ""),
+    headline: stripCiteTags(article.headline ?? ""),
+  };
+}
+
 export default function NewsFeed() {
   const [sections, setSections] = useState<NewsSectionType[]>([]);
   const [loading, setLoading] = useState(false);
@@ -29,65 +45,68 @@ export default function NewsFeed() {
   const [activeCategory, setActiveCategory] = useState<Category | null>(null);
   const [liveGenerating, setLiveGenerating] = useState(false);
 
-  const sectionCount = useRef(0);
+  // Use refs for values that loadMore closes over — avoids stale closure bugs
+  const loadingRef = useRef(false);
+  const sectionCountRef = useRef(0);
+  const activeCategoryRef = useRef<Category | null>(null);
+  const userIdRef = useRef<string>("anonymous");
   const isFirstLoad = useRef(true);
-  const userId = useRef<string>("anonymous");
 
-  // Resolve userId on mount (client-side only)
+  // Sentinel ref — plain IntersectionObserver (no library dependency on stale state)
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const observerRef = useRef<IntersectionObserver | null>(null);
+
   useEffect(() => {
-    userId.current = getOrCreateUserId();
+    userIdRef.current = getOrCreateUserId();
   }, []);
 
-  // Sentinel element at the bottom of the feed
-  const { ref: sentinelRef, inView } = useInView({
-    threshold: 0.1,
-    initialInView: false,
-  });
+  const loadMore = useCallback(async (overrideCategory?: Category | null) => {
+    if (loadingRef.current) return;
 
-  const loadMore = useCallback(
-    async (overrideCategory?: Category | null) => {
-      if (loading) return;
-      setLoading(true);
-      setError(null);
+    loadingRef.current = true;
+    setLoading(true);
+    setError(null);
 
-      const category =
-        overrideCategory !== undefined ? overrideCategory : activeCategory;
+    const category =
+      overrideCategory !== undefined
+        ? overrideCategory
+        : activeCategoryRef.current;
 
-      try {
-        const params = new URLSearchParams();
-        params.set("userId", userId.current);
-        params.set("sectionIndex", String(sectionCount.current));
-        if (category) params.set("category", category);
+    try {
+      const params = new URLSearchParams();
+      params.set("userId", userIdRef.current);
+      params.set("sectionIndex", String(sectionCountRef.current));
+      if (category) params.set("category", category);
 
-        const res = await fetch(`/api/feed?${params.toString()}`);
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body.error || `HTTP ${res.status}`);
-        }
-
-        const data: {
-          articles: Article[];
-          category: string;
-          fromCache: boolean;
-        } = await res.json();
-
-        // Let the user know if we had to generate live (stock was empty)
-        setLiveGenerating(!data.fromCache);
-
-        setSections((prev) => [
-          ...prev,
-          { articles: data.articles, index: sectionCount.current },
-        ]);
-        sectionCount.current += 1;
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : "Something went wrong.";
-        setError(`Could not load stories — ${msg}`);
-      } finally {
-        setLoading(false);
+      const res = await fetch(`/api/feed?${params.toString()}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
       }
-    },
-    [loading, activeCategory]
-  );
+
+      const data: {
+        articles: Article[];
+        category: string;
+        fromCache: boolean;
+      } = await res.json();
+
+      setLiveGenerating(!data.fromCache);
+
+      const cleaned = data.articles.map(cleanArticle);
+
+      setSections((prev) => [
+        ...prev,
+        { articles: cleaned, index: sectionCountRef.current },
+      ]);
+      sectionCountRef.current += 1;
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Something went wrong.";
+      setError(`Could not load stories — ${msg}`);
+    } finally {
+      loadingRef.current = false;
+      setLoading(false);
+    }
+  }, []); // stable — reads everything from refs
 
   // Initial load
   useEffect(() => {
@@ -95,24 +114,40 @@ export default function NewsFeed() {
       isFirstLoad.current = false;
       loadMore();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadMore]);
 
-  // Infinite scroll
+  // Keep activeCategoryRef in sync
   useEffect(() => {
-    if (inView && !loading && !error) {
-      loadMore();
+    activeCategoryRef.current = activeCategory;
+  }, [activeCategory]);
+
+  // Wire up IntersectionObserver directly — no library, no stale closure
+  useEffect(() => {
+    observerRef.current = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !loadingRef.current) {
+          loadMore();
+        }
+      },
+      { threshold: 0, rootMargin: "200px" } // trigger 200px before sentinel is visible
+    );
+
+    if (sentinelRef.current) {
+      observerRef.current.observe(sentinelRef.current);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inView]);
+
+    return () => observerRef.current?.disconnect();
+  }, [loadMore]);
 
   const handleCategorySelect = (cat: Category) => {
     const next = activeCategory === cat ? null : cat;
     setActiveCategory(next);
+    activeCategoryRef.current = next;
     setSections([]);
-    sectionCount.current = 0;
+    sectionCountRef.current = 0;
+    loadingRef.current = false;
     setLoading(false);
-    setTimeout(() => loadMore(next), 0);
+    loadMore(next);
   };
 
   return (
@@ -120,7 +155,6 @@ export default function NewsFeed() {
       <Masthead />
       <CategoryBar selected={activeCategory} onSelect={handleCategorySelect} />
 
-      {/* Live-generation notice — shown when DB stock was empty */}
       {liveGenerating && (
         <div
           style={{
@@ -136,7 +170,8 @@ export default function NewsFeed() {
             margin: "0 auto",
           }}
         >
-          Freshly sourced — our editors are searching the world for your stories&hellip;
+          Freshly sourced — our editors are searching the world for your
+          stories&hellip;
         </div>
       )}
 
@@ -148,7 +183,6 @@ export default function NewsFeed() {
           boxShadow: "0 0 60px rgba(0,0,0,0.13)",
         }}
       >
-        {/* Empty state */}
         {sections.length === 0 && !loading && !error && (
           <div
             style={{
@@ -160,11 +194,10 @@ export default function NewsFeed() {
               fontStyle: "italic",
             }}
           >
-            Scroll down to load today&apos;s uplifting stories&hellip;
+            Loading today&apos;s uplifting stories&hellip;
           </div>
         )}
 
-        {/* Rendered sections */}
         {sections.map((section) => (
           <NewsSection
             key={section.index}
@@ -173,13 +206,10 @@ export default function NewsFeed() {
           />
         ))}
 
-        {/* Error state */}
         {error && <ErrorBanner message={error} onRetry={() => loadMore()} />}
-
-        {/* Loading spinner */}
         {loading && <LoadingSection />}
 
-        {/* Invisible sentinel for IntersectionObserver */}
+        {/* Sentinel — observed directly, not via library */}
         <div ref={sentinelRef} style={{ height: "1px" }} />
 
         <footer
