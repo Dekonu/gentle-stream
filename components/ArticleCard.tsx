@@ -1,7 +1,15 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import { CATEGORY_COLORS } from "@/lib/constants";
 import type { Article, LayoutVariant } from "@/lib/types";
+import {
+  picsumFallbackUrl,
+  pollinationsImageUrl,
+} from "@/lib/article-image";
+
+const HERO_IMG_W = 800;
+const HERO_IMG_H = 450;
 
 interface ArticleCardProps {
   article: Article;
@@ -21,6 +29,33 @@ export default function ArticleCard({
 
   const isHero = layout === "hero";
   const isWide = layout === "wide";
+
+  const articleSeed =
+    "id" in article && article.id ? article.id : article.headline;
+
+  /** Try AI image from prompt first, then deterministic stock photo, then text fallback */
+  const [imageStage, setImageStage] = useState<
+    "pollinations" | "picsum" | "broken"
+  >("pollinations");
+
+  useEffect(() => {
+    setImageStage("pollinations");
+  }, [article.imagePrompt, articleSeed]);
+
+  const heroImageSrc = useMemo(() => {
+    if (!article.imagePrompt?.trim()) return null;
+    if (imageStage === "broken") return null;
+    if (imageStage === "picsum") {
+      return picsumFallbackUrl(articleSeed, HERO_IMG_W, HERO_IMG_H);
+    }
+    return (
+      pollinationsImageUrl(
+        article.imagePrompt,
+        HERO_IMG_W,
+        HERO_IMG_H
+      ) ?? picsumFallbackUrl(articleSeed, HERO_IMG_W, HERO_IMG_H)
+    );
+  }, [article.imagePrompt, articleSeed, imageStage]);
 
   const headlineSizePx = isHero
     ? "clamp(1.55rem, 2.8vw, 2.3rem)"
@@ -107,27 +142,59 @@ export default function ArticleCard({
         {article.location && <span>&middot; {article.location}</span>}
       </div>
 
-      {/* Image placeholder (hero only) */}
-      {isHero && article.imagePrompt && (
-        <div
+      {/* Hero image from imagePrompt (AI URL → stock photo fallback → caption only) */}
+      {isHero && article.imagePrompt?.trim() && (
+        <figure
           style={{
-            background: "linear-gradient(135deg, #e8e4da 0%, #d4cfc4 100%)",
+            margin: "0.4rem 0 0",
+            position: "relative",
+            width: "100%",
             height: "190px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            margin: "0.4rem 0",
+            overflow: "hidden",
             border: "1px solid #ccc",
-            fontFamily: "Georgia, serif",
-            color: "#999",
-            fontSize: "0.73rem",
-            fontStyle: "italic",
-            textAlign: "center",
-            padding: "1rem",
+            background: "linear-gradient(135deg, #e8e4da 0%, #d4cfc4 100%)",
           }}
         >
-          <span>[ {article.imagePrompt} ]</span>
-        </div>
+          {heroImageSrc ? (
+            <img
+              src={heroImageSrc}
+              alt={article.imagePrompt}
+              width={HERO_IMG_W}
+              height={HERO_IMG_H}
+              loading="lazy"
+              decoding="async"
+              onError={() => {
+                setImageStage((s) =>
+                  s === "pollinations" ? "picsum" : "broken"
+                );
+              }}
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                objectPosition: "center",
+                display: "block",
+              }}
+            />
+          ) : (
+            <div
+              style={{
+                height: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontFamily: "Georgia, serif",
+                color: "#999",
+                fontSize: "0.73rem",
+                fontStyle: "italic",
+                textAlign: "center",
+                padding: "1rem",
+              }}
+            >
+              <span>[ {article.imagePrompt} ]</span>
+            </div>
+          )}
+        </figure>
       )}
 
       {/* Body copy */}
