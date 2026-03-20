@@ -15,17 +15,27 @@
 
 import {
   getArticlesForFeed,
+  getRandomArticlesResurfacing,
+  getRandomAvailableArticles,
   getUntaggedArticlesForFeed,
 } from "../db/articles";
 import { getOrCreateUserProfile, markArticlesSeen } from "../db/users";
-import type { StoredArticle, UserProfile } from "../types";
+import type {
+  FeedSelectionMode,
+  StoredArticle,
+  UserProfile,
+} from "../types";
 import type { Category } from "../constants";
 import { CATEGORIES, DEFAULT_CATEGORY_WEIGHTS } from "../constants";
+
+/** Section label when articles come from multiple categories (random backfill). */
+const MIXED_SECTION_LABEL = "Mixed";
 
 export interface RankedFeedResult {
   articles: StoredArticle[];
   fromCache: true;
   category: string;
+  selectionMode: FeedSelectionMode;
 }
 
 interface RankOptions {
@@ -115,6 +125,11 @@ async function collectUntaggedAcrossCategories(
 
 /**
  * Main entry point. Returns a ranked page of articles for a user.
+ *
+ * Selection pipeline (see `lib/feed/README.md` for future engagement hooks):
+ *   1) Profile-weighted category picks → tagged → untagged per category
+ *   2) Random pool across all unexpired (still excluding seen)
+ *   3) Random resurfacing (ignore seen) if the DB has rows but none unseen in sample
  */
 export async function getRankedFeed(
   options: RankOptions
@@ -122,6 +137,7 @@ export async function getRankedFeed(
   const { userId, category, sectionIndex, pageSize = 3, markSeen = true } = options;
 
   const profile = await getOrCreateUserProfile(userId);
+  // Future: build `FeedSelectionContext` from profile + engagement signals here.
 
   // Label for this section (single category when filtered; primary pick when mixed)
   const resolvedCategory = category ?? pickCategory(profile, sectionIndex);
@@ -151,6 +167,30 @@ export async function getRankedFeed(
         );
   }
 
+  let selectionMode: FeedSelectionMode = "profile_ranked";
+  let sectionCategoryLabel: string = resolvedCategory;
+
+  // No profile-based recommendations for this section — pull from the whole catalog
+  if (candidates.length === 0) {
+    candidates = await getRandomAvailableArticles(
+      poolSize,
+      profile.seenArticleIds
+    );
+    if (candidates.length > 0) {
+      selectionMode = "random_pool";
+      sectionCategoryLabel = MIXED_SECTION_LABEL;
+    }
+  }
+
+  // Still empty (e.g. user has seen everything in the sampled pool) — allow repeats
+  if (candidates.length === 0) {
+    candidates = await getRandomArticlesResurfacing(poolSize);
+    if (candidates.length > 0) {
+      selectionMode = "random_resurface";
+      sectionCategoryLabel = MIXED_SECTION_LABEL;
+    }
+  }
+
   // Score and rank
   const scored = candidates.map((a) => ({
     article: a,
@@ -168,7 +208,8 @@ export async function getRankedFeed(
   return {
     articles: selected,
     fromCache: true,
-    category: resolvedCategory,
+    category: sectionCategoryLabel,
+    selectionMode,
   };
 }
 

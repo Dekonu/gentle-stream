@@ -58,10 +58,18 @@ export interface FeedRequest {
   pageSize?: number;           // default 3 (one newspaper section = 3 articles)
 }
 
+/** See `lib/feed/selection-types.ts` */
+export type FeedSelectionMode =
+  | "profile_ranked"
+  | "random_pool"
+  | "random_resurface";
+
 export interface FeedResponse {
   articles: StoredArticle[];
   category: string;
   fromCache: boolean;          // true = served from DB, false = freshly generated
+  /** How articles were chosen; omit = treat as profile_ranked (legacy clients) */
+  selectionMode?: FeedSelectionMode;
 }
 
 // ─── Component / UI types ─────────────────────────────────────────────────────

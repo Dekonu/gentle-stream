@@ -324,6 +324,58 @@ export async function getUntaggedArticlesForFeed(
   return (data as ArticleRow[]).map(rowToArticle);
 }
 
+function shuffleInPlace<T>(items: T[]): void {
+  for (let i = items.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = items[i];
+    items[i] = items[j]!;
+    items[j] = t!;
+  }
+}
+
+/**
+ * Random unexpired articles from any category (tagged or untagged).
+ * Used when profile-weighted / category picks yield no candidates (e.g. dev-light, sparse stock).
+ */
+export async function getRandomAvailableArticles(
+  limit: number,
+  excludeIds: string[] = []
+): Promise<StoredArticle[]> {
+  const cap = Math.min(150, Math.max(40, limit * 12));
+  let query = db
+    .from("articles")
+    .select("*")
+    .gt("expires_at", new Date().toISOString())
+    .limit(cap);
+
+  if (excludeIds.length > 0) {
+    query = query.notIn("id", excludeIds);
+  }
+
+  const { data, error } = await query;
+  if (error) throw new Error(`getRandomAvailableArticles: ${error.message}`);
+  const rows = (data as ArticleRow[]).map(rowToArticle);
+  shuffleInPlace(rows);
+  return rows.slice(0, limit);
+}
+
+/**
+ * Random unexpired articles ignoring seen-list — last resort so the feed can still render.
+ */
+export async function getRandomArticlesResurfacing(limit: number): Promise<StoredArticle[]> {
+  const cap = Math.min(150, Math.max(40, limit * 12));
+  const { data, error } = await db
+    .from("articles")
+    .select("*")
+    .gt("expires_at", new Date().toISOString())
+    .limit(cap);
+
+  if (error) throw new Error(`getRandomArticlesResurfacing: ${error.message}`);
+  const rows = (data as ArticleRow[]).map(rowToArticle);
+  shuffleInPlace(rows);
+  return rows.slice(0, limit);
+}
+
 /**
  * Count available (tagged, unexpired) articles per category.
  * Used by the scheduler to decide whether to trigger ingest.
