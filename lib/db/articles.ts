@@ -25,6 +25,7 @@ interface ArticleRow {
   quality_score: number;
   used_count: number;
   tagged: boolean;
+  fingerprint: string;
 }
 
 function rowToArticle(row: ArticleRow): StoredArticle {
@@ -52,8 +53,21 @@ function rowToArticle(row: ArticleRow): StoredArticle {
 }
 
 /**
- * Insert a batch of raw articles (before tagging).
- * Returns the stored articles with generated IDs.
+ * Compute a deduplication fingerprint from headline + category.
+ * Lowercased and whitespace-collapsed so minor phrasing differences
+ * don't create separate entries.
+ */
+function fingerprint(headline: string, category: string): string {
+  return `${headline}|${category}`
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Insert articles, skipping any whose fingerprint already exists in the DB.
+ * Uses upsert with onConflict: ignore as the last line of defence.
+ * Returns only the articles that were actually inserted.
  */
 export async function insertArticles(
   articles: Omit<
@@ -61,11 +75,39 @@ export async function insertArticles(
     "id" | "fetchedAt" | "expiresAt" | "usedCount" | "tagged"
   >[]
 ): Promise<StoredArticle[]> {
+  if (articles.length === 0) return [];
+
   const now = new Date();
   const expiresAt = new Date(now);
   expiresAt.setDate(expiresAt.getDate() + ARTICLE_TTL_DAYS);
 
-  const rows = articles.map((a) => ({
+  // Compute fingerprints and check which ones already exist
+  const candidates = articles.map((a) => ({
+    article: a,
+    fp: fingerprint(a.headline, a.category),
+  }));
+
+  const fps = candidates.map((c) => c.fp);
+  const { data: existing } = await db
+    .from("articles")
+    .select("fingerprint")
+    .in("fingerprint", fps);
+
+  const existingFps = new Set((existing ?? []).map((r: { fingerprint: string }) => r.fingerprint));
+  const novel = candidates.filter((c) => !existingFps.has(c.fp));
+
+  if (novel.length === 0) {
+    console.log("[insertArticles] All articles already exist — skipping insert");
+    return [];
+  }
+
+  if (novel.length < candidates.length) {
+    console.log(
+      `[insertArticles] Skipping ${candidates.length - novel.length} duplicate(s), inserting ${novel.length}`
+    );
+  }
+
+  const rows = novel.map(({ article: a, fp }) => ({
     id: uuidv4(),
     headline: a.headline,
     subheadline: a.subheadline,
@@ -85,15 +127,37 @@ export async function insertArticles(
     quality_score: a.qualityScore ?? 0.5,
     used_count: 0,
     tagged: false,
+    fingerprint: fp,
   }));
 
+  // Upsert with ignoreDuplicates as final safety net
   const { data, error } = await db
     .from("articles")
-    .insert(rows)
+    .upsert(rows, { onConflict: "fingerprint", ignoreDuplicates: true })
     .select();
 
   if (error) throw new Error(`insertArticles: ${error.message}`);
   return (data as ArticleRow[]).map(rowToArticle);
+}
+
+/**
+ * Fetch the most recent N headlines for a category from the DB.
+ * Used by the ingest agent to build its avoid-list before each API call,
+ * so it doesn't request stories that are already stored.
+ */
+export async function getRecentHeadlines(
+  category: Category,
+  limit = 20
+): Promise<string[]> {
+  const { data, error } = await db
+    .from("articles")
+    .select("headline")
+    .eq("category", category)
+    .order("fetched_at", { ascending: false })
+    .limit(limit);
+
+  if (error) throw new Error(`getRecentHeadlines: ${error.message}`);
+  return (data ?? []).map((r: { headline: string }) => r.headline);
 }
 
 /**

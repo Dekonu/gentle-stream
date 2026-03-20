@@ -16,7 +16,7 @@
 import type { Category } from "../constants";
 import { INGEST_BATCH_SIZE } from "../constants";
 import type { RawArticle, StoredArticle } from "../types";
-import { insertArticles } from "../db/articles";
+import { insertArticles, getRecentHeadlines } from "../db/articles";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 
@@ -89,7 +89,12 @@ export async function runIngestAgent(
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
 
   const allInserted: StoredArticle[] = [];
-  const seenHeadlines: string[] = [];
+
+  // Pre-seed the avoid list from the DB so re-runs never repeat stored stories
+  const seenHeadlines: string[] = await getRecentHeadlines(category, 20);
+  console.log(
+    `[IngestAgent] "${category}" — ${seenHeadlines.length} existing headlines loaded as avoid-list`
+  );
 
   console.log(`[IngestAgent] Starting ingest for "${category}", target: ${total} articles`);
 
