@@ -4,10 +4,12 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import Masthead from "./Masthead";
 import CategoryBar from "./CategoryBar";
 import NewsSection from "./NewsSection";
+import GameSlot from "./games/GameSlot";
 import LoadingSection from "./LoadingSection";
 import ErrorBanner from "./ErrorBanner";
 import type { Category } from "@/lib/constants";
-import type { Article, NewsSection as NewsSectionType } from "@/lib/types";
+import type { Article, FeedSection, ArticleFeedSection, GameFeedSection } from "@/lib/types";
+import { DEFAULT_GAME_RATIO } from "@/lib/constants";
 
 function getOrCreateUserId(): string {
   if (typeof window === "undefined") return "anonymous";
@@ -39,10 +41,22 @@ function cleanArticle(article: Article): Article {
   };
 }
 
+/**
+ * Decide whether a given section index should be a game slot.
+ * Uses the user's gameRatio (default 0.2 = every 5th section).
+ * Deterministic: same sectionIndex always produces the same result for a given ratio.
+ */
+function shouldBeGame(sectionIndex: number, gameRatio: number): boolean {
+  if (gameRatio <= 0) return false;
+  if (gameRatio >= 1) return true;
+  const period = Math.round(1 / gameRatio);
+  return sectionIndex % period === period - 1;
+}
+
 const FEED_FETCH_TIMEOUT_MS = 90_000;
 
 export default function NewsFeed() {
-  const [sections, setSections] = useState<NewsSectionType[]>([]);
+  const [sections, setSections] = useState<FeedSection[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<Category | null>(null);
@@ -54,6 +68,7 @@ export default function NewsFeed() {
   const activeCategoryRef = useRef<Category | null>(null);
   const userIdRef = useRef<string>("anonymous");
   const isFirstLoad = useRef(true);
+  const gameRatioRef = useRef(DEFAULT_GAME_RATIO);
 
   // Sentinel ref — plain IntersectionObserver (no library dependency on stale state)
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -61,6 +76,13 @@ export default function NewsFeed() {
 
   useEffect(() => {
     userIdRef.current = getOrCreateUserId();
+
+    // Load user's game ratio preference if stored locally
+    const storedRatio = localStorage.getItem("gentle_stream_game_ratio");
+    if (storedRatio !== null) {
+      const ratio = parseFloat(storedRatio);
+      if (!isNaN(ratio)) gameRatioRef.current = ratio;
+    }
   }, []);
 
   const loadMore = useCallback(async (overrideCategory?: Category | null) => {
@@ -75,10 +97,28 @@ export default function NewsFeed() {
         ? overrideCategory
         : activeCategoryRef.current;
 
+    const currentIndex = sectionCountRef.current;
+
+    // ── Decide: game slot or article section? ────────────────────────────────
+    if (shouldBeGame(currentIndex, gameRatioRef.current)) {
+      const gameSection: GameFeedSection = {
+        sectionType: "game",
+        gameType: "sudoku",
+        difficulty: (["easy", "medium", "hard"] as const)[currentIndex % 3],
+        index: currentIndex,
+      };
+      setSections((prev) => [...prev, gameSection]);
+      sectionCountRef.current += 1;
+      loadingRef.current = false;
+      setLoading(false);
+      return;
+    }
+
+    // ── Article section ──────────────────────────────────────────────────────
     try {
       const params = new URLSearchParams();
       params.set("userId", userIdRef.current);
-      params.set("sectionIndex", String(sectionCountRef.current));
+      params.set("sectionIndex", String(currentIndex));
       if (category) params.set("category", category);
 
       const controller = new AbortController();
@@ -111,17 +151,20 @@ export default function NewsFeed() {
 
       if (cleaned.length === 0) {
         setError(
-          sectionCountRef.current > 0
+          currentIndex > 0
             ? "No more stories right now."
             : "No stories available yet — try again in a moment."
         );
         return;
       }
 
-      setSections((prev) => [
-        ...prev,
-        { articles: cleaned, index: sectionCountRef.current },
-      ]);
+      const section: ArticleFeedSection = {
+        sectionType: "articles",
+        articles: cleaned,
+        index: currentIndex,
+      };
+
+      setSections((prev) => [...prev, section]);
       sectionCountRef.current += 1;
 
       // IntersectionObserver only fires on visibility *changes*. If the sentinel
@@ -167,7 +210,7 @@ export default function NewsFeed() {
     activeCategoryRef.current = activeCategory;
   }, [activeCategory]);
 
-  // Re-attach when sections change so layout updates don’t leave the sentinel unobserved
+  // Re-attach when sections change so layout updates don't leave the sentinel unobserved
   useEffect(() => {
     const el = sentinelRef.current;
     const io = new IntersectionObserver(
@@ -242,13 +285,24 @@ export default function NewsFeed() {
           </div>
         )}
 
-        {sections.map((section) => (
-          <NewsSection
-            key={section.index}
-            articles={section.articles}
-            sectionIndex={section.index}
-          />
-        ))}
+        {sections.map((section) => {
+          if (section.sectionType === "game") {
+            return (
+              <GameSlot
+                key={`game-${section.index}`}
+                gameType={section.gameType}
+                difficulty={section.difficulty}
+              />
+            );
+          }
+          return (
+            <NewsSection
+              key={`news-${section.index}`}
+              articles={section.articles}
+              sectionIndex={section.index}
+            />
+          );
+        })}
 
         {error && <ErrorBanner message={error} onRetry={() => loadMore()} />}
         {loading && <LoadingSection />}

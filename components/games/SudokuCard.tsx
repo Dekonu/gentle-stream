@@ -1,0 +1,503 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
+import type { SudokuPuzzle, Difficulty } from "@/lib/games/types";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type CellState = "given" | "empty" | "filled" | "error";
+
+interface BoardState {
+  values: number[][];       // current board values (0 = empty)
+  selected: [number, number] | null;
+  errors: boolean[][];      // cells that conflict with Sudoku rules
+  completed: boolean;
+  startedAt: number | null; // timestamp ms
+  elapsedSecs: number;
+}
+
+type Action =
+  | { type: "SELECT"; row: number; col: number }
+  | { type: "INPUT"; num: number }
+  | { type: "ERASE" }
+  | { type: "TICK" }
+  | { type: "RESET"; puzzle: SudokuPuzzle };
+
+interface SudokuCardProps {
+  puzzle: SudokuPuzzle;
+  onNewPuzzle?: (difficulty: Difficulty) => void;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function computeErrors(values: number[][], given: number[][]): boolean[][] {
+  const errors: boolean[][] = Array.from({ length: 9 }, () => Array(9).fill(false));
+
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      const v = values[r][c];
+      if (v === 0 || given[r][c] !== 0) continue;
+
+      // Check row
+      for (let cc = 0; cc < 9; cc++) {
+        if (cc !== c && values[r][cc] === v) { errors[r][c] = true; break; }
+      }
+      if (errors[r][c]) continue;
+
+      // Check col
+      for (let rr = 0; rr < 9; rr++) {
+        if (rr !== r && values[rr][c] === v) { errors[r][c] = true; break; }
+      }
+      if (errors[r][c]) continue;
+
+      // Check box
+      const br = Math.floor(r / 3) * 3;
+      const bc = Math.floor(c / 3) * 3;
+      outer: for (let rr = br; rr < br + 3; rr++) {
+        for (let cc = bc; cc < bc + 3; cc++) {
+          if ((rr !== r || cc !== c) && values[rr][cc] === v) {
+            errors[r][c] = true;
+            break outer;
+          }
+        }
+      }
+    }
+  }
+
+  return errors;
+}
+
+function isComplete(values: number[][], solution: number[][]): boolean {
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      if (values[r][c] !== solution[r][c]) return false;
+    }
+  }
+  return true;
+}
+
+function formatTime(secs: number): string {
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function makeInitialState(puzzle: SudokuPuzzle): BoardState {
+  return {
+    values: puzzle.given.map((row) => [...row]),
+    selected: null,
+    errors: Array.from({ length: 9 }, () => Array(9).fill(false)),
+    completed: false,
+    startedAt: null,
+    elapsedSecs: 0,
+  };
+}
+
+// ─── Reducer ──────────────────────────────────────────────────────────────────
+
+function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): BoardState {
+  switch (action.type) {
+    case "SELECT": {
+      if (state.completed) return state;
+      const alreadySelected =
+        state.selected?.[0] === action.row && state.selected?.[1] === action.col;
+      return {
+        ...state,
+        selected: alreadySelected ? null : [action.row, action.col],
+        startedAt: state.startedAt ?? Date.now(),
+      };
+    }
+
+    case "INPUT": {
+      if (!state.selected || state.completed) return state;
+      const [r, c] = state.selected;
+      if (puzzle.given[r][c] !== 0) return state; // can't overwrite givens
+
+      const values = state.values.map((row) => [...row]);
+      values[r][c] = action.num;
+
+      const errors = computeErrors(values, puzzle.given);
+      const completed = isComplete(values, puzzle.solution);
+
+      return { ...state, values, errors, completed };
+    }
+
+    case "ERASE": {
+      if (!state.selected || state.completed) return state;
+      const [r, c] = state.selected;
+      if (puzzle.given[r][c] !== 0) return state;
+
+      const values = state.values.map((row) => [...row]);
+      values[r][c] = 0;
+      return { ...state, values, errors: computeErrors(values, puzzle.given) };
+    }
+
+    case "TICK": {
+      if (state.completed || !state.startedAt) return state;
+      return {
+        ...state,
+        elapsedSecs: Math.floor((Date.now() - state.startedAt) / 1000),
+      };
+    }
+
+    case "RESET":
+      return makeInitialState(action.puzzle);
+
+    default:
+      return state;
+  }
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export default function SudokuCard({ puzzle, onNewPuzzle }: SudokuCardProps) {
+  const puzzleRef = useRef(puzzle);
+  puzzleRef.current = puzzle;
+
+  const [state, dispatchRaw] = useReducer(
+    (s: BoardState, a: Action) => reducer(s, a, puzzleRef.current),
+    puzzle,
+    makeInitialState
+  );
+
+  const dispatch = dispatchRaw;
+
+  // Timer
+  useEffect(() => {
+    if (state.completed || !state.startedAt) return;
+    const id = setInterval(() => dispatch({ type: "TICK" }), 1000);
+    return () => clearInterval(id);
+  }, [state.completed, state.startedAt, dispatch]);
+
+  // Keyboard input
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (!state.selected) return;
+      const num = parseInt(e.key);
+      if (num >= 1 && num <= 9) {
+        dispatch({ type: "INPUT", num });
+      } else if (e.key === "Backspace" || e.key === "Delete" || e.key === "0") {
+        dispatch({ type: "ERASE" });
+      } else if (e.key === "ArrowUp" && state.selected[0] > 0) {
+        dispatch({ type: "SELECT", row: state.selected[0] - 1, col: state.selected[1] });
+      } else if (e.key === "ArrowDown" && state.selected[0] < 8) {
+        dispatch({ type: "SELECT", row: state.selected[0] + 1, col: state.selected[1] });
+      } else if (e.key === "ArrowLeft" && state.selected[1] > 0) {
+        dispatch({ type: "SELECT", row: state.selected[0], col: state.selected[1] - 1 });
+      } else if (e.key === "ArrowRight" && state.selected[1] < 8) {
+        dispatch({ type: "SELECT", row: state.selected[0], col: state.selected[1] + 1 });
+      }
+    }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [state.selected, dispatch]);
+
+  // Highlight — same row, col, box, or same number as selected cell
+  const highlights = useMemo(() => {
+    const h: ("peer" | "same-num" | "none")[][] = Array.from(
+      { length: 9 }, () => Array(9).fill("none")
+    );
+    if (!state.selected) return h;
+    const [sr, sc] = state.selected;
+    const selNum = state.values[sr][sc];
+
+    for (let r = 0; r < 9; r++) {
+      for (let c = 0; c < 9; c++) {
+        const sameRow = r === sr;
+        const sameCol = c === sc;
+        const sameBox =
+          Math.floor(r / 3) === Math.floor(sr / 3) &&
+          Math.floor(c / 3) === Math.floor(sc / 3);
+        if (sameRow || sameCol || sameBox) h[r][c] = "peer";
+        if (selNum !== 0 && state.values[r][c] === selNum) h[r][c] = "same-num";
+      }
+    }
+    return h;
+  }, [state.selected, state.values]);
+
+  const difficultyLabel = {
+    easy: "Easy",
+    medium: "Medium",
+    hard: "Hard",
+  }[puzzle.difficulty];
+
+  // ── Styles ──────────────────────────────────────────────────────────────────
+
+  const cardStyle: React.CSSProperties = {
+    borderTop: "3px double #1a1a1a",
+    borderBottom: "2px solid #1a1a1a",
+    background: "#faf8f3",
+    padding: "1.5rem 1.5rem 1.2rem",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "1rem",
+  };
+
+  const headerStyle: React.CSSProperties = {
+    width: "100%",
+    display: "flex",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+  };
+
+  const titleStyle: React.CSSProperties = {
+    fontFamily: "'Playfair Display', Georgia, serif",
+    fontSize: "1.3rem",
+    fontWeight: 700,
+    color: "#0d0d0d",
+    letterSpacing: "-0.01em",
+  };
+
+  const metaStyle: React.CSSProperties = {
+    fontFamily: "'IM Fell English', Georgia, serif",
+    fontStyle: "italic",
+    fontSize: "0.78rem",
+    color: "#888",
+    display: "flex",
+    gap: "1rem",
+    alignItems: "center",
+  };
+
+  const gridStyle: React.CSSProperties = {
+    display: "grid",
+    gridTemplateColumns: "repeat(9, 1fr)",
+    width: "min(360px, 100%)",
+    aspectRatio: "1",
+    border: "2px solid #1a1a1a",
+    userSelect: "none",
+  };
+
+  // ── Cell renderer ────────────────────────────────────────────────────────────
+
+  function cellStyle(r: number, c: number): React.CSSProperties {
+    const isSelected = state.selected?.[0] === r && state.selected?.[1] === c;
+    const isGiven = puzzle.given[r][c] !== 0;
+    const isError = state.errors[r][c];
+    const hl = highlights[r][c];
+    const val = state.values[r][c];
+
+    let bg = "#faf8f3";
+    if (isSelected) bg = "#d4c27a";
+    else if (hl === "same-num" && val !== 0) bg = "#e8d98a";
+    else if (hl === "peer") bg = "#ede9e1";
+
+    const borderRight = (c + 1) % 3 === 0 && c < 8
+      ? "2px solid #1a1a1a"
+      : "0.5px solid #ccc";
+    const borderBottom = (r + 1) % 3 === 0 && r < 8
+      ? "2px solid #1a1a1a"
+      : "0.5px solid #ccc";
+
+    return {
+      background: bg,
+      borderRight,
+      borderBottom,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      cursor: isGiven ? "default" : "pointer",
+      fontFamily: "'Playfair Display', Georgia, serif",
+      fontSize: "clamp(12px, 2.5vw, 18px)",
+      fontWeight: isGiven ? 700 : 400,
+      color: isError
+        ? "#c0392b"
+        : isGiven
+        ? "#0d0d0d"
+        : "#2c5282",
+      transition: "background 0.08s ease",
+      WebkitTapHighlightColor: "transparent",
+    };
+  }
+
+  // ── Number pad ───────────────────────────────────────────────────────────────
+
+  const padStyle: React.CSSProperties = {
+    display: "flex",
+    gap: "0.4rem",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    width: "min(360px, 100%)",
+  };
+
+  function padBtnStyle(num: number): React.CSSProperties {
+    const selNum = state.selected
+      ? state.values[state.selected[0]][state.selected[1]]
+      : 0;
+    const isActive = selNum === num;
+    return {
+      width: "2.6rem",
+      height: "2.6rem",
+      border: "1px solid #1a1a1a",
+      background: isActive ? "#1a1a1a" : "#faf8f3",
+      color: isActive ? "#faf8f3" : "#1a1a1a",
+      fontFamily: "'Playfair Display', Georgia, serif",
+      fontSize: "1rem",
+      fontWeight: 700,
+      cursor: "pointer",
+      transition: "background 0.1s ease",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+    };
+  }
+
+  // ── Completed banner ─────────────────────────────────────────────────────────
+
+  if (state.completed) {
+    return (
+      <div style={cardStyle}>
+        <div style={headerStyle}>
+          <span style={titleStyle}>Sudoku</span>
+          <span style={metaStyle}>{difficultyLabel}</span>
+        </div>
+
+        <div style={{
+          textAlign: "center",
+          padding: "2rem 1rem",
+          fontFamily: "'Playfair Display', Georgia, serif",
+        }}>
+          <div style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>✓</div>
+          <div style={{ fontSize: "1.2rem", fontWeight: 700, color: "#0d0d0d" }}>
+            Puzzle complete
+          </div>
+          <div style={{
+            fontFamily: "'IM Fell English', Georgia, serif",
+            fontStyle: "italic",
+            color: "#888",
+            marginTop: "0.25rem",
+            fontSize: "0.9rem",
+          }}>
+            Solved in {formatTime(state.elapsedSecs)}
+          </div>
+        </div>
+
+        {onNewPuzzle && (
+          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", justifyContent: "center" }}>
+            {(["easy", "medium", "hard"] as Difficulty[]).map((d) => (
+              <button
+                key={d}
+                onClick={() => onNewPuzzle(d)}
+                style={{
+                  padding: "0.4rem 1rem",
+                  border: "1px solid #1a1a1a",
+                  background: d === puzzle.difficulty ? "#1a1a1a" : "#faf8f3",
+                  color: d === puzzle.difficulty ? "#faf8f3" : "#1a1a1a",
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: "0.75rem",
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  cursor: "pointer",
+                }}
+              >
+                New {d}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Main render ──────────────────────────────────────────────────────────────
+
+  return (
+    <div style={cardStyle}>
+      <div style={headerStyle}>
+        <span style={titleStyle}>Sudoku</span>
+        <span style={metaStyle}>
+          <span>{difficultyLabel}</span>
+          {state.startedAt && (
+            <span style={{ fontVariantNumeric: "tabular-nums" }}>
+              {formatTime(state.elapsedSecs)}
+            </span>
+          )}
+        </span>
+      </div>
+
+      {/* Grid */}
+      <div style={gridStyle}>
+        {state.values.map((row, r) =>
+          row.map((val, c) => (
+            <div
+              key={`${r}-${c}`}
+              style={cellStyle(r, c)}
+              onClick={() => dispatch({ type: "SELECT", row: r, col: c })}
+            >
+              {val !== 0 ? val : ""}
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Number pad */}
+      <div style={padStyle}>
+        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+          <button
+            key={num}
+            style={padBtnStyle(num)}
+            onClick={() => dispatch({ type: "INPUT", num })}
+            aria-label={`Enter ${num}`}
+          >
+            {num}
+          </button>
+        ))}
+        <button
+          style={{
+            ...padBtnStyle(0),
+            width: "auto",
+            padding: "0 0.75rem",
+            fontSize: "0.7rem",
+            letterSpacing: "0.05em",
+            textTransform: "uppercase",
+            fontFamily: "'Playfair Display', Georgia, serif",
+          }}
+          onClick={() => dispatch({ type: "ERASE" })}
+          aria-label="Erase"
+        >
+          Erase
+        </button>
+      </div>
+
+      {/* Controls */}
+      {onNewPuzzle && (
+        <div style={{
+          display: "flex",
+          gap: "0.5rem",
+          flexWrap: "wrap",
+          justifyContent: "center",
+        }}>
+          {(["easy", "medium", "hard"] as Difficulty[]).map((d) => (
+            <button
+              key={d}
+              onClick={() => onNewPuzzle(d)}
+              style={{
+                padding: "0.3rem 0.8rem",
+                border: "1px solid #ccc",
+                background: d === puzzle.difficulty ? "#1a1a1a" : "transparent",
+                color: d === puzzle.difficulty ? "#faf8f3" : "#888",
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "0.68rem",
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+                cursor: "pointer",
+              }}
+            >
+              {d}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <p style={{
+        fontFamily: "'IM Fell English', Georgia, serif",
+        fontStyle: "italic",
+        fontSize: "0.72rem",
+        color: "#bbb",
+        margin: 0,
+      }}>
+        Click a cell, then type a number or use the pad
+      </p>
+    </div>
+  );
+}
