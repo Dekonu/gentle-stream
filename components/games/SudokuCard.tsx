@@ -1,14 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { SudokuPuzzle, Difficulty } from "@/lib/games/types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type CellState = "given" | "empty" | "filled" | "error";
+/** Bitmask: bit (n-1) set ⇔ pencil mark for digit n (1–9). */
+type NoteMask = number;
 
 interface BoardState {
   values: number[][];       // current board values (0 = empty)
+  notes: NoteMask[][];      // pencil marks per cell (only for empty non-given cells)
   selected: [number, number] | null;
   errors: boolean[][];      // cells that conflict with Sudoku rules
   completed: boolean;
@@ -18,7 +20,7 @@ interface BoardState {
 
 type Action =
   | { type: "SELECT"; row: number; col: number }
-  | { type: "INPUT"; num: number }
+  | { type: "INPUT"; num: number; asNote?: boolean }
   | { type: "ERASE" }
   | { type: "TICK" }
   | { type: "RESET"; puzzle: SudokuPuzzle };
@@ -28,6 +30,38 @@ interface SudokuCardProps {
   onNewPuzzle?: (difficulty: Difficulty) => void;
   /** Hero-column embed: softer frame */
   embedded?: boolean;
+}
+
+function CellNotes({ mask }: { mask: NoteMask }) {
+  if (mask === 0) return null;
+  const noteStyle: React.CSSProperties = {
+    fontSize: "clamp(6px, 2.1vw, 9px)",
+    fontWeight: 500,
+    color: "#6b6560",
+    lineHeight: 1,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontFamily: "'Playfair Display', Georgia, serif",
+  };
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: "2px",
+        display: "grid",
+        gridTemplateColumns: "repeat(3, 1fr)",
+        gridTemplateRows: "repeat(3, 1fr)",
+        pointerEvents: "none",
+      }}
+    >
+      {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
+        <span key={n} style={noteStyle}>
+          {mask & (1 << (n - 1)) ? n : ""}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -84,9 +118,18 @@ function formatTime(secs: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+function emptyNotesGrid(): NoteMask[][] {
+  return Array.from({ length: 9 }, () => Array(9).fill(0));
+}
+
+function cloneNotes(notes: NoteMask[][]): NoteMask[][] {
+  return notes.map((row) => [...row]);
+}
+
 function makeInitialState(puzzle: SudokuPuzzle): BoardState {
   return {
     values: puzzle.given.map((row) => [...row]),
+    notes: emptyNotesGrid(),
     selected: null,
     errors: Array.from({ length: 9 }, () => Array(9).fill(false)),
     completed: false,
@@ -115,13 +158,23 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
       const [r, c] = state.selected;
       if (puzzle.given[r][c] !== 0) return state; // can't overwrite givens
 
+      if (action.asNote) {
+        if (state.values[r][c] !== 0) return state;
+        const notes = cloneNotes(state.notes);
+        const bit = 1 << (action.num - 1);
+        notes[r][c] ^= bit;
+        return { ...state, notes };
+      }
+
       const values = state.values.map((row) => [...row]);
       values[r][c] = action.num;
+      const notes = cloneNotes(state.notes);
+      notes[r][c] = 0;
 
       const errors = computeErrors(values, puzzle.given);
       const completed = isComplete(values, puzzle.solution);
 
-      return { ...state, values, errors, completed };
+      return { ...state, values, notes, errors, completed };
     }
 
     case "ERASE": {
@@ -130,8 +183,18 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
       if (puzzle.given[r][c] !== 0) return state;
 
       const values = state.values.map((row) => [...row]);
-      values[r][c] = 0;
-      return { ...state, values, errors: computeErrors(values, puzzle.given) };
+      const notes = cloneNotes(state.notes);
+      if (values[r][c] !== 0) {
+        values[r][c] = 0;
+      } else {
+        notes[r][c] = 0;
+      }
+      return {
+        ...state,
+        values,
+        notes,
+        errors: computeErrors(values, puzzle.given),
+      };
     }
 
     case "TICK": {
@@ -167,6 +230,7 @@ export default function SudokuCard({
   );
 
   const dispatch = dispatchRaw;
+  const [notesMode, setNotesMode] = useState(false);
 
   // Timer
   useEffect(() => {
@@ -175,14 +239,25 @@ export default function SudokuCard({
     return () => clearInterval(id);
   }, [state.completed, state.startedAt, dispatch]);
 
-  // Keyboard input
+  // Keyboard input (Shift+digit = toggle note without turning Notes mode on)
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      if (
+        target?.closest(
+          "input, textarea, select, [contenteditable=true], [contenteditable='']"
+        )
+      ) {
+        return;
+      }
+
       if (!state.selected) return;
-      const num = parseInt(e.key);
+      const num = parseInt(e.key, 10);
       if (num >= 1 && num <= 9) {
-        dispatch({ type: "INPUT", num });
+        e.preventDefault();
+        dispatch({ type: "INPUT", num, asNote: e.shiftKey || notesMode });
       } else if (e.key === "Backspace" || e.key === "Delete" || e.key === "0") {
+        e.preventDefault();
         dispatch({ type: "ERASE" });
       } else if (e.key === "ArrowUp" && state.selected[0] > 0) {
         dispatch({ type: "SELECT", row: state.selected[0] - 1, col: state.selected[1] });
@@ -192,11 +267,16 @@ export default function SudokuCard({
         dispatch({ type: "SELECT", row: state.selected[0], col: state.selected[1] - 1 });
       } else if (e.key === "ArrowRight" && state.selected[1] < 8) {
         dispatch({ type: "SELECT", row: state.selected[0], col: state.selected[1] + 1 });
+      } else if (e.key === "n" || e.key === "N") {
+        if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+          e.preventDefault();
+          setNotesMode((v) => !v);
+        }
       }
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [state.selected, dispatch]);
+  }, [state.selected, dispatch, notesMode]);
 
   // Highlight — same row, col, box, or same number as selected cell
   const highlights = useMemo(() => {
@@ -307,6 +387,7 @@ export default function SudokuCard({
       : "0.5px solid #ccc";
 
     return {
+      position: "relative",
       background: bg,
       borderRight,
       borderBottom,
@@ -440,26 +521,66 @@ export default function SudokuCard({
               key={`${r}-${c}`}
               style={cellStyle(r, c)}
               onClick={() => dispatch({ type: "SELECT", row: r, col: c })}
+              aria-label={
+                val !== 0
+                  ? `Cell ${r + 1},${c + 1}, value ${val}`
+                  : state.notes[r][c]
+                    ? `Cell ${r + 1},${c + 1}, notes`
+                    : `Cell ${r + 1},${c + 1}, empty`
+              }
             >
-              {val !== 0 ? val : ""}
+              {val !== 0 ? (
+                val
+              ) : (
+                <CellNotes mask={state.notes[r][c]} />
+              )}
             </div>
           ))
         )}
       </div>
 
       {/* Number pad */}
-      <div style={padStyle}>
+      <div style={{ ...padStyle, alignItems: "center" }}>
+        <button
+          type="button"
+          onClick={() => setNotesMode((v) => !v)}
+          aria-pressed={notesMode}
+          style={{
+            width: "auto",
+            minWidth: "4.2rem",
+            height: "2.6rem",
+            padding: "0 0.55rem",
+            border: notesMode ? "2px solid #1a5f3c" : "1px solid #1a1a1a",
+            background: notesMode ? "#e8f2ec" : "#faf8f3",
+            color: notesMode ? "#1a5f3c" : "#1a1a1a",
+            fontFamily: "'Playfair Display', Georgia, serif",
+            fontSize: "0.68rem",
+            fontWeight: 700,
+            letterSpacing: "0.04em",
+            textTransform: "uppercase",
+            cursor: "pointer",
+            borderRadius: "2px",
+          }}
+        >
+          Notes
+        </button>
         {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
           <button
             key={num}
+            type="button"
             style={padBtnStyle(num)}
-            onClick={() => dispatch({ type: "INPUT", num })}
-            aria-label={`Enter ${num}`}
+            onClick={() =>
+              dispatch({ type: "INPUT", num, asNote: notesMode })
+            }
+            aria-label={
+              notesMode ? `Toggle note ${num}` : `Enter ${num}`
+            }
           >
             {num}
           </button>
         ))}
         <button
+          type="button"
           style={{
             ...padBtnStyle(0),
             width: "auto",
@@ -512,8 +633,15 @@ export default function SudokuCard({
         fontSize: "0.72rem",
         color: "#bbb",
         margin: 0,
+        textAlign: "center",
+        maxWidth: "min(360px, 100%)",
+        lineHeight: 1.45,
       }}>
-        Click a cell, then type a number or use the pad
+        Tap <strong style={{ fontWeight: 600, color: "#888" }}>Notes</strong> (or press{" "}
+        <strong style={{ fontWeight: 600, color: "#888" }}>N</strong>) for pencil marks.
+        <span style={{ display: "block", marginTop: "0.25rem" }}>
+          <strong style={{ fontWeight: 600, color: "#888" }}>Shift</strong>+digit always toggles a note.
+        </span>
       </p>
     </div>
   );

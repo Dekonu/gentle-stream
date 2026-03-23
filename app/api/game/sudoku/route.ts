@@ -7,8 +7,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { generateSudoku } from "@/lib/games/sudokuGenerator";
-import type { Difficulty } from "@/lib/games/types";
+import { generateSudoku } from "../../../../lib/games/sudokuGenerator";
+import type { Difficulty } from "../../../../lib/games/types";
 
 const VALID_DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];
 
