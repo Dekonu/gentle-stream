@@ -7,11 +7,14 @@ import type { SudokuPuzzle, Difficulty, GameType } from "@/lib/games/types";
 interface GameSlotProps {
   gameType: GameType;
   difficulty?: Difficulty;
+  /** Inside a hero article: lighter chrome, no full-bleed section borders */
+  embedded?: boolean;
 }
 
 export default function GameSlot({
   gameType,
   difficulty = "medium",
+  embedded = false,
 }: GameSlotProps) {
   const [puzzle, setPuzzle] = useState<SudokuPuzzle | null>(null);
   const [loading, setLoading] = useState(true);
