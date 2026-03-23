@@ -1,7 +1,8 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { CATEGORY_COLORS } from "@/lib/constants";
+import GameSlot from "./games/GameSlot";
 import type { Article, LayoutVariant } from "@/lib/types";
 import {
   picsumFallbackUrl,
@@ -15,6 +16,9 @@ import {
 
 const HERO_IMG_W = 800;
 const HERO_IMG_H = 450;
+
+/** When the hero cell is taller than editorial content (grid stretch), offer Sudoku in the slack. */
+const HERO_VERTICAL_GAP_PX = 280;
 
 interface ArticleCardProps {
   article: Article;
@@ -38,6 +42,10 @@ export default function ArticleCard({
   const articleSeed =
     "id" in article && article.id ? article.id : article.headline;
 
+  const articleRef = useRef<HTMLElement>(null);
+  const contentWrapRef = useRef<HTMLDivElement>(null);
+  const [showHeroGapGame, setShowHeroGapGame] = useState(false);
+
   /** Try AI image from prompt first, then deterministic stock photo, then text fallback */
   const [imageStage, setImageStage] = useState<
     "pollinations" | "picsum" | "broken"
@@ -46,6 +54,42 @@ export default function ArticleCard({
   useEffect(() => {
     setImageStage("pollinations");
   }, [article.imagePrompt, articleSeed]);
+
+  useEffect(() => {
+    if (!isHero) {
+      setShowHeroGapGame(false);
+      return;
+    }
+
+    const el = articleRef.current;
+    const wrap = contentWrapRef.current;
+    if (!el || !wrap) return;
+
+    const mq = window.matchMedia("(max-width: 768px)");
+
+    function measure() {
+      if (mq.matches) {
+        setShowHeroGapGame(false);
+        return;
+      }
+      const ar = el.getBoundingClientRect();
+      const wr = wrap.getBoundingClientRect();
+      const usedFromTop = wr.bottom - ar.top;
+      const slack = el.clientHeight - usedFromTop;
+      setShowHeroGapGame(slack >= HERO_VERTICAL_GAP_PX);
+    }
+
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    ro.observe(wrap);
+    mq.addEventListener("change", measure);
+    measure();
+
+    return () => {
+      ro.disconnect();
+      mq.removeEventListener("change", measure);
+    };
+  }, [isHero, articleSeed]);
 
   const heroImageSrc = useMemo(() => {
     if (!article.imagePrompt?.trim()) return null;
@@ -91,6 +135,7 @@ export default function ArticleCard({
 
   return (
     <article
+      ref={articleRef}
       style={{
         borderRight: !isHero ? "1px solid #d4cfc4" : "none",
         padding: isHero ? "1.5rem 1.6rem 1.2rem" : "1rem 1.2rem 1rem",
@@ -99,8 +144,11 @@ export default function ArticleCard({
         gap: "0.45rem",
         animation: `fadeSlideIn 0.5s ease ${index * 0.08}s both`,
         background: "#faf8f3",
+        minHeight: isHero ? "100%" : undefined,
+        boxSizing: "border-box",
       }}
     >
+      <div ref={contentWrapRef} style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
       {/* Category tag */}
       <div
         style={{
@@ -358,6 +406,31 @@ export default function ArticleCard({
             </Fragment>
           ))}
         </footer>
+      )}
+      </div>
+
+      {isHero && showHeroGapGame && (
+        <div
+          style={{
+            marginTop: "auto",
+            width: "100%",
+            flexShrink: 0,
+          }}
+        >
+          <p
+            style={{
+              fontFamily: "'IM Fell English', Georgia, serif",
+              fontStyle: "italic",
+              fontSize: "0.72rem",
+              color: "#999",
+              margin: "0 0 0.35rem",
+              letterSpacing: "0.04em",
+            }}
+          >
+            A puzzle for the space beside today&apos;s story
+          </p>
+          <GameSlot gameType="sudoku" difficulty="medium" embedded />
+        </div>
       )}
     </article>
   );

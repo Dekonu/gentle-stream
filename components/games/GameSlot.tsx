@@ -45,19 +45,31 @@ export default function GameSlot({
     fetchPuzzle(diff);
   }, [fetchPuzzle]);
 
-  if (loading) {
-    return (
-      <div style={{
+  const shellStyle = embedded
+    ? {
+        borderTop: "1px solid #d4cfc4",
+        borderBottom: "none",
+        background: "transparent",
+      }
+    : {
         borderTop: "3px double #1a1a1a",
         borderBottom: "2px solid #1a1a1a",
         background: "#faf8f3",
-        padding: "3rem",
-        textAlign: "center",
-        fontFamily: "'IM Fell English', Georgia, serif",
-        fontStyle: "italic",
-        color: "#bbb",
-        fontSize: "0.88rem",
-      }}>
+      };
+
+  if (loading) {
+    return (
+      <div
+        style={{
+          ...shellStyle,
+          textAlign: "center",
+          fontFamily: "'IM Fell English', Georgia, serif",
+          fontStyle: "italic",
+          color: "#bbb",
+          fontSize: "0.88rem",
+          padding: embedded ? "1.5rem 0" : "3rem",
+        }}
+      >
         Setting the puzzle&hellip;
       </div>
     );
@@ -65,13 +77,13 @@ export default function GameSlot({
 
   if (error || !puzzle) {
     return (
-      <div style={{
-        borderTop: "3px double #1a1a1a",
-        borderBottom: "2px solid #1a1a1a",
-        background: "#faf8f3",
-        padding: "2rem",
-        textAlign: "center",
-      }}>
+      <div
+        style={{
+          ...shellStyle,
+          padding: embedded ? "1rem 0" : "2rem",
+          textAlign: "center",
+        }}
+      >
         <p style={{
           fontFamily: "'IM Fell English', Georgia, serif",
           fontStyle: "italic",
@@ -102,7 +114,13 @@ export default function GameSlot({
   }
 
   if (gameType === "sudoku") {
-    return <SudokuCard puzzle={puzzle} onNewPuzzle={handleNewPuzzle} />;
+    return (
+      <SudokuCard
+        puzzle={puzzle}
+        onNewPuzzle={handleNewPuzzle}
+        embedded={embedded}
+      />
+    );
   }
 
   // Future game types slot in here

@@ -26,6 +26,8 @@ type Action =
 interface SudokuCardProps {
   puzzle: SudokuPuzzle;
   onNewPuzzle?: (difficulty: Difficulty) => void;
+  /** Hero-column embed: softer frame */
+  embedded?: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -150,7 +152,11 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function SudokuCard({ puzzle, onNewPuzzle }: SudokuCardProps) {
+export default function SudokuCard({
+  puzzle,
+  onNewPuzzle,
+  embedded = false,
+}: SudokuCardProps) {
   const puzzleRef = useRef(puzzle);
   puzzleRef.current = puzzle;
 
@@ -223,16 +229,27 @@ export default function SudokuCard({ puzzle, onNewPuzzle }: SudokuCardProps) {
 
   // ── Styles ──────────────────────────────────────────────────────────────────
 
-  const cardStyle: React.CSSProperties = {
-    borderTop: "3px double #1a1a1a",
-    borderBottom: "2px solid #1a1a1a",
-    background: "#faf8f3",
-    padding: "1.5rem 1.5rem 1.2rem",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: "1rem",
-  };
+  const cardStyle: React.CSSProperties = embedded
+    ? {
+        borderTop: "none",
+        borderBottom: "none",
+        background: "transparent",
+        padding: "0.5rem 0 0",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: "0.85rem",
+      }
+    : {
+        borderTop: "3px double #1a1a1a",
+        borderBottom: "2px solid #1a1a1a",
+        background: "#faf8f3",
+        padding: "1.5rem 1.5rem 1.2rem",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: "1rem",
+      };
 
   const headerStyle: React.CSSProperties = {
     width: "100%",
