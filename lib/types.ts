@@ -97,6 +97,8 @@ export interface GameFeedSection {
   gameType: "sudoku" | "killer_sudoku" | "word_search" | "nonogram" | "crossword" | "connections" | "cryptic" | "lateral";
   difficulty: "easy" | "medium" | "hard";
   index: number;
+  /** Article category of the preceding feed section — used for word bank theming */
+  category?: string;
 }
 
 /** A single row in the infinite scroll feed — either articles or a game */

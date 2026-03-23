@@ -2,21 +2,32 @@
 
 import { useCallback, useEffect, useState } from "react";
 import SudokuCard from "./SudokuCard";
-import type { SudokuPuzzle, Difficulty, GameType } from "@/lib/games/types";
+import WordSearchCard from "./WordSearchCard";
+import type { SudokuPuzzle, WordSearchPuzzle, Difficulty, GameType } from "@/lib/games/types";
 
 interface GameSlotProps {
   gameType: GameType;
   difficulty?: Difficulty;
-  /** Inside a hero article: lighter chrome, no full-bleed section borders */
-  embedded?: boolean;
+  /** Article category of the surrounding feed section — used for word bank theming */
+  category?: string;
+}
+
+type AnyPuzzle = SudokuPuzzle | WordSearchPuzzle;
+
+function puzzleEndpoint(gameType: GameType, difficulty: Difficulty, category?: string): string {
+  const params = new URLSearchParams({ difficulty });
+  if (category) params.set("category", category);
+  if (gameType === "sudoku") return `/api/game/sudoku?${params}`;
+  if (gameType === "word_search") return `/api/game/word-search?${params}`;
+  return `/api/game/sudoku?${params}`; // fallback
 }
 
 export default function GameSlot({
   gameType,
   difficulty = "medium",
-  embedded = false,
+  category,
 }: GameSlotProps) {
-  const [puzzle, setPuzzle] = useState<SudokuPuzzle | null>(null);
+  const [puzzle, setPuzzle] = useState<AnyPuzzle | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentDifficulty, setCurrentDifficulty] = useState<Difficulty>(difficulty);
@@ -25,51 +36,41 @@ export default function GameSlot({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/game/sudoku?difficulty=${diff}`);
+      const url = puzzleEndpoint(gameType, diff, category);
+      const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: SudokuPuzzle = await res.json();
+      const data = await res.json();
       setPuzzle(data);
       setCurrentDifficulty(diff);
-    } catch (e) {
+    } catch {
       setError("Could not load puzzle — try again.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [gameType, category]);
 
   useEffect(() => {
     fetchPuzzle(currentDifficulty);
-  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleNewPuzzle = useCallback((diff: Difficulty) => {
-    fetchPuzzle(diff);
-  }, [fetchPuzzle]);
-
-  const shellStyle = embedded
-    ? {
-        borderTop: "1px solid #d4cfc4",
-        borderBottom: "none",
-        background: "transparent",
-      }
-    : {
-        borderTop: "3px double #1a1a1a",
-        borderBottom: "2px solid #1a1a1a",
-        background: "#faf8f3",
-      };
+  const handleNewPuzzle = useCallback(
+    (diff: Difficulty) => fetchPuzzle(diff),
+    [fetchPuzzle]
+  );
 
   if (loading) {
     return (
-      <div
-        style={{
-          ...shellStyle,
-          textAlign: "center",
-          fontFamily: "'IM Fell English', Georgia, serif",
-          fontStyle: "italic",
-          color: "#bbb",
-          fontSize: "0.88rem",
-          padding: embedded ? "1.5rem 0" : "3rem",
-        }}
-      >
+      <div style={{
+        borderTop: "3px double #1a1a1a",
+        borderBottom: "2px solid #1a1a1a",
+        background: "#faf8f3",
+        padding: "3rem",
+        textAlign: "center",
+        fontFamily: "'IM Fell English', Georgia, serif",
+        fontStyle: "italic",
+        color: "#bbb",
+        fontSize: "0.88rem",
+      }}>
         Setting the puzzle&hellip;
       </div>
     );
@@ -77,13 +78,13 @@ export default function GameSlot({
 
   if (error || !puzzle) {
     return (
-      <div
-        style={{
-          ...shellStyle,
-          padding: embedded ? "1rem 0" : "2rem",
-          textAlign: "center",
-        }}
-      >
+      <div style={{
+        borderTop: "3px double #1a1a1a",
+        borderBottom: "2px solid #1a1a1a",
+        background: "#faf8f3",
+        padding: "2rem",
+        textAlign: "center",
+      }}>
         <p style={{
           fontFamily: "'IM Fell English', Georgia, serif",
           fontStyle: "italic",
@@ -114,15 +115,12 @@ export default function GameSlot({
   }
 
   if (gameType === "sudoku") {
-    return (
-      <SudokuCard
-        puzzle={puzzle}
-        onNewPuzzle={handleNewPuzzle}
-        embedded={embedded}
-      />
-    );
+    return <SudokuCard puzzle={puzzle as SudokuPuzzle} onNewPuzzle={handleNewPuzzle} />;
   }
 
-  // Future game types slot in here
+  if (gameType === "word_search") {
+    return <WordSearchCard puzzle={puzzle as WordSearchPuzzle} onNewPuzzle={handleNewPuzzle} />;
+  }
+
   return null;
 }
