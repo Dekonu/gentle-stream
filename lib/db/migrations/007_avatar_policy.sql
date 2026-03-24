@@ -1,31 +1,33 @@
--- Allow authenticated users to SELECT any avatar (public reads)
+-- Storage policies for bucket `avatars` (run after bucket exists). Idempotent.
+
+DROP POLICY IF EXISTS "avatars_select" ON storage.objects;
 CREATE POLICY "avatars_select"
-ON storage.objects FOR SELECT
-USING ( bucket_id = 'avatars' );
+  ON storage.objects FOR SELECT
+  USING (bucket_id = 'avatars');
 
--- Allow authenticated users to INSERT into their own folder only
+DROP POLICY IF EXISTS "avatars_insert" ON storage.objects;
 CREATE POLICY "avatars_insert"
-ON storage.objects FOR INSERT
-TO authenticated
-WITH CHECK (
-  bucket_id = 'avatars'
-  AND (storage.foldername(name))[1] = auth.uid()::text
-);
+  ON storage.objects FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    bucket_id = 'avatars'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+  );
 
--- Allow authenticated users to UPDATE their own folder only
+DROP POLICY IF EXISTS "avatars_update" ON storage.objects;
 CREATE POLICY "avatars_update"
-ON storage.objects FOR UPDATE
-TO authenticated
-USING (
-  bucket_id = 'avatars'
-  AND (storage.foldername(name))[1] = auth.uid()::text
-);
+  ON storage.objects FOR UPDATE
+  TO authenticated
+  USING (
+    bucket_id = 'avatars'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+  );
 
--- Allow authenticated users to DELETE their own folder only
+DROP POLICY IF EXISTS "avatars_delete" ON storage.objects;
 CREATE POLICY "avatars_delete"
-ON storage.objects FOR DELETE
-TO authenticated
-USING (
-  bucket_id = 'avatars'
-  AND (storage.foldername(name))[1] = auth.uid()::text
-);
+  ON storage.objects FOR DELETE
+  TO authenticated
+  USING (
+    bucket_id = 'avatars'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+  );
