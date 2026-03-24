@@ -27,6 +27,7 @@ type Action =
 interface NonogramCardProps {
   puzzle: NonogramPuzzle;
   onNewPuzzle?: (difficulty: Difficulty) => void;
+  metricsEnabled?: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -170,9 +171,14 @@ function reducer(state: BoardState, action: Action, puzzle: NonogramPuzzle): Boa
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function NonogramCard({ puzzle, onNewPuzzle }: NonogramCardProps) {
+export default function NonogramCard({
+  puzzle,
+  onNewPuzzle,
+  metricsEnabled = true,
+}: NonogramCardProps) {
   const puzzleRef = useRef(puzzle);
   puzzleRef.current = puzzle;
+  const completionLogged = useRef(false);
 
   const [state, dispatchRaw] = useReducer(
     (s: BoardState, a: Action) => reducer(s, a, puzzleRef.current),
@@ -181,7 +187,27 @@ export default function NonogramCard({ puzzle, onNewPuzzle }: NonogramCardProps)
   );
   const dispatch = dispatchRaw;
 
-  useEffect(() => { dispatch({ type: "RESET" }); }, [puzzle, dispatch]);
+  useEffect(() => {
+    dispatch({ type: "RESET" });
+    completionLogged.current = false;
+  }, [puzzle, dispatch]);
+
+  useEffect(() => {
+    if (!metricsEnabled || !state.completed || completionLogged.current) return;
+    completionLogged.current = true;
+    const p = puzzleRef.current;
+    void fetch("/api/user/game-completion", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gameType: "nonogram",
+        difficulty: p.difficulty,
+        durationSeconds: state.elapsedSecs,
+        metadata: { rows: p.rows, cols: p.cols },
+      }),
+    });
+  }, [metricsEnabled, state.completed, state.elapsedSecs]);
 
   useEffect(() => {
     if (state.completed || !state.startedAt) return;

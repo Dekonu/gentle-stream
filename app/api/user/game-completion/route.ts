@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db/client";
 import { getSessionUserId } from "@/lib/api/sessionUser";
 
-const GAME_TYPES = new Set(["sudoku", "word_search"]);
+const GAME_TYPES = new Set([
+  "sudoku",
+  "word_search",
+  "killer_sudoku",
+  "nonogram",
+]);
 const DIFFS = new Set(["easy", "medium", "hard"]);
 
 export async function POST(request: NextRequest) {

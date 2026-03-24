@@ -27,6 +27,8 @@ const GAME_POOL: GameType[] = [
   "word_search",
   "killer_sudoku",
   "nonogram",
+  "killer_sudoku",
+  "nonogram",
 ];
 
 const DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];

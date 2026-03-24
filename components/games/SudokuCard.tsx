@@ -46,8 +46,10 @@ interface SudokuCardProps {
   embedded?: boolean;
   /** Restore grid from cloud save (same puzzle as `puzzle` prop). */
   initialCloudSlice?: SudokuCloudSlice | null;
-  /** Persist progress to `/api/user/game-save` on an interval + log completion */
+  /** Persist progress to `/api/user/game-save` on an interval */
   cloudSaveEnabled?: boolean;
+  /** Log finished puzzles to `/api/user/game-completion` (feed metrics). */
+  metricsEnabled?: boolean;
 }
 
 function CellNotes({ mask }: { mask: NoteMask }) {
@@ -256,6 +258,7 @@ export default function SudokuCard({
   embedded = false,
   initialCloudSlice = null,
   cloudSaveEnabled = false,
+  metricsEnabled = true,
 }: SudokuCardProps) {
   const puzzleRef = useRef(puzzle);
   puzzleRef.current = puzzle;
@@ -324,27 +327,34 @@ export default function SudokuCard({
     return () => window.clearInterval(id);
   }, [cloudSaveEnabled, embedded]);
 
-  // Log completion + clear cloud save slot
+  // Log completion + clear cloud save slot (metrics independent of cloud resume)
   useEffect(() => {
-    if (!cloudSaveEnabled || embedded || !state.completed || completionLogged.current) return;
+    if (!state.completed || completionLogged.current) return;
+    const shouldPost = metricsEnabled;
+    const shouldClearCloud = cloudSaveEnabled && !embedded;
+    if (!shouldPost && !shouldClearCloud) return;
     completionLogged.current = true;
     const p = puzzleRef.current;
-    void fetch("/api/user/game-completion", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        gameType: "sudoku",
-        difficulty: p.difficulty,
-        durationSeconds: state.elapsedSecs,
-        metadata: { difficulty: p.difficulty },
-      }),
-    });
-    void fetch("/api/user/game-save?gameType=sudoku", {
-      method: "DELETE",
-      credentials: "include",
-    });
-  }, [cloudSaveEnabled, embedded, state.completed, state.elapsedSecs]);
+    if (shouldPost) {
+      void fetch("/api/user/game-completion", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          gameType: "sudoku",
+          difficulty: p.difficulty,
+          durationSeconds: state.elapsedSecs,
+          metadata: { difficulty: p.difficulty },
+        }),
+      });
+    }
+    if (shouldClearCloud) {
+      void fetch("/api/user/game-save?gameType=sudoku", {
+        method: "DELETE",
+        credentials: "include",
+      });
+    }
+  }, [metricsEnabled, cloudSaveEnabled, embedded, state.completed, state.elapsedSecs]);
 
   // Keyboard input (Shift+digit = toggle note without turning Notes mode on)
   useEffect(() => {

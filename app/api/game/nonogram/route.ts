@@ -2,7 +2,6 @@
  * GET /api/game/nonogram?difficulty=easy|medium|hard
  *
  * Generates a fresh Nonogram puzzle server-side.
- * No DB read — pure algorithmic generation (<5ms).
  */
 
 import { NextRequest, NextResponse } from "next/server";

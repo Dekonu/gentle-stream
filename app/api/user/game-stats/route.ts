@@ -9,18 +9,34 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { data: rows, error } = await db
-    .from("game_completions")
-    .select("game_type, difficulty, duration_seconds, completed_at")
-    .eq("user_id", userId)
-    .order("completed_at", { ascending: false })
-    .limit(200);
+  const [countRes, aggRes, recentRes] = await Promise.all([
+    db
+      .from("game_completions")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", userId),
+    db
+      .from("game_completions")
+      .select("game_type, duration_seconds")
+      .eq("user_id", userId),
+    db
+      .from("game_completions")
+      .select("game_type, difficulty, duration_seconds, completed_at")
+      .eq("user_id", userId)
+      .order("completed_at", { ascending: false })
+      .limit(8),
+  ]);
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (countRes.error) {
+    return NextResponse.json({ error: countRes.error.message }, { status: 500 });
+  }
+  if (aggRes.error) {
+    return NextResponse.json({ error: aggRes.error.message }, { status: 500 });
+  }
+  if (recentRes.error) {
+    return NextResponse.json({ error: recentRes.error.message }, { status: 500 });
   }
 
-  const list = rows ?? [];
+  const list = aggRes.data ?? [];
   const byType: UserGameStats["byType"] = {};
   let totalSeconds = 0;
 
@@ -42,7 +58,8 @@ export async function GET() {
       b.completions > 0 ? Math.round(b.totalSeconds / b.completions) : 0;
   }
 
-  const recent = list.slice(0, 8).map((r) => ({
+  const recentRows = recentRes.data ?? [];
+  const recent = recentRows.map((r) => ({
     gameType: r.game_type as string,
     difficulty: r.difficulty as string,
     durationSeconds: r.duration_seconds as number,
@@ -50,7 +67,7 @@ export async function GET() {
   }));
 
   const stats: UserGameStats = {
-    totalCompletions: list.length,
+    totalCompletions: countRes.count ?? list.length,
     totalSecondsPlayed: totalSeconds,
     byType,
     recent,

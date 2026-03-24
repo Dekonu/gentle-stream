@@ -2,7 +2,6 @@
  * GET /api/game/killer-sudoku?difficulty=easy|medium|hard
  *
  * Generates a fresh Killer Sudoku puzzle server-side.
- * No DB read — pure algorithmic generation (~5–50ms depending on difficulty).
  */
 
 import { NextRequest, NextResponse } from "next/server";

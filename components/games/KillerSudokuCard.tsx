@@ -24,6 +24,7 @@ type Action =
 interface KillerSudokuCardProps {
   puzzle: KillerSudokuPuzzle;
   onNewPuzzle?: (difficulty: Difficulty) => void;
+  metricsEnabled?: boolean;
 }
 
 // ─── Cell → cage lookup ───────────────────────────────────────────────────────
@@ -187,9 +188,14 @@ function getCageBorders(r: number, c: number, cageMap: Map<string, Cage>) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function KillerSudokuCard({ puzzle, onNewPuzzle }: KillerSudokuCardProps) {
+export default function KillerSudokuCard({
+  puzzle,
+  onNewPuzzle,
+  metricsEnabled = true,
+}: KillerSudokuCardProps) {
   const puzzleRef = useRef(puzzle);
   puzzleRef.current = puzzle;
+  const completionLogged = useRef(false);
 
   const [state, dispatchRaw] = useReducer(
     (s: BoardState, a: Action) => reducer(s, a, puzzleRef.current),
@@ -217,6 +223,23 @@ export default function KillerSudokuCard({ puzzle, onNewPuzzle }: KillerSudokuCa
     return () => clearInterval(id);
   }, [state.completed, state.startedAt, dispatch]);
 
+  useEffect(() => {
+    if (!metricsEnabled || !state.completed || completionLogged.current) return;
+    completionLogged.current = true;
+    const p = puzzleRef.current;
+    void fetch("/api/user/game-completion", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gameType: "killer_sudoku",
+        difficulty: p.difficulty,
+        durationSeconds: state.elapsedSecs,
+        metadata: { difficulty: p.difficulty },
+      }),
+    });
+  }, [metricsEnabled, state.completed, state.elapsedSecs]);
+
   // Keyboard
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -234,7 +257,10 @@ export default function KillerSudokuCard({ puzzle, onNewPuzzle }: KillerSudokuCa
   }, [state.selected, dispatch]);
 
   // Reset on new puzzle
-  useEffect(() => { dispatch({ type: "RESET" }); }, [puzzle, dispatch]);
+  useEffect(() => {
+    dispatch({ type: "RESET" });
+    completionLogged.current = false;
+  }, [puzzle, dispatch]);
 
   // Peer highlighting
   const peers = useMemo(() => {

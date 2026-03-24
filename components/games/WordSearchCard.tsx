@@ -57,6 +57,7 @@ interface WordSearchCardProps {
   onNewPuzzle?: (difficulty: Difficulty) => void;
   initialCloudSlice?: WordSearchCloudSlice | null;
   cloudSaveEnabled?: boolean;
+  metricsEnabled?: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -296,6 +297,7 @@ export default function WordSearchCard({
   onNewPuzzle,
   initialCloudSlice = null,
   cloudSaveEnabled = false,
+  metricsEnabled = true,
 }: WordSearchCardProps) {
   const puzzleRef = useRef(puzzle);
   puzzleRef.current = puzzle;
@@ -360,25 +362,32 @@ export default function WordSearchCard({
   }, [cloudSaveEnabled]);
 
   useEffect(() => {
-    if (!cloudSaveEnabled || !state.completed || completionLogged.current) return;
+    if (!state.completed || completionLogged.current) return;
+    const shouldPost = metricsEnabled;
+    const shouldClearCloud = cloudSaveEnabled;
+    if (!shouldPost && !shouldClearCloud) return;
     completionLogged.current = true;
     const p = puzzleRef.current;
-    void fetch("/api/user/game-completion", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        gameType: "word_search",
-        difficulty: p.difficulty,
-        durationSeconds: state.elapsedSecs,
-        metadata: { theme: p.theme },
-      }),
-    });
-    void fetch("/api/user/game-save?gameType=word_search", {
-      method: "DELETE",
-      credentials: "include",
-    });
-  }, [cloudSaveEnabled, state.completed, state.elapsedSecs]);
+    if (shouldPost) {
+      void fetch("/api/user/game-completion", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          gameType: "word_search",
+          difficulty: p.difficulty,
+          durationSeconds: state.elapsedSecs,
+          metadata: { theme: p.theme },
+        }),
+      });
+    }
+    if (shouldClearCloud) {
+      void fetch("/api/user/game-save?gameType=word_search", {
+        method: "DELETE",
+        credentials: "include",
+      });
+    }
+  }, [metricsEnabled, cloudSaveEnabled, state.completed, state.elapsedSecs]);
 
   // ── Cell highlighting ────────────────────────────────────────────────────────
 

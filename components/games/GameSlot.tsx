@@ -226,6 +226,8 @@ export default function GameSlot({
     );
   }
 
+  const metricsOn = !embedded;
+
   if (gameType === "sudoku") {
     return (
       <SudokuCard
@@ -234,6 +236,7 @@ export default function GameSlot({
         embedded={embedded}
         initialCloudSlice={sudokuCloud}
         cloudSaveEnabled={cloudOn}
+        metricsEnabled={metricsOn}
       />
     );
   }
@@ -245,6 +248,7 @@ export default function GameSlot({
         onNewPuzzle={handleNewPuzzle}
         initialCloudSlice={wordCloud}
         cloudSaveEnabled={cloudOn}
+        metricsEnabled={metricsOn}
       />
     );
   }
@@ -254,6 +258,7 @@ export default function GameSlot({
       <KillerSudokuCard
         puzzle={puzzle as KillerSudokuPuzzle}
         onNewPuzzle={handleNewPuzzle}
+        metricsEnabled={metricsOn}
       />
     );
   }
@@ -263,6 +268,7 @@ export default function GameSlot({
       <NonogramCard
         puzzle={puzzle as NonogramPuzzle}
         onNewPuzzle={handleNewPuzzle}
+        metricsEnabled={metricsOn}
       />
     );
   }
