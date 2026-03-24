@@ -1,5 +1,4 @@
 import { headers } from "next/headers";
-import type { NextRequest } from "next/server";
 
 /**
  * OAuth / magic-link `redirect_to` origin (scheme + host + optional port).
@@ -49,22 +48,4 @@ export function getAuthRedirectBaseFromRequest(): string {
   }
 
   return "";
-}
-
-/**
- * Final URL after `/auth/callback` (success or error redirects). Uses forwarded headers
- * when present so the browser is not sent to the wrong host behind proxies.
- */
-export function getPublicOriginFromRequest(request: NextRequest): string {
-  const forwardedHost = request.headers.get("x-forwarded-host");
-  if (forwardedHost) {
-    const host = forwardedHost.split(",")[0].trim();
-    const proto =
-      request.headers.get("x-forwarded-proto") === "https" ||
-      request.nextUrl.protocol === "https:"
-        ? "https"
-        : "http";
-    return `${proto}://${host}`;
-  }
-  return request.nextUrl.origin;
 }

@@ -9,18 +9,33 @@ function safeNextPath(raw: string | null): string {
   return raw;
 }
 
+function isBrowserLoopbackHost(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "[::1]" ||
+    hostname === "::1"
+  );
+}
+
 /**
- * Server sends the canonical OAuth return origin (see `getAuthRedirectBaseFromRequest`).
- * Client fallbacks only if the server hint is empty (e.g. prod without SITE_URL).
+ * OAuth / magic-link `redirect_to` must match the tab you are in. When the address bar is
+ * loopback, always use `window.location.origin` so a stale server hint or wrong
+ * NEXT_PUBLIC_* env cannot send you to production.
  */
 function resolveAuthRedirectBase(serverHint: string): string {
+  if (typeof window !== "undefined") {
+    const { hostname, origin } = window.location;
+    if (isBrowserLoopbackHost(hostname)) return origin.replace(/\/$/, "");
+  }
+
   const trimmed = serverHint.trim().replace(/\/$/, "");
   if (trimmed) return trimmed;
   const fromEnv =
     process.env.NEXT_PUBLIC_AUTH_REDIRECT_ORIGIN?.trim().replace(/\/$/, "") ??
     "";
   if (fromEnv) return fromEnv;
-  if (typeof window !== "undefined") return window.location.origin;
+  if (typeof window !== "undefined") return window.location.origin.replace(/\/$/, "");
   return "";
 }
 
