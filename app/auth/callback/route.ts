@@ -39,7 +39,7 @@ async function redirectToLoginCleared(
 }
 
 /**
- * OAuth (Google) and email magic links land here with ?code=...
+ * OAuth (Google/Facebook) and email magic links land here with ?code=...
  * Cookies must be written onto the returned redirect response (Route Handler quirk).
  *
  * Do not call signOut before exchangeCodeForSession: signOut removes the PKCE code
