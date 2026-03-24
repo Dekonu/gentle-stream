@@ -1,0 +1,27 @@
+# ci.yml
+#
+# Runs on every PR and on pushes to all branches except main (main runs CI once
+# inside deploy.yml to avoid duplicate runs). Includes DB integration on same-repo
+# PRs, pushes to develop/feature branches, etc.; skips integration on fork PRs.
+#
+# Deliberately not covered in integration (see ci-reusable / former integration.yml):
+#   - Ingest / LLM (expensive, non-deterministic)
+#   - Supabase Storage / avatars (needs dedicated test project)
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    uses: ./.github/workflows/ci-reusable.yml
+    secrets: inherit
+    with:
+      run-integration: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
