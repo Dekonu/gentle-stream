@@ -1,10 +1,14 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { APP_LOGO_SRC } from "@/lib/brand/logo";
 
 export const metadata: Metadata = {
   title: "Gentle Stream",
   description:
     "Uplifting stories from around the world — a calmer broadsheet feed, delivered with care.",
+  icons: {
+    icon: [{ url: APP_LOGO_SRC, type: "image/svg+xml" }],
+  },
   openGraph: {
     title: "Gentle Stream",
     description: "Only the uplifting. Only the inspiring.",

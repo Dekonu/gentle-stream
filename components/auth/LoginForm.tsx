@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { AppLogo } from "@/components/brand/AppLogo";
 import { createClient } from "@/lib/supabase/client";
 
 function safeNextPath(raw: string | null): string {
@@ -143,6 +144,9 @@ export function LoginForm({
   return (
     <div style={shell}>
       <div style={card}>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: "0.35rem" }}>
+          <AppLogo heightPx={40} priority />
+        </div>
         <h1
           style={{
             fontFamily: "'Playfair Display', Georgia, serif",
@@ -345,7 +349,14 @@ export function LoginForm({
           }}
         >
           <a href="/privacy" style={{ color: "#777", textDecoration: "underline" }}>
-            Privacy policy
+            Privacy
+          </a>
+          {" · "}
+          <a
+            href="/data-deletion"
+            style={{ color: "#777", textDecoration: "underline" }}
+          >
+            Data deletion
           </a>
         </p>
       </div>

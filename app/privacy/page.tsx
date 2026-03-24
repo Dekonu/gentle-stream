@@ -63,6 +63,10 @@ export default function PrivacyPage() {
           </p>
         </div>
         <p style={{ marginTop: "1.5rem", fontSize: "0.85rem" }}>
+          <a href="/data-deletion" style={{ color: "#5c4a32" }}>
+            User data deletion
+          </a>
+          {" · "}
           <a href="/login" style={{ color: "#5c4a32" }}>
             ← Back to sign in
           </a>
