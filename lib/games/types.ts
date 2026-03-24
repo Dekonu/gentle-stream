@@ -71,6 +71,8 @@ export interface WordSearchPuzzle {
   cols: number;
   theme: string;
   difficulty: Difficulty;
+  /** Stable content signature used to reduce repeat puzzles in the feed. */
+  uniquenessSignature?: string;
 }
 
 // ─── Nonogram (Picross) ───────────────────────────────────────────────────────
