@@ -11,7 +11,7 @@ import ErrorBanner from "./ErrorBanner";
 import type { Category } from "@/lib/constants";
 import type { Article, FeedSection, ArticleFeedSection, GameFeedSection } from "@/lib/types";
 import { DEFAULT_GAME_RATIO } from "@/lib/constants";
-import { randomFeedGamePick } from "@/lib/games/feedPick";
+import { feedGamePickForOrdinal } from "@/lib/games/feedPick";
 
 // Strip any <cite ...>...</cite> or bare </cite> tags that leak from Claude
 function stripCiteTags(text: string): string {
@@ -61,6 +61,8 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
   // Use refs for values that loadMore closes over — avoids stale closure bugs
   const loadingRef = useRef(false);
   const sectionCountRef = useRef(0);
+  /** Counts game sections only — drives fair rotation in feedGamePickForOrdinal. */
+  const gameSlotOrdinalRef = useRef(0);
   const activeCategoryRef = useRef<Category | null>(null);
   const userIdRef = useRef<string>("anonymous");
   /** Bumps on each [userId] bootstrap so Strict Mode / fast remounts only run one initial loadMore. */
@@ -89,7 +91,9 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
 
     // ── Decide: game slot or article section? ────────────────────────────────
     if (shouldBeGame(currentIndex, gameRatioRef.current)) {
-      const { gameType, difficulty } = randomFeedGamePick();
+      const { gameType, difficulty } = feedGamePickForOrdinal(
+        gameSlotOrdinalRef.current++
+      );
       const gameSection: GameFeedSection = {
         sectionType: "game",
         gameType,
@@ -286,6 +290,7 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
       localStorage.setItem("gentle_stream_game_ratio", String(ratio));
       setSections([]);
       sectionCountRef.current = 0;
+      gameSlotOrdinalRef.current = 0;
       loadingRef.current = false;
       setError(null);
       void loadMore();

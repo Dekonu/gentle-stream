@@ -14,11 +14,15 @@ interface BoardState {
   selected: { row: number; col: number } | null;
   activeSlot: SlotWithClue | null;
   completed: boolean;
+  /** True after "Reveal all" — completion screen still shows the full grid. */
+  fullGridReveal: boolean;
   startedAt: number | null;
   elapsedSecs: number;
-  revealed: Set<string>;        // "r,c" cells the player revealed
+  revealed: Set<string>;        // "r,c" cells the player revealed (hint / reveal)
   checked: boolean;             // whether errors are currently shown
   errors: boolean[][];          // cells that are wrong (after check)
+  /** Letter-hint uses per word (key: `${number}-${direction}`), capped per word. */
+  letterHintsUsed: Record<string, number>;
 }
 
 type Action =
@@ -29,6 +33,7 @@ type Action =
   | { type: "CHECK" }
   | { type: "REVEAL_WORD" }
   | { type: "REVEAL_ALL" }
+  | { type: "HINT_LETTER"; number: number; direction: "across" | "down" }
   | { type: "RESET" };
 
 interface CrosswordCardProps {
@@ -92,6 +97,13 @@ function nextEmpty(
   return null;
 }
 
+/** Max single-letter hints per entry — enough to unblock, not auto-solve. */
+const MAX_LETTER_HINTS_PER_WORD = 2;
+
+function slotKey(number: number, direction: "across" | "down"): string {
+  return `${number}-${direction}`;
+}
+
 function isComplete(
   letters: string[][],
   puzzle: CrosswordPuzzle
@@ -133,11 +145,13 @@ function makeInitialState(puzzle: CrosswordPuzzle): BoardState {
     selected: null,
     activeSlot: null,
     completed: false,
+    fullGridReveal: false,
     startedAt: null,
     elapsedSecs: 0,
     revealed: new Set(),
     checked: false,
     errors: makeEmptyBool(puzzle.grid.length, puzzle.grid[0].length),
+    letterHintsUsed: {},
   };
 }
 
@@ -228,7 +242,64 @@ function reducer(
           if (puzzle.grid[r][c] !== "#") revealed.add(`${r},${c}`);
         }
       }
-      return { ...state, letters, revealed, completed: true, checked: false, errors: makeEmptyBool(puzzle.grid.length, puzzle.grid[0].length) };
+      return {
+        ...state,
+        letters,
+        revealed,
+        completed: true,
+        fullGridReveal: true,
+        checked: false,
+        errors: makeEmptyBool(puzzle.grid.length, puzzle.grid[0].length),
+      };
+    }
+
+    case "HINT_LETTER": {
+      if (state.completed) return state;
+      const slots = puzzle.slots as SlotWithClue[];
+      const slot = slots.find(
+        (s) => s.number === action.number && s.direction === action.direction
+      );
+      if (!slot) return state;
+
+      const key = slotKey(slot.number, slot.direction);
+      const used = state.letterHintsUsed[key] ?? 0;
+      const cap = Math.min(MAX_LETTER_HINTS_PER_WORD, slot.length);
+      if (used >= cap) return state;
+
+      const dr = slot.direction === "down" ? 1 : 0;
+      const dc = slot.direction === "across" ? 1 : 0;
+
+      let targetI: number | null = null;
+      for (let i = 0; i < slot.length; i++) {
+        const r = slot.row + dr * i;
+        const c = slot.col + dc * i;
+        const ch = state.letters[r]?.[c] ?? "";
+        const correct = slot.answer[i];
+        if (!ch || ch !== correct) {
+          targetI = i;
+          break;
+        }
+      }
+      if (targetI === null) return state;
+
+      const letters = state.letters.map((row) => [...row]);
+      const r = slot.row + dr * targetI;
+      const c = slot.col + dc * targetI;
+      letters[r][c] = slot.answer[targetI];
+      const revealed = new Set(state.revealed);
+      revealed.add(`${r},${c}`);
+      const letterHintsUsed = { ...state.letterHintsUsed, [key]: used + 1 };
+      const completed = isComplete(letters, puzzle);
+      return {
+        ...state,
+        letters,
+        revealed,
+        letterHintsUsed,
+        completed,
+        fullGridReveal: false,
+        checked: false,
+        errors: makeEmptyBool(puzzle.grid.length, puzzle.grid[0].length),
+      };
     }
 
     case "TICK":
@@ -246,6 +317,122 @@ function reducer(
 // ─── Component ────────────────────────────────────────────────────────────────
 
 const CELL = 38; // px per grid cell
+
+interface CrosswordGridBoardProps {
+  puzzle: CrosswordPuzzle;
+  letters: string[][];
+  selected: { row: number; col: number } | null;
+  revealed: Set<string>;
+  errors: boolean[][];
+  checked: boolean;
+  activeSlotCells: Set<string>;
+  numberMap: Map<string, number>;
+  onCellSelect?: (row: number, col: number) => void;
+}
+
+function CrosswordGridBoard({
+  puzzle,
+  letters,
+  selected,
+  revealed,
+  errors,
+  checked,
+  activeSlotCells,
+  numberMap,
+  onCellSelect,
+}: CrosswordGridBoardProps) {
+  const rows = puzzle.grid.length;
+  const cols = puzzle.grid[0].length;
+  const readOnly = onCellSelect == null;
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${cols}, ${CELL}px)`,
+        gridTemplateRows: `repeat(${rows}, ${CELL}px)`,
+        border: "2px solid #1a1a1a",
+        flexShrink: 0,
+      }}
+    >
+      {puzzle.grid.map((row, r) =>
+        row.map((cell, c) => {
+          const key = `${r},${c}`;
+          const isBlack = cell === "#";
+          const isSelected =
+            !readOnly && selected?.row === r && selected?.col === c;
+          const isActiveSlot = activeSlotCells.has(key);
+          const isRevealed = revealed.has(key);
+          const isError = checked && errors[r]?.[c];
+          const num = numberMap.get(key);
+          const letter = letters[r]?.[c] ?? "";
+
+          let bg = "#faf8f3";
+          if (isBlack) bg = "#1a1a1a";
+          else if (isSelected) bg = "#d4c27a";
+          else if (isActiveSlot) bg = "#ede9e1";
+
+          return (
+            <div
+              key={key}
+              onClick={() => {
+                if (!isBlack && onCellSelect) onCellSelect(r, c);
+              }}
+              style={{
+                width: CELL,
+                height: CELL,
+                background: bg,
+                position: "relative",
+                cursor: isBlack ? "default" : readOnly ? "default" : "pointer",
+                borderRight: c < cols - 1 ? "0.5px solid #ccc" : "none",
+                borderBottom: r < rows - 1 ? "0.5px solid #ccc" : "none",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                transition: "background 0.08s ease",
+                WebkitTapHighlightColor: "transparent",
+              }}
+            >
+              {num !== undefined && (
+                <span
+                  style={{
+                    position: "absolute",
+                    top: 2,
+                    left: 2,
+                    fontSize: "0.48rem",
+                    fontWeight: 700,
+                    fontFamily: "Georgia, serif",
+                    color: "#1a1a1a",
+                    lineHeight: 1,
+                    pointerEvents: "none",
+                  }}
+                >
+                  {num}
+                </span>
+              )}
+              {!isBlack && letter && (
+                <span
+                  style={{
+                    fontFamily: "'Playfair Display', Georgia, serif",
+                    fontSize: `${CELL * 0.52}px`,
+                    fontWeight: 400,
+                    color: isError ? "#c0392b" : isRevealed ? "#1a472a" : "#1a1a1a",
+                    lineHeight: 1,
+                    pointerEvents: "none",
+                  }}
+                >
+                  {letter}
+                </span>
+              )}
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
+const emptySlotCells = new Set<string>();
 
 export default function CrosswordCard({ puzzle, onNewPuzzle }: CrosswordCardProps) {
   const puzzleRef = useRef(puzzle);
@@ -343,7 +530,69 @@ export default function CrosswordCard({ puzzle, onNewPuzzle }: CrosswordCardProp
     WebkitUserSelect: "none",
   };
 
-  // ── Completed ───────────────────────────────────────────────────────────────
+  // ── Completed (full reveal — keep grid visible) ───────────────────────────
+
+  if (state.completed && state.fullGridReveal) {
+    const emptyErrors = makeEmptyBool(rows, cols);
+    return (
+      <div style={cardStyle}>
+        <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+          <span style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "1.3rem", fontWeight: 700 }}>
+            Crossword
+          </span>
+          <span style={{ fontFamily: "'IM Fell English', Georgia, serif", fontStyle: "italic", fontSize: "0.78rem", color: "#888" }}>
+            {puzzle.category}
+          </span>
+        </div>
+        <div
+          style={{
+            width: "100%",
+            padding: "0.55rem 0.75rem",
+            background: "#ede9e1",
+            borderLeft: "3px solid #6b7c3a",
+            fontFamily: "'IM Fell English', Georgia, serif",
+            fontStyle: "italic",
+            fontSize: "0.82rem",
+            color: "#3d4429",
+            lineHeight: 1.45,
+          }}
+        >
+          Full solution shown — study the grid below, then start a new puzzle when you&apos;re ready.
+        </div>
+        <CrosswordGridBoard
+          puzzle={puzzle}
+          letters={state.letters}
+          selected={null}
+          revealed={state.revealed}
+          errors={emptyErrors}
+          checked={false}
+          activeSlotCells={emptySlotCells}
+          numberMap={numberMap}
+        />
+        {onNewPuzzle && (
+          <button
+            type="button"
+            onClick={() => onNewPuzzle("medium")}
+            style={{
+              padding: "0.45rem 1.25rem",
+              border: "1px solid #1a1a1a",
+              background: "#1a1a1a",
+              color: "#faf8f3",
+              fontFamily: "'Playfair Display', Georgia, serif",
+              fontSize: "0.75rem",
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              cursor: "pointer",
+            }}
+          >
+            New puzzle
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  // ── Completed (solved or partial reveal — compact win) ─────────────────────
 
   if (state.completed) {
     return (
@@ -360,7 +609,7 @@ export default function CrosswordCard({ puzzle, onNewPuzzle }: CrosswordCardProp
           <div style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>✓</div>
           <div style={{ fontSize: "1.2rem", fontWeight: 700, color: "#0d0d0d" }}>Puzzle complete</div>
           <div style={{ fontFamily: "'IM Fell English', Georgia, serif", fontStyle: "italic", color: "#888", marginTop: "0.25rem", fontSize: "0.9rem" }}>
-            {state.revealed.size > 0 ? "Completed with reveals" : `Solved in ${formatTime(state.elapsedSecs)}`}
+            {state.revealed.size > 0 ? "Completed with hints or reveals" : `Solved in ${formatTime(state.elapsedSecs)}`}
           </div>
         </div>
         {onNewPuzzle && (
@@ -416,84 +665,22 @@ export default function CrosswordCard({ puzzle, onNewPuzzle }: CrosswordCardProp
       {/* Grid + clue list side by side */}
       <div style={{ display: "flex", gap: "1.5rem", alignItems: "flex-start", flexWrap: "wrap", justifyContent: "center", width: "100%" }}>
 
-        {/* Grid */}
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: `repeat(${cols}, ${CELL}px)`,
-          gridTemplateRows: `repeat(${rows}, ${CELL}px)`,
-          border: "2px solid #1a1a1a",
-          flexShrink: 0,
-        }}>
-          {puzzle.grid.map((row, r) =>
-            row.map((cell, c) => {
-              const key = `${r},${c}`;
-              const isBlack = cell === "#";
-              const isSelected = state.selected?.row === r && state.selected?.col === c;
-              const isActiveSlot = activeSlotCells.has(key);
-              const isRevealed = state.revealed.has(key);
-              const isError = state.checked && state.errors[r]?.[c];
-              const num = numberMap.get(key);
-              const letter = state.letters[r]?.[c] ?? "";
-
-              let bg = "#faf8f3";
-              if (isBlack) bg = "#1a1a1a";
-              else if (isSelected) bg = "#d4c27a";
-              else if (isActiveSlot) bg = "#ede9e1";
-
-              return (
-                <div
-                  key={key}
-                  onClick={() => !isBlack && dispatch({ type: "SELECT_CELL", row: r, col: c })}
-                  style={{
-                    width: CELL, height: CELL,
-                    background: bg,
-                    position: "relative",
-                    cursor: isBlack ? "default" : "pointer",
-                    borderRight: c < cols - 1 ? "0.5px solid #ccc" : "none",
-                    borderBottom: r < rows - 1 ? "0.5px solid #ccc" : "none",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    transition: "background 0.08s ease",
-                    WebkitTapHighlightColor: "transparent",
-                  }}
-                >
-                  {/* Cell number */}
-                  {num !== undefined && (
-                    <span style={{
-                      position: "absolute",
-                      top: 2, left: 2,
-                      fontSize: "0.48rem",
-                      fontWeight: 700,
-                      fontFamily: "Georgia, serif",
-                      color: "#1a1a1a",
-                      lineHeight: 1,
-                      pointerEvents: "none",
-                    }}>
-                      {num}
-                    </span>
-                  )}
-                  {/* Letter */}
-                  {!isBlack && letter && (
-                    <span style={{
-                      fontFamily: "'Playfair Display', Georgia, serif",
-                      fontSize: `${CELL * 0.52}px`,
-                      fontWeight: 400,
-                      color: isError ? "#c0392b" : isRevealed ? "#1a472a" : "#1a1a1a",
-                      lineHeight: 1,
-                      pointerEvents: "none",
-                    }}>
-                      {letter}
-                    </span>
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
+        <CrosswordGridBoard
+          puzzle={puzzle}
+          letters={state.letters}
+          selected={state.selected}
+          revealed={state.revealed}
+          errors={state.errors}
+          checked={state.checked}
+          activeSlotCells={activeSlotCells}
+          numberMap={numberMap}
+          onCellSelect={(row, col) =>
+            dispatch({ type: "SELECT_CELL", row, col })
+          }
+        />
 
         {/* Clue list */}
-        <div style={{ flex: 1, minWidth: 160, maxWidth: 220 }}>
+        <div style={{ flex: 1, minWidth: 180, maxWidth: 300 }}>
           {/* Tab bar */}
           <div style={{ display: "flex", borderBottom: "1px solid #1a1a1a", marginBottom: "0.5rem" }}>
             {(["across", "down"] as const).map((dir) => (
@@ -516,46 +703,125 @@ export default function CrosswordCard({ puzzle, onNewPuzzle }: CrosswordCardProp
               </button>
             ))}
           </div>
+          <p
+            style={{
+              fontFamily: "'IM Fell English', Georgia, serif",
+              fontStyle: "italic",
+              fontSize: "0.62rem",
+              color: "#aaa",
+              margin: "0.25rem 0 0.35rem",
+              lineHeight: 1.35,
+            }}
+          >
+            Letter: next blank or wrong square only — up to {MAX_LETTER_HINTS_PER_WORD} per entry.
+          </p>
 
           {/* Clues */}
           <div style={{ maxHeight: rows * CELL + 20, overflowY: "auto", display: "flex", flexDirection: "column", gap: "0.15rem" }}>
             {(activeTab === "across" ? acrossClues : downClues).map((slot) => {
               const isActive = state.activeSlot?.number === slot.number && state.activeSlot?.direction === slot.direction;
-              // Check if word is complete
               const dr = slot.direction === "down" ? 1 : 0;
               const dc = slot.direction === "across" ? 1 : 0;
               const done = Array.from({ length: slot.length }, (_, i) =>
                 state.letters[slot.row + dr * i]?.[slot.col + dc * i] === slot.answer[i]
               ).every(Boolean);
+              const sk = slotKey(slot.number, slot.direction);
+              const cap = Math.min(MAX_LETTER_HINTS_PER_WORD, slot.length);
+              const hintsUsed = state.letterHintsUsed[sk] ?? 0;
+              const hintsLeft = cap - hintsUsed;
+              const canLetterHint = !done && hintsLeft > 0;
 
               return (
                 <div
                   key={`${slot.number}-${slot.direction}`}
-                  onClick={() => dispatch({ type: "SELECT_CELL", row: slot.row, col: slot.col })}
                   style={{
-                    padding: "0.2rem 0.35rem",
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "0.25rem",
+                    padding: "0.2rem 0.25rem",
                     background: isActive ? "#ede9e1" : "transparent",
-                    cursor: "pointer",
                     borderRadius: 3,
                   }}
                 >
-                  <span style={{
-                    fontFamily: "'Playfair Display', Georgia, serif",
-                    fontSize: "0.72rem",
-                    fontWeight: 700,
-                    color: done ? "#1a472a" : "#555",
-                    marginRight: "0.3rem",
-                  }}>
-                    {slot.number}.
-                  </span>
-                  <span style={{
-                    fontFamily: "Georgia, serif",
-                    fontSize: "0.72rem",
-                    color: done ? "#888" : "#333",
-                    textDecoration: done ? "line-through" : "none",
-                  }}>
-                    {slot.clue}
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      dispatch({
+                        type: "SELECT_CELL",
+                        row: slot.row,
+                        col: slot.col,
+                      })
+                    }
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      textAlign: "left",
+                      border: "none",
+                      background: "transparent",
+                      padding: 0,
+                      cursor: "pointer",
+                      font: "inherit",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontFamily: "'Playfair Display', Georgia, serif",
+                        fontSize: "0.72rem",
+                        fontWeight: 700,
+                        color: done ? "#1a472a" : "#555",
+                        marginRight: "0.3rem",
+                      }}
+                    >
+                      {slot.number}.
+                    </span>
+                    <span
+                      style={{
+                        fontFamily: "Georgia, serif",
+                        fontSize: "0.72rem",
+                        color: done ? "#888" : "#333",
+                        textDecoration: done ? "line-through" : "none",
+                      }}
+                    >
+                      {slot.clue}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    title={
+                      canLetterHint
+                        ? `Reveal the next missing or incorrect letter in this word (${hintsLeft} left for this entry).`
+                        : done
+                          ? "Word is complete."
+                          : "No letter hints left for this entry."
+                    }
+                    aria-label={`Letter hint for ${slot.number} ${slot.direction}`}
+                    disabled={!canLetterHint}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      dispatch({
+                        type: "HINT_LETTER",
+                        number: slot.number,
+                        direction: slot.direction,
+                      });
+                    }}
+                    style={{
+                      flexShrink: 0,
+                      marginTop: "0.05rem",
+                      padding: "0.12rem 0.32rem",
+                      border: "1px solid",
+                      borderColor: canLetterHint ? "#8b7355" : "#e0dcd4",
+                      background: canLetterHint ? "#faf6f0" : "transparent",
+                      color: canLetterHint ? "#5c4a32" : "#ccc",
+                      fontFamily: "'Playfair Display', Georgia, serif",
+                      fontSize: "0.58rem",
+                      letterSpacing: "0.04em",
+                      textTransform: "uppercase",
+                      cursor: canLetterHint ? "pointer" : "not-allowed",
+                      lineHeight: 1.2,
+                    }}
+                  >
+                    Letter{hintsUsed > 0 ? ` ${hintsLeft}` : ""}
+                  </button>
                 </div>
               );
             })}
@@ -567,12 +833,23 @@ export default function CrosswordCard({ puzzle, onNewPuzzle }: CrosswordCardProp
       <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", justifyContent: "center" }}>
         <ActionBtn onClick={() => dispatch({ type: "CHECK" })}>Check</ActionBtn>
         <ActionBtn onClick={() => dispatch({ type: "REVEAL_WORD" })} disabled={!state.activeSlot}>Reveal word</ActionBtn>
-        <ActionBtn onClick={() => { if (confirm("Reveal the full puzzle?")) dispatch({ type: "REVEAL_ALL" }); }}>Reveal all</ActionBtn>
+        <ActionBtn
+          onClick={() => {
+            if (
+              confirm(
+                "Show the full solution? The completed grid will stay on screen so you can read it, then use New puzzle when you are done."
+              )
+            )
+              dispatch({ type: "REVEAL_ALL" });
+          }}
+        >
+          Reveal all
+        </ActionBtn>
         {onNewPuzzle && <ActionBtn onClick={() => onNewPuzzle("medium")}>New puzzle</ActionBtn>}
       </div>
 
       <p style={{ fontFamily: "'IM Fell English', Georgia, serif", fontStyle: "italic", fontSize: "0.72rem", color: "#bbb", margin: 0 }}>
-        Click a cell · type letters · Tab to next word
+        Click a cell · type letters · Tab to next word · per-clue Letter hints are capped
       </p>
     </div>
   );

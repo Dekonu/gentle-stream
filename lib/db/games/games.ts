@@ -22,41 +22,58 @@ interface GameRow {
 
 // ─── Read ─────────────────────────────────────────────────────────────────────
 
+function pickRowPreferringLowUse(
+  rows: GameRow[],
+  randomTieBreak: boolean
+): GameRow {
+  const minUse = Math.min(...rows.map((r) => r.used_count ?? 0));
+  const tied = rows.filter((r) => (r.used_count ?? 0) === minUse);
+  if (!randomTieBreak || tied.length <= 1) return tied[0]!;
+  return tied[Math.floor(Math.random() * tied.length)]!;
+}
+
 /**
  * Fetch one unused (or least-used) puzzle of a given type from the pool.
  * Prefers puzzles that match the given category, falls back to any category.
  * Returns null if the pool is empty.
+ *
+ * `randomTieBreak`: when several rows share the lowest `used_count`, pick one at
+ * random so the same crossword is not always served first (helps variety and load spread).
  */
 export async function getGameFromPool(
   type: string,
-  category?: string
+  category?: string,
+  options?: { randomTieBreak?: boolean }
 ): Promise<GameRow | null> {
+  const randomTieBreak = options?.randomTieBreak === true;
+  const batchLimit = randomTieBreak ? 40 : 1;
+
   // Try category match first
   if (category) {
-    const { data } = await db
+    const { data: catRows } = await db
       .from("games")
       .select("*")
       .eq("type", type)
       .eq("category", category)
       .order("used_count", { ascending: true })
       .order("created_at", { ascending: true })
-      .limit(1)
-      .single();
-    if (data) return data as GameRow;
+      .limit(batchLimit);
+    if (catRows?.length) {
+      return pickRowPreferringLowUse(catRows as GameRow[], randomTieBreak);
+    }
   }
 
   // Fall back to any category
-  const { data, error } = await db
+  const { data: rows, error } = await db
     .from("games")
     .select("*")
     .eq("type", type)
     .order("used_count", { ascending: true })
     .order("created_at", { ascending: true })
-    .limit(1)
-    .single();
+    .limit(batchLimit);
 
-  if (error || !data) return null;
-  return data as GameRow;
+  if (error || !rows?.length) return null;
+  return pickRowPreferringLowUse(rows as GameRow[], randomTieBreak);
 }
 
 /**
@@ -99,7 +116,9 @@ export async function countGamePool(type: string): Promise<number> {
 export async function getCrosswordFromPool(
   category?: string
 ): Promise<CrosswordPuzzle | null> {
-  const row = await getGameFromPool("crossword", category);
+  const row = await getGameFromPool("crossword", category, {
+    randomTieBreak: true,
+  });
   if (!row) return null;
   void markGameUsed(row.id); // fire-and-forget
   return row.payload as CrosswordPuzzle;

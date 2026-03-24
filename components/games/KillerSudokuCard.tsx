@@ -205,8 +205,8 @@ function reducer(
         state.mistakeUndoStack[state.mistakeUndoStack.length - 1];
       const mistakeUndoStack = state.mistakeUndoStack.slice(0, -1);
       const values = cloneValues(snap.values);
-      const mistakes = snap.mistakes;
-      const failed = snap.failed;
+      const mistakes = Math.max(0, state.mistakes - 1);
+      const failed = mistakes >= MAX_MISTAKES;
       const errors = computeErrors(values, puzzle.cages);
       const completed = isComplete(values, puzzle.solution);
       return {

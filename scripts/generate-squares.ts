@@ -10,7 +10,10 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { getWordBank } from "./crosswordWordList";
+import {
+  getWordBank,
+  type WordEntry,
+} from "../lib/games/crosswordWordList";
 
 // ─── Word list ────────────────────────────────────────────────────────────────
 // Curated additions: common 5-letter words with varied letter distributions
@@ -91,8 +94,12 @@ const CROSSWORD_WORDS = [
 ];
 
 const bank = getWordBank(undefined);
-const themed = bank.filter(w => w.word.length === 5).map(w => w.word);
-const allWords = [...new Set([...themed, ...CROSSWORD_WORDS])].sort();
+const themed = bank
+  .filter((w: WordEntry) => w.word.length === 5)
+  .map((w: WordEntry) => w.word);
+const allWords = Array.from(
+  new Set([...themed, ...CROSSWORD_WORDS])
+).sort();
 const wordSet = new Set(allWords);
 
 console.log(`Total words: ${allWords.length}`);
