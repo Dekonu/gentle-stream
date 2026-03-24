@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { AppLogo } from "@/components/brand/AppLogo";
 import { createClient } from "@/lib/supabase/client";
 
 function safeNextPath(raw: string | null): string {
@@ -8,7 +9,39 @@ function safeNextPath(raw: string | null): string {
   return raw;
 }
 
+function isBrowserLoopbackHost(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "[::1]" ||
+    hostname === "::1"
+  );
+}
+
+/**
+ * OAuth / magic-link `redirect_to` must match the tab you are in. When the address bar is
+ * loopback, always use `window.location.origin` so a stale server hint or wrong
+ * NEXT_PUBLIC_* env cannot send you to production.
+ */
+function resolveAuthRedirectBase(serverHint: string): string {
+  if (typeof window !== "undefined") {
+    const { hostname, origin } = window.location;
+    if (isBrowserLoopbackHost(hostname)) return origin.replace(/\/$/, "");
+  }
+
+  const trimmed = serverHint.trim().replace(/\/$/, "");
+  if (trimmed) return trimmed;
+  const fromEnv =
+    process.env.NEXT_PUBLIC_AUTH_REDIRECT_ORIGIN?.trim().replace(/\/$/, "") ??
+    "";
+  if (fromEnv) return fromEnv;
+  if (typeof window !== "undefined") return window.location.origin.replace(/\/$/, "");
+  return "";
+}
+
 export interface LoginFormProps {
+  /** From server: OAuth/magic-link return origin (dev defaults to http://localhost:3000). */
+  authRedirectBaseFromServer?: string;
   /** From `?next=` — passed by the server page to avoid `useSearchParams` + Suspense chunk issues in dev. */
   initialNext?: string | null;
   initialAuthError?: string | null;
@@ -19,6 +52,7 @@ export interface LoginFormProps {
 }
 
 export function LoginForm({
+  authRedirectBaseFromServer = "",
   initialNext = null,
   initialAuthError = null,
   initialSessionExpired = false,
@@ -36,22 +70,37 @@ export function LoginForm({
   const [emailBusy, setEmailBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  const origin =
-    typeof window !== "undefined" ? window.location.origin : "";
-
+  /**
+   * Do not call signOut before OAuth: signOut removes the PKCE code_verifier from
+   * cookie storage; the server callback needs that verifier for exchangeCodeForSession.
+   * A successful exchange replaces any prior session.
+   */
   async function signInWithGoogle() {
     setMessage(null);
     setOauthBusy(true);
     try {
+      const base = resolveAuthRedirectBase(authRedirectBaseFromServer);
+      if (!base) {
+        setMessage(
+          "Could not determine the app URL for sign-in. Set NEXT_PUBLIC_AUTH_REDIRECT_ORIGIN (e.g. http://localhost:3000) in .env.local."
+        );
+        setOauthBusy(false);
+        return;
+      }
       const supabase = createClient();
-      await supabase.auth.signOut({ scope: "local" });
-      const redirectTo = `${origin}/auth/callback?next=${encodeURIComponent(nextPath)}`;
+      const redirectTo = `${base}/auth/callback?next=${encodeURIComponent(nextPath)}`;
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: { redirectTo },
       });
-      if (error) setMessage(error.message);
-    } finally {
+      if (error) {
+        setMessage(error.message);
+        setOauthBusy(false);
+        return;
+      }
+      // Browser navigates to Google; avoid finally { setBusy(false) } racing the redirect.
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Sign-in failed");
       setOauthBusy(false);
     }
   }
@@ -61,9 +110,16 @@ export function LoginForm({
     setMessage(null);
     setEmailBusy(true);
     try {
+      const base = resolveAuthRedirectBase(authRedirectBaseFromServer);
+      if (!base) {
+        setMessage(
+          "Could not determine the app URL for sign-in. Set NEXT_PUBLIC_AUTH_REDIRECT_ORIGIN (e.g. http://localhost:3000) in .env.local."
+        );
+        return;
+      }
       const supabase = createClient();
       await supabase.auth.signOut({ scope: "local" });
-      const redirectTo = `${origin}/auth/callback?next=${encodeURIComponent(nextPath)}`;
+      const redirectTo = `${base}/auth/callback?next=${encodeURIComponent(nextPath)}`;
       const { error } = await supabase.auth.signInWithOtp({
         email: email.trim(),
         options: { emailRedirectTo: redirectTo },
@@ -100,6 +156,9 @@ export function LoginForm({
   return (
     <div style={shell}>
       <div style={card}>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: "0.35rem" }}>
+          <AppLogo heightPx={40} priority />
+        </div>
         <h1
           style={{
             fontFamily: "'Playfair Display', Georgia, serif",
@@ -291,6 +350,27 @@ export function LoginForm({
             {message}
           </p>
         )}
+
+        <p
+          style={{
+            margin: "1.35rem 0 0",
+            textAlign: "center",
+            fontFamily: "'IM Fell English', Georgia, serif",
+            fontSize: "0.72rem",
+            color: "#999",
+          }}
+        >
+          <a href="/privacy" style={{ color: "#777", textDecoration: "underline" }}>
+            Privacy
+          </a>
+          {" · "}
+          <a
+            href="/data-deletion"
+            style={{ color: "#777", textDecoration: "underline" }}
+          >
+            Data deletion
+          </a>
+        </p>
       </div>
     </div>
   );

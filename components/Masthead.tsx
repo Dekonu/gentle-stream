@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { AppLogo } from "@/components/brand/AppLogo";
 
 interface MastheadProps {
   /** Replaces the right meta line (volume / date line) when signed in. */
@@ -63,7 +64,16 @@ export default function Masthead({ accountSlot }: MastheadProps) {
       </div>
 
       {/* Masthead title */}
-      <div style={{ padding: "0.5rem 1rem 0.25rem" }}>
+      <div
+        style={{
+          padding: "0.5rem 1rem 0.25rem",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: "0.35rem",
+        }}
+      >
+        <AppLogo heightPx={56} priority />
         <h1
           style={{
             fontFamily:

@@ -91,6 +91,30 @@ export interface NonogramPuzzle {
   difficulty: Difficulty;
 }
 
+// ─── Crossword ────────────────────────────────────────────────────────────────
+
+export interface CrosswordSlot {
+  number: number;
+  row: number;
+  col: number;
+  direction: "across" | "down";
+  length: number;
+  answer: string;
+  clue: string;
+}
+
+/**
+ * A 5×5 mini crossword puzzle.
+ * All rows and columns are valid words (word square constraint).
+ * Clues are written by Claude themed to the article category.
+ */
+export interface CrosswordPuzzle {
+  grid: string[][];
+  slots: CrosswordSlot[];
+  category: string;
+  difficulty: "medium";
+}
+
 // ─── Feed slot ────────────────────────────────────────────────────────────────
 
 export type FeedSectionType = "articles" | "game";

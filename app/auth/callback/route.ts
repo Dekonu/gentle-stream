@@ -25,10 +25,9 @@ function isPkceVerifierMissing(error: unknown): boolean {
  */
 async function redirectToLoginCleared(
   request: NextRequest,
-  origin: string,
   query: Record<string, string>
 ): Promise<NextResponse> {
-  const url = new URL(`${origin}/login`);
+  const url = new URL("/login", request.url);
   for (const [k, v] of Object.entries(query)) {
     url.searchParams.set(k, v);
   }
@@ -45,18 +44,28 @@ async function redirectToLoginCleared(
  *
  * Do not call signOut before exchangeCodeForSession: signOut removes the PKCE code
  * verifier from storage, so the exchange always fails and the old session remains.
+ *
+ * If the browser never hits this route on localhost (you jump straight to production),
+ * Supabase is ignoring `redirect_to` — add `http://localhost:3000/auth/callback**` (or the
+ * exact URL with query) under Authentication → URL Configuration → Redirect URLs.
  */
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = request.nextUrl;
+  if (process.env.NODE_ENV === "development") {
+    console.info("[auth/callback]", request.method, request.url);
+  }
+
+  const { searchParams } = request.nextUrl;
   const code = searchParams.get("code");
   const next = safeNextPath(searchParams.get("next"));
 
   if (!code) {
-    return redirectToLoginCleared(request, origin, { error: "auth" });
+    return redirectToLoginCleared(request, { error: "auth" });
   }
 
-  const redirectUrl = `${origin}${next}`;
-  const response = NextResponse.redirect(redirectUrl);
+  // Resolve against this request’s URL so host/port match the tab (never trust
+  // reconstructed origins from X-Forwarded-* when those point at production).
+  const destination = new URL(next, request.url);
+  const response = NextResponse.redirect(destination);
   const supabase = createSupabaseResponseClient(request, response);
 
   const { error } = await supabase.auth.exchangeCodeForSession(code);
@@ -65,7 +74,7 @@ export async function GET(request: NextRequest) {
     const errKey = isPkceVerifierMissing(error)
       ? "magic_link_browser"
       : "auth";
-    return redirectToLoginCleared(request, origin, { error: errKey });
+    return redirectToLoginCleared(request, { error: errKey });
   }
 
   const {
@@ -73,7 +82,7 @@ export async function GET(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return redirectToLoginCleared(request, origin, { error: "auth" });
+    return redirectToLoginCleared(request, { error: "auth" });
   }
 
   const nowSec = Math.floor(Date.now() / 1000);
