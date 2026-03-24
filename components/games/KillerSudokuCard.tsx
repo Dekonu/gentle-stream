@@ -1,11 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { KillerSudokuPuzzle, Cage, Difficulty } from "@/lib/games/types";
 import {
   GAME_HOW_TO_URL,
   GameHowToPlayLink,
 } from "@/components/games/GameHowToPlayLink";
+import {
+  cellInFlashUnits,
+  completedSudokuUnits,
+} from "@/lib/games/sudokuLineComplete";
+
+const MAX_MISTAKES = 3;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -14,6 +20,8 @@ interface BoardState {
   selected: [number, number] | null;
   errors: boolean[][];
   completed: boolean;
+  failed: boolean;
+  mistakes: number;
   startedAt: number | null;
   elapsedSecs: number;
 }
@@ -118,6 +126,8 @@ function makeInitialState(): BoardState {
     selected: null,
     errors: Array.from({ length: 9 }, () => Array(9).fill(false)),
     completed: false,
+    failed: false,
+    mistakes: 0,
     startedAt: null,
     elapsedSecs: 0,
   };
@@ -132,7 +142,7 @@ function reducer(
 ): BoardState {
   switch (action.type) {
     case "SELECT":
-      if (state.completed) return state;
+      if (state.completed || state.failed) return state;
       return {
         ...state,
         startedAt: state.startedAt ?? Date.now(),
@@ -143,17 +153,22 @@ function reducer(
       };
 
     case "INPUT": {
-      if (!state.selected || state.completed) return state;
+      if (!state.selected || state.completed || state.failed) return state;
       const [r, c] = state.selected;
+      const correct = action.num === puzzle.solution[r][c];
+      let mistakes = state.mistakes;
+      if (!correct) mistakes = Math.min(MAX_MISTAKES, mistakes + 1);
+      const failed = mistakes >= MAX_MISTAKES;
+
       const values = state.values.map((row) => [...row]);
       values[r][c] = action.num;
       const errors = computeErrors(values, puzzle.cages);
       const completed = isComplete(values, puzzle.solution);
-      return { ...state, values, errors, completed };
+      return { ...state, values, errors, completed, mistakes, failed };
     }
 
     case "ERASE": {
-      if (!state.selected || state.completed) return state;
+      if (!state.selected || state.completed || state.failed) return state;
       const [r, c] = state.selected;
       const values = state.values.map((row) => [...row]);
       values[r][c] = 0;
@@ -161,7 +176,7 @@ function reducer(
     }
 
     case "TICK":
-      if (state.completed || !state.startedAt) return state;
+      if (state.completed || state.failed || !state.startedAt) return state;
       return { ...state, elapsedSecs: Math.floor((Date.now() - state.startedAt) / 1000) };
 
     case "RESET":
@@ -207,6 +222,8 @@ export default function KillerSudokuCard({
     makeInitialState
   );
   const dispatch = dispatchRaw;
+  const [lineFlashUnits, setLineFlashUnits] = useState<string[]>([]);
+  const lineCompleteRef = useRef<Set<string>>(new Set());
 
   const cageMap = useMemo(() => buildCageMap(puzzle.cages), [puzzle.cages]);
 
@@ -222,13 +239,40 @@ export default function KillerSudokuCard({
 
   // Timer
   useEffect(() => {
-    if (state.completed || !state.startedAt) return;
+    if (state.completed || state.failed || !state.startedAt) return;
     const id = setInterval(() => dispatch({ type: "TICK" }), 1000);
     return () => clearInterval(id);
-  }, [state.completed, state.startedAt, dispatch]);
+  }, [state.completed, state.failed, state.startedAt, dispatch]);
 
   useEffect(() => {
-    if (!metricsEnabled || !state.completed || completionLogged.current) return;
+    if (state.completed || state.failed || !state.startedAt) return;
+    const now = completedSudokuUnits(state.values, puzzle.solution);
+    const prev = lineCompleteRef.current;
+    const newly = [...now].filter((k) => !prev.has(k));
+    lineCompleteRef.current = new Set(now);
+    if (newly.length > 0) setLineFlashUnits(newly);
+  }, [
+    state.values,
+    puzzle.solution,
+    state.completed,
+    state.failed,
+    state.startedAt,
+  ]);
+
+  useEffect(() => {
+    if (lineFlashUnits.length === 0) return;
+    const t = window.setTimeout(() => setLineFlashUnits([]), 780);
+    return () => window.clearTimeout(t);
+  }, [lineFlashUnits]);
+
+  useEffect(() => {
+    if (
+      !metricsEnabled ||
+      !state.completed ||
+      state.failed ||
+      completionLogged.current
+    )
+      return;
     completionLogged.current = true;
     const p = puzzleRef.current;
     void fetch("/api/user/game-completion", {
@@ -242,11 +286,12 @@ export default function KillerSudokuCard({
         metadata: { difficulty: p.difficulty },
       }),
     });
-  }, [metricsEnabled, state.completed, state.elapsedSecs]);
+  }, [metricsEnabled, state.completed, state.failed, state.elapsedSecs]);
 
   // Keyboard
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
+      if (state.failed) return;
       if (!state.selected) return;
       const num = parseInt(e.key);
       if (num >= 1 && num <= 9) dispatch({ type: "INPUT", num });
@@ -258,10 +303,12 @@ export default function KillerSudokuCard({
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [state.selected, dispatch]);
+  }, [state.selected, state.failed, dispatch]);
 
   // Reset on new puzzle
   useEffect(() => {
+    lineCompleteRef.current = new Set();
+    setLineFlashUnits([]);
     dispatch({ type: "RESET" });
     completionLogged.current = false;
   }, [puzzle, dispatch]);
@@ -299,6 +346,33 @@ export default function KillerSudokuCard({
 
   const CELL = 40;
 
+  // ── Game over (mistakes) ────────────────────────────────────────────────────
+  if (state.failed && !state.completed) {
+    return (
+      <div style={cardStyle}>
+        <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+          <span style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "1.3rem", fontWeight: 700 }}>Killer Sudoku</span>
+          <span style={{ fontFamily: "'IM Fell English', Georgia, serif", fontStyle: "italic", fontSize: "0.78rem", color: "#888" }}>
+            {puzzle.difficulty}
+          </span>
+        </div>
+        <div style={{ width: "100%" }}>
+          <GameHowToPlayLink href={GAME_HOW_TO_URL.killer_sudoku} />
+        </div>
+        <div style={{ textAlign: "center", padding: "2rem 1rem", fontFamily: "'Playfair Display', Georgia, serif", maxWidth: 400 }}>
+          <div style={{ fontSize: "3.2rem", lineHeight: 1, marginBottom: "0.65rem" }} aria-hidden>☹</div>
+          <div style={{ fontSize: "1.15rem", fontWeight: 700, color: "#5c4a32", marginBottom: "0.35rem" }}>
+            Three cages worth of bad luck.
+          </div>
+          <div style={{ fontFamily: "'IM Fell English', Georgia, serif", fontStyle: "italic", color: "#888", fontSize: "0.9rem", lineHeight: 1.5 }}>
+            The sums were rooting for you. They have now left the chat.
+          </div>
+        </div>
+        {onNewPuzzle && <DifficultyButtons current={puzzle.difficulty} onSelect={onNewPuzzle} primary />}
+      </div>
+    );
+  }
+
   // ── Completed banner ────────────────────────────────────────────────────────
   if (state.completed) {
     return (
@@ -329,8 +403,11 @@ export default function KillerSudokuCard({
     <div style={cardStyle}>
       <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <span style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "1.3rem", fontWeight: 700 }}>Killer Sudoku</span>
-        <span style={{ fontFamily: "'IM Fell English', Georgia, serif", fontStyle: "italic", fontSize: "0.78rem", color: "#888", display: "flex", gap: "1rem" }}>
+        <span style={{ fontFamily: "'IM Fell English', Georgia, serif", fontStyle: "italic", fontSize: "0.78rem", color: "#888", display: "flex", gap: "1rem", flexWrap: "wrap", justifyContent: "flex-end" }}>
           <span>{puzzle.difficulty}</span>
+          <span style={{ fontVariantNumeric: "tabular-nums", color: "#a67c52" }}>
+            Mistakes {state.mistakes}/{MAX_MISTAKES}
+          </span>
           {state.startedAt && <span style={{ fontVariantNumeric: "tabular-nums" }}>{formatTime(state.elapsedSecs)}</span>}
         </span>
       </div>
@@ -354,9 +431,11 @@ export default function KillerSudokuCard({
             const isError = state.errors[r][c];
             const borders = getCageBorders(r, c, cageMap);
             const cageSum = sumLabelCells.get(key);
+            const celebrating = cellInFlashUnits(r, c, lineFlashUnits);
 
             let bg = "#faf8f3";
-            if (isSelected) bg = "#d4c27a";
+            if (celebrating) bg = "#f0e6c8";
+            else if (isSelected) bg = "#d4c27a";
             else if (isPeer) bg = "#ede9e1";
 
             // Box borders
@@ -366,6 +445,7 @@ export default function KillerSudokuCard({
             return (
               <div
                 key={key}
+                className={celebrating ? "sudoku-unit-celebrate" : undefined}
                 onClick={() => dispatch({ type: "SELECT", row: r, col: c })}
                 style={{
                   width: CELL,
@@ -381,6 +461,7 @@ export default function KillerSudokuCard({
                   fontWeight: 400,
                   color: isError ? "#c0392b" : "#2c5282",
                   transition: "background 0.08s ease",
+                  transformOrigin: "center center",
                   // Cage border (dashed, inside) wins over box border (solid, outside)
                   borderRight: boxRight ? "2px solid #1a1a1a" : borders.right ? "1.5px dashed #888" : "0.5px solid #ddd",
                   borderBottom: boxBottom ? "2px solid #1a1a1a" : borders.bottom ? "1.5px dashed #888" : "0.5px solid #ddd",
@@ -450,20 +531,35 @@ export default function KillerSudokuCard({
   );
 }
 
-function DifficultyButtons({ current, onSelect }: { current: Difficulty; onSelect: (d: Difficulty) => void }) {
+function DifficultyButtons({
+  current,
+  onSelect,
+  primary = false,
+}: {
+  current: Difficulty;
+  onSelect: (d: Difficulty) => void;
+  primary?: boolean;
+}) {
   return (
     <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", justifyContent: "center" }}>
       {(["easy", "medium", "hard"] as Difficulty[]).map((d) => (
-        <button key={d} onClick={() => onSelect(d)} style={{
-          padding: "0.3rem 0.8rem",
-          border: "1px solid #ccc",
-          background: d === current ? "#1a1a1a" : "transparent",
-          color: d === current ? "#faf8f3" : "#888",
-          fontFamily: "'Playfair Display', Georgia, serif",
-          fontSize: "0.68rem", letterSpacing: "0.06em",
-          textTransform: "uppercase", cursor: "pointer",
-        }}>
-          {d}
+        <button
+          key={d}
+          type="button"
+          onClick={() => onSelect(d)}
+          style={{
+            padding: primary ? "0.45rem 1.1rem" : "0.3rem 0.8rem",
+            border: primary ? "2px solid #1a1a1a" : "1px solid #ccc",
+            background: d === current ? "#1a1a1a" : primary ? "#faf8f3" : "transparent",
+            color: d === current ? "#faf8f3" : primary ? "#1a1a1a" : "#888",
+            fontFamily: "'Playfair Display', Georgia, serif",
+            fontSize: primary ? "0.78rem" : "0.68rem",
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+            cursor: "pointer",
+          }}
+        >
+          {primary ? `New ${d}` : d}
         </button>
       ))}
     </div>

@@ -6,6 +6,13 @@ import {
   GAME_HOW_TO_URL,
   GameHowToPlayLink,
 } from "@/components/games/GameHowToPlayLink";
+import { clearDigitNotesFromPeers } from "@/lib/games/sudokuPeerNotes";
+import {
+  cellInFlashUnits,
+  completedSudokuUnits,
+} from "@/lib/games/sudokuLineComplete";
+
+const MAX_MISTAKES = 3;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -18,6 +25,8 @@ interface BoardState {
   selected: [number, number] | null;
   errors: boolean[][];      // cells that conflict with Sudoku rules
   completed: boolean;
+  failed: boolean;          // 3 mistakes — puzzle locked
+  mistakes: number;         // incorrect placements (vs solution), capped at MAX_MISTAKES
   startedAt: number | null; // timestamp ms
   elapsedSecs: number;
 }
@@ -34,6 +43,7 @@ type Action =
       notes: NoteMask[][];
       elapsedSecs: number;
       startedAt: number | null;
+      mistakes?: number;
     };
 
 export interface SudokuCloudSlice {
@@ -41,6 +51,7 @@ export interface SudokuCloudSlice {
   notes: NoteMask[][];
   elapsedSecs: number;
   startedAt: number | null;
+  mistakes?: number;
 }
 
 interface SudokuCardProps {
@@ -150,6 +161,41 @@ function cloneNotes(notes: NoteMask[][]): NoteMask[][] {
   return notes.map((row) => [...row]);
 }
 
+/** True if `digit` is already placed in the same row, column, or 3×3 box (excluding r,c). */
+function digitAppearsInSudokuPeers(
+  values: number[][],
+  r: number,
+  c: number,
+  digit: number
+): boolean {
+  for (let i = 0; i < 9; i++) {
+    if (i !== c && values[r][i] === digit) return true;
+    if (i !== r && values[i][c] === digit) return true;
+  }
+  const br = Math.floor(r / 3) * 3;
+  const bc = Math.floor(c / 3) * 3;
+  for (let rr = br; rr < br + 3; rr++) {
+    for (let cc = bc; cc < bc + 3; cc++) {
+      if ((rr !== r || cc !== c) && values[rr][cc] === digit) return true;
+    }
+  }
+  return false;
+}
+
+/** Block adding a new note for `num`; removing an existing note is always allowed. */
+function isSudokuNoteAddBlocked(
+  values: number[][],
+  notes: NoteMask[][],
+  r: number,
+  c: number,
+  num: number
+): boolean {
+  if (values[r][c] !== 0) return false;
+  const bit = 1 << (num - 1);
+  if ((notes[r][c] & bit) !== 0) return false;
+  return digitAppearsInSudokuPeers(values, r, c, num);
+}
+
 function makeInitialState(puzzle: SudokuPuzzle): BoardState {
   return {
     values: puzzle.given.map((row) => [...row]),
@@ -157,6 +203,8 @@ function makeInitialState(puzzle: SudokuPuzzle): BoardState {
     selected: null,
     errors: Array.from({ length: 9 }, () => Array(9).fill(false)),
     completed: false,
+    failed: false,
+    mistakes: 0,
     startedAt: null,
     elapsedSecs: 0,
   };
@@ -167,7 +215,7 @@ function makeInitialState(puzzle: SudokuPuzzle): BoardState {
 function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): BoardState {
   switch (action.type) {
     case "SELECT": {
-      if (state.completed) return state;
+      if (state.completed || state.failed) return state;
       const alreadySelected =
         state.selected?.[0] === action.row && state.selected?.[1] === action.col;
       return {
@@ -178,22 +226,31 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
     }
 
     case "INPUT": {
-      if (!state.selected || state.completed) return state;
+      if (!state.selected || state.completed || state.failed) return state;
       const [r, c] = state.selected;
       if (puzzle.given[r][c] !== 0) return state; // can't overwrite givens
 
       if (action.asNote) {
         if (state.values[r][c] !== 0) return state;
-        const notes = cloneNotes(state.notes);
         const bit = 1 << (action.num - 1);
+        if (isSudokuNoteAddBlocked(state.values, state.notes, r, c, action.num)) {
+          return state;
+        }
+        const notes = cloneNotes(state.notes);
         notes[r][c] ^= bit;
         return { ...state, notes };
       }
+
+      const correct = action.num === puzzle.solution[r][c];
+      let mistakes = state.mistakes;
+      if (!correct) mistakes = Math.min(MAX_MISTAKES, mistakes + 1);
+      const failed = mistakes >= MAX_MISTAKES;
 
       const values = state.values.map((row) => [...row]);
       values[r][c] = action.num;
       const notes = cloneNotes(state.notes);
       notes[r][c] = 0;
+      if (correct) clearDigitNotesFromPeers(notes, r, c, action.num);
 
       const errors = computeErrors(values, puzzle.given);
       const completed = isComplete(values, puzzle.solution);
@@ -202,11 +259,20 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
           ? Math.floor((Date.now() - state.startedAt) / 1000)
           : state.elapsedSecs;
 
-      return { ...state, values, notes, errors, completed, elapsedSecs };
+      return {
+        ...state,
+        values,
+        notes,
+        errors,
+        completed,
+        failed,
+        mistakes,
+        elapsedSecs,
+      };
     }
 
     case "ERASE": {
-      if (!state.selected || state.completed) return state;
+      if (!state.selected || state.completed || state.failed) return state;
       const [r, c] = state.selected;
       if (puzzle.given[r][c] !== 0) return state;
 
@@ -226,7 +292,7 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
     }
 
     case "TICK": {
-      if (state.completed || !state.startedAt) return state;
+      if (state.completed || state.failed || !state.startedAt) return state;
       return {
         ...state,
         elapsedSecs: Math.floor((Date.now() - state.startedAt) / 1000),
@@ -241,6 +307,11 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
       const notes = action.notes.map((row) => [...row]);
       const errors = computeErrors(values, puzzle.given);
       const completed = isComplete(values, puzzle.solution);
+      const mistakes = Math.min(
+        MAX_MISTAKES,
+        Math.max(0, action.mistakes ?? 0)
+      );
+      const failed = mistakes >= MAX_MISTAKES && !completed;
       return {
         ...state,
         values,
@@ -249,6 +320,8 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
         startedAt: action.startedAt,
         errors,
         completed,
+        failed,
+        mistakes,
         selected: null,
       };
     }
@@ -279,19 +352,23 @@ export default function SudokuCard({
 
   const dispatch = dispatchRaw;
   const [notesMode, setNotesMode] = useState(false);
+  const [lineFlashUnits, setLineFlashUnits] = useState<string[]>([]);
   const stateRef = useRef(state);
   stateRef.current = state;
   const completionLogged = useRef(false);
+  const lineCompleteRef = useRef<Set<string>>(new Set());
 
   // Timer
   useEffect(() => {
-    if (state.completed || !state.startedAt) return;
+    if (state.completed || state.failed || !state.startedAt) return;
     const id = setInterval(() => dispatch({ type: "TICK" }), 1000);
     return () => clearInterval(id);
-  }, [state.completed, state.startedAt, dispatch]);
+  }, [state.completed, state.failed, state.startedAt, dispatch]);
 
   // Reset + optional hydrate when puzzle / saved slice changes
   useEffect(() => {
+    lineCompleteRef.current = new Set();
+    setLineFlashUnits([]);
     dispatch({ type: "RESET", puzzle });
     if (initialCloudSlice) {
       dispatch({
@@ -300,17 +377,40 @@ export default function SudokuCard({
         notes: initialCloudSlice.notes,
         elapsedSecs: initialCloudSlice.elapsedSecs,
         startedAt: initialCloudSlice.startedAt,
+        mistakes: initialCloudSlice.mistakes,
       });
     }
     completionLogged.current = false;
   }, [puzzle, initialCloudSlice, dispatch]);
+
+  // Row / column / box just completed — celebration flash
+  useEffect(() => {
+    if (state.completed || state.failed || !state.startedAt) return;
+    const now = completedSudokuUnits(state.values, puzzle.solution);
+    const prev = lineCompleteRef.current;
+    const newly = [...now].filter((k) => !prev.has(k));
+    lineCompleteRef.current = new Set(now);
+    if (newly.length > 0) setLineFlashUnits(newly);
+  }, [
+    state.values,
+    puzzle.solution,
+    state.completed,
+    state.failed,
+    state.startedAt,
+  ]);
+
+  useEffect(() => {
+    if (lineFlashUnits.length === 0) return;
+    const t = window.setTimeout(() => setLineFlashUnits([]), 780);
+    return () => window.clearTimeout(t);
+  }, [lineFlashUnits]);
 
   // Cloud auto-save (30s)
   useEffect(() => {
     if (!cloudSaveEnabled || embedded) return;
     const id = window.setInterval(() => {
       const s = stateRef.current;
-      if (s.completed) return;
+      if (s.completed || s.failed) return;
       const p = puzzleRef.current;
       void fetch("/api/user/game-save", {
         method: "PUT",
@@ -327,6 +427,7 @@ export default function SudokuCard({
               notes: s.notes,
               elapsedSecs: s.elapsedSecs,
               startedAt: s.startedAt,
+              mistakes: s.mistakes,
             },
           },
         }),
@@ -376,6 +477,8 @@ export default function SudokuCard({
         return;
       }
 
+      if (state.failed) return;
+
       if (!state.selected) return;
       const num = parseInt(e.key, 10);
       if (num >= 1 && num <= 9) {
@@ -401,7 +504,7 @@ export default function SudokuCard({
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [state.selected, dispatch, notesMode]);
+  }, [state.selected, state.failed, dispatch, notesMode]);
 
   // Highlight — same row, col, box, or same number as selected cell
   const highlights = useMemo(() => {
@@ -498,9 +601,11 @@ export default function SudokuCard({
     const isError = state.errors[r][c];
     const hl = highlights[r][c];
     const val = state.values[r][c];
+    const celebrating = cellInFlashUnits(r, c, lineFlashUnits);
 
     let bg = "#faf8f3";
-    if (isSelected) bg = "#d4c27a";
+    if (celebrating) bg = "#f0e6c8";
+    else if (isSelected) bg = "#d4c27a";
     else if (hl === "same-num" && val !== 0) bg = "#e8d98a";
     else if (hl === "peer") bg = "#ede9e1";
 
@@ -530,6 +635,7 @@ export default function SudokuCard({
         : "#2c5282",
       transition: "background 0.08s ease",
       WebkitTapHighlightColor: "transparent",
+      transformOrigin: "center center",
     };
   }
 
@@ -543,26 +649,126 @@ export default function SudokuCard({
     width: "min(360px, 100%)",
   };
 
-  function padBtnStyle(num: number): React.CSSProperties {
+  function padBtnStyle(
+    num: number,
+    options?: { noteAddBlocked?: boolean }
+  ): React.CSSProperties {
     const selNum = state.selected
       ? state.values[state.selected[0]][state.selected[1]]
       : 0;
     const isActive = selNum === num;
+    const blocked = options?.noteAddBlocked ?? false;
     return {
       width: "2.6rem",
       height: "2.6rem",
-      border: "1px solid #1a1a1a",
-      background: isActive ? "#1a1a1a" : "#faf8f3",
-      color: isActive ? "#faf8f3" : "#1a1a1a",
+      border: blocked ? "1px solid #ccc" : "1px solid #1a1a1a",
+      background: blocked
+        ? "#eeeae4"
+        : isActive
+          ? "#1a1a1a"
+          : "#faf8f3",
+      color: blocked ? "#bbb" : isActive ? "#faf8f3" : "#1a1a1a",
       fontFamily: "'Playfair Display', Georgia, serif",
       fontSize: "1rem",
       fontWeight: 700,
-      cursor: "pointer",
-      transition: "background 0.1s ease",
+      cursor: blocked ? "not-allowed" : "pointer",
+      opacity: blocked ? 0.55 : 1,
+      transition: "background 0.1s ease, opacity 0.1s ease",
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
     };
+  }
+
+  // ── Game over (mistakes) ─────────────────────────────────────────────────────
+
+  if (state.failed && !state.completed) {
+    return (
+      <div style={cardStyle}>
+        <div style={headerStyle}>
+          <span style={titleStyle}>Sudoku</span>
+          <span style={metaStyle}>{difficultyLabel}</span>
+        </div>
+        <div style={{ width: "100%" }}>
+          <GameHowToPlayLink href={GAME_HOW_TO_URL.sudoku} />
+        </div>
+
+        <div
+          style={{
+            textAlign: "center",
+            padding: "2rem 1rem",
+            fontFamily: "'Playfair Display', Georgia, serif",
+            maxWidth: "min(360px, 100%)",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "3.2rem",
+              lineHeight: 1,
+              marginBottom: "0.65rem",
+              filter: "grayscale(0.15)",
+            }}
+            aria-hidden
+          >
+            ☹
+          </div>
+          <div
+            style={{
+              fontSize: "1.15rem",
+              fontWeight: 700,
+              color: "#5c4a32",
+              marginBottom: "0.35rem",
+            }}
+          >
+            Three strikes — the grid has opinions.
+          </div>
+          <div
+            style={{
+              fontFamily: "'IM Fell English', Georgia, serif",
+              fontStyle: "italic",
+              color: "#888",
+              fontSize: "0.9rem",
+              lineHeight: 1.5,
+            }}
+          >
+            You may disagree with the solution, but the solution does not care.
+            Start fresh when you&apos;re ready.
+          </div>
+        </div>
+
+        {onNewPuzzle && (
+          <div
+            style={{
+              display: "flex",
+              gap: "0.5rem",
+              flexWrap: "wrap",
+              justifyContent: "center",
+            }}
+          >
+            {(["easy", "medium", "hard"] as Difficulty[]).map((d) => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => onNewPuzzle(d)}
+                style={{
+                  padding: "0.45rem 1.1rem",
+                  border: "2px solid #1a1a1a",
+                  background: d === puzzle.difficulty ? "#1a1a1a" : "#faf8f3",
+                  color: d === puzzle.difficulty ? "#faf8f3" : "#1a1a1a",
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: "0.78rem",
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  cursor: "pointer",
+                }}
+              >
+                New {d}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
   }
 
   // ── Completed banner ─────────────────────────────────────────────────────────
@@ -633,6 +839,9 @@ export default function SudokuCard({
         <span style={titleStyle}>Sudoku</span>
         <span style={metaStyle}>
           <span>{difficultyLabel}</span>
+          <span style={{ fontVariantNumeric: "tabular-nums", color: "#a67c52" }}>
+            Mistakes {state.mistakes}/{MAX_MISTAKES}
+          </span>
           {state.startedAt && (
             <span style={{ fontVariantNumeric: "tabular-nums" }}>
               {formatTime(state.elapsedSecs)}
@@ -650,6 +859,11 @@ export default function SudokuCard({
           row.map((val, c) => (
             <div
               key={`${r}-${c}`}
+              className={
+                cellInFlashUnits(r, c, lineFlashUnits)
+                  ? "sudoku-unit-celebrate"
+                  : undefined
+              }
               style={cellStyle(r, c)}
               onClick={() => dispatch({ type: "SELECT", row: r, col: c })}
               aria-label={
@@ -695,21 +909,38 @@ export default function SudokuCard({
         >
           Notes
         </button>
-        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
-          <button
-            key={num}
-            type="button"
-            style={padBtnStyle(num)}
-            onClick={() =>
-              dispatch({ type: "INPUT", num, asNote: notesMode })
-            }
-            aria-label={
-              notesMode ? `Toggle note ${num}` : `Enter ${num}`
-            }
-          >
-            {num}
-          </button>
-        ))}
+        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => {
+          const noteAddBlocked =
+            notesMode &&
+            state.selected !== null &&
+            isSudokuNoteAddBlocked(
+              state.values,
+              state.notes,
+              state.selected[0],
+              state.selected[1],
+              num
+            );
+          return (
+            <button
+              key={num}
+              type="button"
+              disabled={Boolean(noteAddBlocked)}
+              style={padBtnStyle(num, { noteAddBlocked: Boolean(noteAddBlocked) })}
+              onClick={() =>
+                dispatch({ type: "INPUT", num, asNote: notesMode })
+              }
+              aria-label={
+                notesMode
+                  ? noteAddBlocked
+                    ? `${num} already in row, column, or box`
+                    : `Toggle note ${num}`
+                  : `Enter ${num}`
+              }
+            >
+              {num}
+            </button>
+          );
+        })}
         <button
           type="button"
           style={{
