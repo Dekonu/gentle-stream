@@ -342,6 +342,7 @@ export default function GameSlot({
       <CrosswordCard
         puzzle={puzzle as CrosswordPuzzle}
         onNewPuzzle={handleNewPuzzle}
+        metricsEnabled={metricsOn}
       />
     );
   }
@@ -351,6 +352,7 @@ export default function GameSlot({
       <ConnectionsCard
         puzzle={puzzle as ConnectionsPuzzle}
         onNewPuzzle={handleNewPuzzle}
+        metricsEnabled={metricsOn}
       />
     );
   }

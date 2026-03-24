@@ -44,11 +44,17 @@ function pickRowPreferringLowUse(
 export async function getGameFromPool(
   type: string,
   category?: string,
-  options?: { randomTieBreak?: boolean; excludeSignatures?: string[] }
+  options?: {
+    randomTieBreak?: boolean;
+    excludeSignatures?: string[];
+    /** If false, return null when all fetched rows are excluded. */
+    allowExcludedFallback?: boolean;
+  }
 ): Promise<GameRow | null> {
   const randomTieBreak = options?.randomTieBreak === true;
   const batchLimit = randomTieBreak ? 40 : 1;
   const excludeSet = new Set((options?.excludeSignatures ?? []).filter(Boolean));
+  const allowExcludedFallback = options?.allowExcludedFallback !== false;
 
   function signatureForRow(row: GameRow): string | null {
     const payload = row.payload as { uniquenessSignature?: unknown; puzzleId?: unknown } | null;
@@ -70,7 +76,8 @@ export async function getGameFromPool(
       return !sig || !excludeSet.has(sig);
     });
     if (filtered.length > 0) return pickRowPreferringLowUse(filtered, randomTieBreak);
-    // Pool exhausted for this user/session history — gracefully fall back.
+    if (!allowExcludedFallback) return null;
+    // Pool exhausted for this user/session history — optional graceful fallback.
     return pickRowPreferringLowUse(rows, randomTieBreak);
   }
 

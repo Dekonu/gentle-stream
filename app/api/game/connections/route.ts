@@ -45,6 +45,7 @@ export async function GET(request: NextRequest) {
     const row = await getGameFromPool("connections", category, {
       randomTieBreak: true,
       excludeSignatures,
+      allowExcludedFallback: false,
     });
     if (row) {
       void markGameUsed(row.id);
@@ -61,8 +62,13 @@ export async function GET(request: NextRequest) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
-      { error: "Pool empty and ANTHROPIC_API_KEY not set" },
-      { status: 503 }
+      {
+        error:
+          excludeSignatures.length > 0
+            ? "No unseen Connections puzzle available right now."
+            : "Pool empty and ANTHROPIC_API_KEY not set",
+      },
+      { status: excludeSignatures.length > 0 ? 409 : 503 }
     );
   }
 
@@ -81,9 +87,13 @@ export async function GET(request: NextRequest) {
     const row = await getGameFromPool("connections", category, {
       randomTieBreak: true,
       excludeSignatures,
+      allowExcludedFallback: false,
     });
     if (!row) {
-      return NextResponse.json({ error: "Generation succeeded but fetch failed" }, { status: 500 });
+      return NextResponse.json(
+        { error: "Generation succeeded but no unseen puzzle was available yet" },
+        { status: 409 }
+      );
     }
 
     void markGameUsed(row.id);

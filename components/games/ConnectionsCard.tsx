@@ -38,6 +38,7 @@ type Action =
 interface ConnectionsCardProps {
   puzzle: ConnectionsPuzzle;
   onNewPuzzle?: (difficulty: Difficulty) => void;
+  metricsEnabled?: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -158,9 +159,14 @@ function reducer(
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function ConnectionsCard({ puzzle, onNewPuzzle }: ConnectionsCardProps) {
+export default function ConnectionsCard({
+  puzzle,
+  onNewPuzzle,
+  metricsEnabled = true,
+}: ConnectionsCardProps) {
   const puzzleRef = useRef(puzzle);
   puzzleRef.current = puzzle;
+  const completionLogged = useRef(false);
 
   const [state, dispatchRaw] = useReducer(
     (s: GameState, a: Action) => reducer(s, a, puzzleRef.current),
@@ -176,7 +182,34 @@ export default function ConnectionsCard({ puzzle, onNewPuzzle }: ConnectionsCard
   // Show post-solve reveal panel
   const [showReveal, setShowReveal] = useState(false);
 
-  useEffect(() => { dispatch({ type: "RESET" }); }, [puzzle, dispatch]);
+  useEffect(() => {
+    dispatch({ type: "RESET" });
+    completionLogged.current = false;
+  }, [puzzle, dispatch]);
+
+  useEffect(() => {
+    if (!metricsEnabled || !state.completed || completionLogged.current) return;
+    completionLogged.current = true;
+    const p = puzzleRef.current;
+    const solvedCount = state.solved.length;
+    const won = solvedCount === 4;
+    void fetch("/api/user/game-completion", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gameType: "connections",
+        difficulty: p.difficulty,
+        durationSeconds: state.elapsedSecs,
+        metadata: {
+          category: p.category,
+          solvedCount,
+          won,
+          mistakesUsed: 4 - state.mistakesLeft,
+        },
+      }),
+    });
+  }, [metricsEnabled, state.completed, state.elapsedSecs, state.solved.length, state.mistakesLeft]);
 
   useEffect(() => {
     if (state.completed || !state.startedAt) return;
