@@ -18,6 +18,7 @@ on:
 
 permissions:
   contents: read
+  deployments: write
 
 jobs:
   quality:
