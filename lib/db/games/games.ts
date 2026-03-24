@@ -7,6 +7,7 @@
 
 import { db } from "../client";
 import type { CrosswordPuzzle } from "@/lib/games/crosswordIngestAgent";
+import type { ConnectionsPuzzle } from "@/lib/games/connectionsIngestAgent";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -122,4 +123,15 @@ export async function getCrosswordFromPool(
   if (!row) return null;
   void markGameUsed(row.id); // fire-and-forget
   return row.payload as CrosswordPuzzle;
+}
+
+export async function getConnectionsFromPool(
+  category?: string
+): Promise<ConnectionsPuzzle | null> {
+  const row = await getGameFromPool("connections", category, {
+    randomTieBreak: true,
+  });
+  if (!row) return null;
+  void markGameUsed(row.id);
+  return row.payload as ConnectionsPuzzle;
 }

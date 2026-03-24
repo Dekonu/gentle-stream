@@ -6,12 +6,14 @@ import KillerSudokuCard from "./KillerSudokuCard";
 import WordSearchCard, { type WordSearchCloudSlice } from "./WordSearchCard";
 import NonogramCard from "./NonogramCard";
 import CrosswordCard from "./CrosswordCard";
+import ConnectionsCard from "./ConnectionsCard";
 import type {
   SudokuPuzzle,
   KillerSudokuPuzzle,
   WordSearchPuzzle,
   NonogramPuzzle,
   CrosswordPuzzle,
+  ConnectionsPuzzle,
   Difficulty,
   GameType,
 } from "@/lib/games/types";
@@ -27,7 +29,7 @@ interface GameSlotProps {
   persistCloud?: boolean;
 }
 
-type AnyPuzzle = SudokuPuzzle | KillerSudokuPuzzle | WordSearchPuzzle | NonogramPuzzle | CrosswordPuzzle;
+type AnyPuzzle = SudokuPuzzle | KillerSudokuPuzzle | WordSearchPuzzle | NonogramPuzzle | CrosswordPuzzle | ConnectionsPuzzle;
 
 function puzzleEndpoint(
   gameType: GameType,
@@ -41,6 +43,7 @@ function puzzleEndpoint(
   if (gameType === "word_search")    return `/api/game/word-search?${params}`;
   if (gameType === "nonogram")       return `/api/game/nonogram?${params}`;
   if (gameType === "crossword")      return `/api/game/crossword?${params}`;
+  if (gameType === "connections")    return `/api/game/connections?${params}`;
   return `/api/game/sudoku?${params}`;
 }
 
@@ -50,6 +53,7 @@ const LOADING_MESSAGES: Partial<Record<GameType, string>> = {
   word_search:   "Hiding the words…",
   nonogram:      "Composing the picture…",
   crossword:     "Setting the clues…",
+  connections:   "Building the groups…",
 };
 
 export default function GameSlot({
@@ -283,6 +287,15 @@ export default function GameSlot({
     return (
       <CrosswordCard
         puzzle={puzzle as CrosswordPuzzle}
+        onNewPuzzle={handleNewPuzzle}
+      />
+    );
+  }
+
+  if (gameType === "connections") {
+    return (
+      <ConnectionsCard
+        puzzle={puzzle as ConnectionsPuzzle}
         onNewPuzzle={handleNewPuzzle}
       />
     );

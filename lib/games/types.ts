@@ -115,6 +115,24 @@ export interface CrosswordPuzzle {
   difficulty: "medium";
 }
 
+// ─── Connections ──────────────────────────────────────────────────────────────
+
+export type ConnectionsTier = 1 | 2 | 3 | 4; // 1=yellow, 2=green, 3=blue, 4=purple
+
+export interface ConnectionsGroup {
+  label: string;
+  words: string[];              // exactly 4 words, ALL CAPS
+  tier: ConnectionsTier;
+  explanation: string;
+}
+
+export interface ConnectionsPuzzle {
+  groups: ConnectionsGroup[];   // exactly 4 groups
+  category: string;
+  difficulty: "medium";
+  redHerrings: { word: string; couldAlsoBelong: string }[];
+}
+
 // ─── Feed slot ────────────────────────────────────────────────────────────────
 
 export type FeedSectionType = "articles" | "game";
