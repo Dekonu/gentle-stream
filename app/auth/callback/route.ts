@@ -25,10 +25,9 @@ function isPkceVerifierMissing(error: unknown): boolean {
  */
 async function redirectToLoginCleared(
   request: NextRequest,
-  origin: string,
   query: Record<string, string>
 ): Promise<NextResponse> {
-  const url = new URL(`${origin}/login`);
+  const url = new URL("/login", request.url);
   for (const [k, v] of Object.entries(query)) {
     url.searchParams.set(k, v);
   }
@@ -47,16 +46,18 @@ async function redirectToLoginCleared(
  * verifier from storage, so the exchange always fails and the old session remains.
  */
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = request.nextUrl;
+  const { searchParams } = request.nextUrl;
   const code = searchParams.get("code");
   const next = safeNextPath(searchParams.get("next"));
 
   if (!code) {
-    return redirectToLoginCleared(request, origin, { error: "auth" });
+    return redirectToLoginCleared(request, { error: "auth" });
   }
 
-  const redirectUrl = `${origin}${next}`;
-  const response = NextResponse.redirect(redirectUrl);
+  // Resolve against this request’s URL so host/port match the tab (never trust
+  // reconstructed origins from X-Forwarded-* when those point at production).
+  const destination = new URL(next, request.url);
+  const response = NextResponse.redirect(destination);
   const supabase = createSupabaseResponseClient(request, response);
 
   const { error } = await supabase.auth.exchangeCodeForSession(code);
@@ -65,7 +66,7 @@ export async function GET(request: NextRequest) {
     const errKey = isPkceVerifierMissing(error)
       ? "magic_link_browser"
       : "auth";
-    return redirectToLoginCleared(request, origin, { error: errKey });
+    return redirectToLoginCleared(request, { error: errKey });
   }
 
   const {
@@ -73,7 +74,7 @@ export async function GET(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return redirectToLoginCleared(request, origin, { error: "auth" });
+    return redirectToLoginCleared(request, { error: "auth" });
   }
 
   const nowSec = Math.floor(Date.now() / 1000);

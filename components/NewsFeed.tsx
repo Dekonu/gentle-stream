@@ -11,7 +11,7 @@ import ErrorBanner from "./ErrorBanner";
 import type { Category } from "@/lib/constants";
 import type { Article, FeedSection, ArticleFeedSection, GameFeedSection } from "@/lib/types";
 import { DEFAULT_GAME_RATIO } from "@/lib/constants";
-import { randomFeedGamePick } from "@/lib/games/feedPick";
+import { feedGamePickForOrdinal } from "@/lib/games/feedPick";
 
 // Strip any <cite ...>...</cite> or bare </cite> tags that leak from Claude
 function stripCiteTags(text: string): string {
@@ -61,9 +61,12 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
   // Use refs for values that loadMore closes over — avoids stale closure bugs
   const loadingRef = useRef(false);
   const sectionCountRef = useRef(0);
+  /** Counts game sections only — drives fair rotation in feedGamePickForOrdinal. */
+  const gameSlotOrdinalRef = useRef(0);
   const activeCategoryRef = useRef<Category | null>(null);
   const userIdRef = useRef<string>("anonymous");
-  const isFirstLoad = useRef(true);
+  /** Bumps on each [userId] bootstrap so Strict Mode / fast remounts only run one initial loadMore. */
+  const feedBootstrapGenRef = useRef(0);
   const gameRatioRef = useRef(DEFAULT_GAME_RATIO);
   // Track the last article category so game slots can use a matching word bank
   const lastArticleCategoryRef = useRef<string | undefined>(undefined);
@@ -71,44 +74,6 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
   // Sentinel ref — plain IntersectionObserver (no library dependency on stale state)
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
-
-  useEffect(() => {
-    userIdRef.current = userId;
-
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/user/preferences", {
-          credentials: "include",
-        });
-        if (res.ok) {
-          const profile = await res.json();
-          if (cancelled) return;
-          if (
-            typeof profile.gameRatio === "number" &&
-            !Number.isNaN(profile.gameRatio)
-          ) {
-            const r = Math.min(1, Math.max(0, profile.gameRatio));
-            gameRatioRef.current = r;
-            localStorage.setItem("gentle_stream_game_ratio", String(r));
-          }
-          return;
-        }
-      } catch {
-        /* offline or unauthenticated preview */
-      }
-      if (cancelled) return;
-      const storedRatio = localStorage.getItem("gentle_stream_game_ratio");
-      if (storedRatio !== null) {
-        const ratio = parseFloat(storedRatio);
-        if (!isNaN(ratio)) gameRatioRef.current = ratio;
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [userId]);
 
   const loadMore = useCallback(async (overrideCategory?: Category | null) => {
     if (loadingRef.current) return;
@@ -126,7 +91,9 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
 
     // ── Decide: game slot or article section? ────────────────────────────────
     if (shouldBeGame(currentIndex, gameRatioRef.current)) {
-      const { gameType, difficulty } = randomFeedGamePick();
+      const { gameType, difficulty } = feedGamePickForOrdinal(
+        gameSlotOrdinalRef.current++
+      );
       const gameSection: GameFeedSection = {
         sectionType: "game",
         gameType,
@@ -228,13 +195,61 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
     }
   }, []); // stable — reads everything from refs
 
-  // Initial load
+  // Resolve game ratio from server (or localStorage), then load — avoids first sections using DEFAULT_GAME_RATIO.
   useEffect(() => {
-    if (isFirstLoad.current) {
-      isFirstLoad.current = false;
-      loadMore();
-    }
-  }, [loadMore]);
+    userIdRef.current = userId;
+
+    const gen = ++feedBootstrapGenRef.current;
+    let cancelled = false;
+
+    (async () => {
+      let usedServerRatio = false;
+
+      try {
+        const res = await fetch("/api/user/preferences", {
+          credentials: "include",
+        });
+        if (cancelled || gen !== feedBootstrapGenRef.current) return;
+
+        if (res.ok) {
+          const profile = await res.json();
+          if (cancelled || gen !== feedBootstrapGenRef.current) return;
+
+          if (
+            typeof profile.gameRatio === "number" &&
+            !Number.isNaN(profile.gameRatio)
+          ) {
+            const r = Math.min(1, Math.max(0, profile.gameRatio));
+            gameRatioRef.current = r;
+            localStorage.setItem("gentle_stream_game_ratio", String(r));
+            usedServerRatio = true;
+          }
+        }
+      } catch {
+        /* offline or unauthenticated preview */
+      }
+
+      if (cancelled || gen !== feedBootstrapGenRef.current) return;
+
+      if (!usedServerRatio) {
+        const storedRatio = localStorage.getItem("gentle_stream_game_ratio");
+        if (storedRatio !== null) {
+          const ratio = parseFloat(storedRatio);
+          if (!Number.isNaN(ratio)) {
+            gameRatioRef.current = Math.min(1, Math.max(0, ratio));
+          }
+        }
+      }
+
+      if (cancelled || gen !== feedBootstrapGenRef.current) return;
+
+      void loadMore();
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, loadMore]);
 
   // Keep activeCategoryRef in sync
   useEffect(() => {
@@ -275,6 +290,7 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
       localStorage.setItem("gentle_stream_game_ratio", String(ratio));
       setSections([]);
       sectionCountRef.current = 0;
+      gameSlotOrdinalRef.current = 0;
       loadingRef.current = false;
       setError(null);
       void loadMore();

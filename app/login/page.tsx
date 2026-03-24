@@ -1,4 +1,8 @@
 import { LoginForm } from "@/components/auth/LoginForm";
+import { getAuthRedirectBaseFromRequest } from "@/lib/auth/redirect-origin";
+
+/** Per-request auth redirect base (Host header); avoid static caching with a wrong origin. */
+export const dynamic = "force-dynamic";
 
 function firstParam(
   v: string | string[] | undefined
@@ -17,9 +21,11 @@ export default function LoginPage({
   searchParams: Record<string, string | string[] | undefined>;
 }) {
   const errorParam = firstParam(searchParams.error) ?? null;
+  const authRedirectBase = getAuthRedirectBaseFromRequest();
 
   return (
     <LoginForm
+      authRedirectBaseFromServer={authRedirectBase}
       initialNext={firstParam(searchParams.next) ?? null}
       initialAuthError={errorParam}
       initialSessionExpired={
