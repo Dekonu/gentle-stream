@@ -48,6 +48,10 @@ jobs:
       - run: npx tsx scripts/test-article-engagement-api.ts
       - run: npx tsx scripts/test-recommendation-ranking.ts
       - run: npx tsx scripts/test-engagement-guardrails.ts
+        env:
+          # Route imports lib/db/client.ts at load time; placeholders match npm run build.
+          NEXT_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
+          SUPABASE_SERVICE_ROLE_KEY: "placeholder-service-role-key"
 
   integration:
     name: DB integration tests
