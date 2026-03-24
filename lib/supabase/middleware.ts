@@ -1,6 +1,13 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import {
+  parseSessionStart,
+  SESSION_MAX_AGE_SEC,
+  SESSION_START_COOKIE,
+  sessionStartCookieOptions,
+} from "@/lib/auth/session-policy";
+import { createSupabaseResponseClient } from "@/lib/supabase/response-client";
+import {
   rejectIfSupabaseKeyIsPlatformSecret,
   rejectIfSupabaseKeyIsServiceRole,
 } from "./validate-anon-key";
@@ -21,6 +28,12 @@ export async function updateSession(request: NextRequest) {
   const { pathname } = request.nextUrl;
   // Scheduled jobs use CRON_SECRET, not browser cookies
   if (pathname.startsWith("/api/cron")) {
+    return NextResponse.next({ request });
+  }
+
+  // Let the Route Handler own cookie exchange; refreshing here can keep the prior session
+  // while /auth/callback sets the new one, so the wrong user can appear signed in.
+  if (pathname === "/auth/callback" || pathname.startsWith("/auth/callback/")) {
     return NextResponse.next({ request });
   }
 
@@ -56,7 +69,46 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  const nowSec = Math.floor(Date.now() / 1000);
+  const startRaw = request.cookies.get(SESSION_START_COOKIE)?.value;
+  const started = parseSessionStart(startRaw);
+
+  if (user) {
+    if (
+      started !== null &&
+      nowSec - started > SESSION_MAX_AGE_SEC
+    ) {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = "/login";
+      redirectUrl.searchParams.set("reason", "session_expired");
+      if (!isPublicPath(pathname)) {
+        redirectUrl.searchParams.set("next", pathname);
+      }
+      const r = NextResponse.redirect(redirectUrl);
+      const signOutClient = createSupabaseResponseClient(request, r);
+      await signOutClient.auth.signOut();
+      r.cookies.delete(SESSION_START_COOKIE);
+      return r;
+    }
+
+    if (startRaw && started === null) {
+      supabaseResponse.cookies.delete(SESSION_START_COOKIE);
+    }
+    const hasValidStart =
+      started !== null && nowSec - started <= SESSION_MAX_AGE_SEC;
+    if (!hasValidStart) {
+      supabaseResponse.cookies.set(
+        SESSION_START_COOKIE,
+        String(nowSec),
+        sessionStartCookieOptions()
+      );
+    }
+  }
+
   if (!user) {
+    if (request.cookies.get(SESSION_START_COOKIE)) {
+      supabaseResponse.cookies.delete(SESSION_START_COOKIE);
+    }
     if (pathname.startsWith("/api")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -67,10 +119,16 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(redirectUrl);
     }
   } else if (pathname === "/login") {
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/";
-    redirectUrl.searchParams.delete("next");
-    return NextResponse.redirect(redirectUrl);
+    const sp = request.nextUrl.searchParams;
+    if (sp.has("error") || sp.has("reason")) {
+      // Stay on login so we can show auth errors / session expiry; otherwise logged-in
+      // users get bounced home and never see e.g. a failed magic-link handoff message.
+    } else {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = "/";
+      redirectUrl.searchParams.delete("next");
+      return NextResponse.redirect(redirectUrl);
+    }
   }
 
   return supabaseResponse;
