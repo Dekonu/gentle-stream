@@ -8,6 +8,11 @@ import {
   nearestPresetValue,
 } from "@/lib/user/feed-settings";
 import { isCreator } from "@/lib/user/creator";
+import {
+  isUsernameChangeLocked,
+  usernameChangeUnlocksAtIso,
+  USERNAME_CHANGE_COOLDOWN_HOURS,
+} from "@/lib/user/username-policy";
 import type { UserProfile, UserGameStats } from "@/lib/types";
 import { AvatarInput } from "./AvatarInput";
 
@@ -160,20 +165,41 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
     setSaveError(null);
     setSaving(true);
     try {
+      const usernameLocked =
+        profile != null &&
+        isUsernameChangeLocked(profile.username, profile.usernameSetAt);
+
       const res = await fetch("/api/user/profile", {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           displayName: profileForm.displayName.trim() || null,
-          username: profileForm.username.trim().toLowerCase() || null,
+          ...(usernameLocked
+            ? {}
+            : { username: profileForm.username.trim().toLowerCase() || null }),
         }),
       });
-      const data = await res.json().catch(() => ({}));
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        unlockAt?: string;
+      };
       if (!res.ok) {
-        setSaveError(
-          typeof data.error === "string" ? data.error : "Could not save profile."
-        );
+        if (
+          res.status === 429 &&
+          typeof data.unlockAt === "string" &&
+          typeof data.error === "string"
+        ) {
+          const when = new Date(data.unlockAt).toLocaleString(undefined, {
+            dateStyle: "medium",
+            timeStyle: "short",
+          });
+          setSaveError(`${data.error} (${when})`);
+        } else {
+          setSaveError(
+            typeof data.error === "string" ? data.error : "Could not save profile."
+          );
+        }
         return;
       }
       setProfile(data as UserProfile);
@@ -197,6 +223,10 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
     profile?.username && profile?.displayName
       ? `@${profile.username}`
       : userEmail;
+
+  const usernameLocked =
+    profile != null &&
+    isUsernameChangeLocked(profile.username, profile.usernameSetAt);
 
   return (
     <div
@@ -434,6 +464,37 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
             >
               Username
             </label>
+            {usernameLocked && profile?.usernameSetAt ? (
+              <p
+                style={{
+                  fontSize: "0.65rem",
+                  color: "#777",
+                  margin: "0 0 0.35rem",
+                  lineHeight: 1.35,
+                  fontFamily: "'IM Fell English', Georgia, serif",
+                }}
+              >
+                You can change this again after{" "}
+                {new Date(
+                  usernameChangeUnlocksAtIso(profile.usernameSetAt)
+                ).toLocaleString(undefined, {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                })}{" "}
+                ({USERNAME_CHANGE_COOLDOWN_HOURS}-hour lock after each change).
+              </p>
+            ) : (
+              <p
+                style={{
+                  fontSize: "0.62rem",
+                  color: "#aaa",
+                  margin: "0 0 0.35rem",
+                  lineHeight: 1.35,
+                }}
+              >
+                Unique on the site; lowercase letters, numbers, underscore (3–30).
+              </p>
+            )}
             <input
               value={profileForm.username}
               onChange={(e) =>
@@ -443,6 +504,13 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
                 }))
               }
               placeholder="letters_numbers_underscore"
+              disabled={usernameLocked}
+              aria-readonly={usernameLocked}
+              title={
+                usernameLocked
+                  ? "Username is locked for 24 hours after the last change"
+                  : undefined
+              }
               style={{
                 width: "100%",
                 boxSizing: "border-box",
@@ -450,6 +518,8 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
                 padding: "0.35rem 0.45rem",
                 border: "1px solid #ccc",
                 fontSize: "0.85rem",
+                background: usernameLocked ? "#f0ede6" : undefined,
+                cursor: usernameLocked ? "not-allowed" : undefined,
               }}
             />
             {profile && (
