@@ -1,5 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import {
+  rejectIfSupabaseKeyIsPlatformSecret,
+  rejectIfSupabaseKeyIsServiceRole,
+} from "./validate-anon-key";
 
 const PUBLIC_PREFIXES = ["/login", "/auth/callback", "/auth/auth-code-error"];
 
@@ -25,6 +29,9 @@ export async function updateSession(request: NextRequest) {
   if (!url || !key) {
     return NextResponse.next({ request });
   }
+
+  rejectIfSupabaseKeyIsPlatformSecret(key);
+  rejectIfSupabaseKeyIsServiceRole(key);
 
   let supabaseResponse = NextResponse.next({ request });
 
