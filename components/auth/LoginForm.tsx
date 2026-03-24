@@ -32,27 +32,31 @@ export function LoginForm({
 
   const [email, setEmail] = useState("");
   const [emailSent, setEmailSent] = useState(false);
-  const [oauthBusy, setOauthBusy] = useState(false);
+  const [oauthProvider, setOauthProvider] = useState<
+    null | "google" | "facebook"
+  >(null);
   const [emailBusy, setEmailBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   const origin =
     typeof window !== "undefined" ? window.location.origin : "";
 
-  async function signInWithGoogle() {
+  async function signInWithOAuthProvider(
+    provider: "google" | "facebook"
+  ) {
     setMessage(null);
-    setOauthBusy(true);
+    setOauthProvider(provider);
     try {
       const supabase = createClient();
       await supabase.auth.signOut({ scope: "local" });
       const redirectTo = `${origin}/auth/callback?next=${encodeURIComponent(nextPath)}`;
       const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
+        provider,
         options: { redirectTo },
       });
       if (error) setMessage(error.message);
     } finally {
-      setOauthBusy(false);
+      setOauthProvider(null);
     }
   }
 
@@ -175,8 +179,8 @@ export function LoginForm({
 
         <button
           type="button"
-          disabled={oauthBusy}
-          onClick={() => void signInWithGoogle()}
+          disabled={oauthProvider !== null}
+          onClick={() => void signInWithOAuthProvider("google")}
           style={{
             width: "100%",
             padding: "0.65rem 1rem",
@@ -186,11 +190,33 @@ export function LoginForm({
             fontFamily: "'Playfair Display', Georgia, serif",
             fontSize: "0.8rem",
             letterSpacing: "0.04em",
-            cursor: oauthBusy ? "wait" : "pointer",
+            cursor: oauthProvider !== null ? "wait" : "pointer",
+            marginBottom: "0.65rem",
+          }}
+        >
+          {oauthProvider === "google" ? "Redirecting…" : "Continue with Google"}
+        </button>
+
+        <button
+          type="button"
+          disabled={oauthProvider !== null}
+          onClick={() => void signInWithOAuthProvider("facebook")}
+          style={{
+            width: "100%",
+            padding: "0.65rem 1rem",
+            border: "1px solid #1a1a1a",
+            background: "#fff",
+            color: "#1a1a1a",
+            fontFamily: "'Playfair Display', Georgia, serif",
+            fontSize: "0.8rem",
+            letterSpacing: "0.04em",
+            cursor: oauthProvider !== null ? "wait" : "pointer",
             marginBottom: "1.25rem",
           }}
         >
-          {oauthBusy ? "Redirecting…" : "Continue with Google"}
+          {oauthProvider === "facebook"
+            ? "Redirecting…"
+            : "Continue with Facebook"}
         </button>
 
         <div

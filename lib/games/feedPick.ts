@@ -29,6 +29,7 @@ const GAME_POOL: GameType[] = [
   "nonogram",
   "killer_sudoku",
   "nonogram",
+  "crossword",
 ];
 
 const DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];
