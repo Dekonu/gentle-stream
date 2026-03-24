@@ -85,11 +85,11 @@ async function testBeforeAfterAffinityOrdering() {
   assert(before.articles.length > 0, "Baseline feed returns at least one article");
   const beforeTopCategory = before.articles[0]?.category ?? "";
 
-  // Strong engagement toward science
-  const sciIds = before.articles
-    .filter((a) => a.category === "Science & Discovery")
-    .map((a) => a.id);
-  const targetId = sciIds[0] ?? insertedIds[0];
+  // Prefer our seeded Science fixture so affinity is tied to known rows; fallback to feed.
+  const targetId =
+    insertedIds[0] ??
+    before.articles.find((a) => a.category === "Science & Discovery")?.id ??
+    "";
   if (!targetId) {
     assert(false, "No science article available for engagement seed");
     return;
@@ -122,9 +122,12 @@ async function testBeforeAfterAffinityOrdering() {
   });
   assert(!refreshErr, "Refreshed user affinity", refreshErr?.message);
 
+  // Same sectionIndex as baseline: mixed-feed category order is derived from sectionIndex;
+  // changing it swaps the primary category and replaces the whole candidate pool, so
+  // before/after top-{category} would compare unrelated slices (flaky in CI).
   const after = await getRankedFeed({
     userId: testUserId,
-    sectionIndex: 1,
+    sectionIndex: 0,
     pageSize: 3,
     markSeen: false,
   });
