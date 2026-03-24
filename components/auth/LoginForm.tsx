@@ -231,7 +231,9 @@ export function LoginForm({
               textAlign: "center",
             }}
           >
-            Sign-in did not complete. Please try again.
+            {authError === "sso_email_conflict"
+              ? "This email already belongs to an existing account. For security, social sign-in is blocked for that email. Sign in with email link instead."
+              : "Sign-in did not complete. Please try again."}
           </p>
         )}
 
