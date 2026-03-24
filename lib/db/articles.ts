@@ -128,7 +128,13 @@ async function findUrlConflict(
  * filter URLs.
  */
 async function fetchExistingFingerprints(fps: string[]): Promise<Set<string>> {
-  const unique = [...new Set(fps)];
+  const unique: string[] = [];
+  const seen = new Set<string>();
+  for (const fp of fps) {
+    if (seen.has(fp)) continue;
+    seen.add(fp);
+    unique.push(fp);
+  }
   if (unique.length === 0) return new Set();
 
   const rows = await Promise.all(
