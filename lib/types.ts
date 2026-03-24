@@ -69,7 +69,14 @@ export interface SavedArticleListItem {
   isRead: boolean;
 }
 
-/** Aggregated gaming metrics for profile */
+/** Per difficulty bucket within a game type (easy / medium / hard). */
+export interface GameDifficultyBucketStats {
+  completions: number;
+  totalSeconds: number;
+  avgSeconds: number;
+}
+
+/** Aggregated gaming metrics for profile + full stats page */
 export interface UserGameStats {
   totalCompletions: number;
   totalSecondsPlayed: number;
@@ -77,6 +84,8 @@ export interface UserGameStats {
     string,
     { completions: number; totalSeconds: number; avgSeconds: number }
   >;
+  /** gameType → difficulty → counts (difficulty stored on each completion row) */
+  byTypeAndDifficulty: Record<string, Record<string, GameDifficultyBucketStats>>;
   recent: Array<{
     gameType: string;
     difficulty: string;

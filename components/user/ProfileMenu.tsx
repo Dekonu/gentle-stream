@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SignOutButton } from "@/components/auth/SignOutButton";
 import {
@@ -433,39 +434,44 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
             >
               Game stats
             </h3>
+            <Link
+              href="/me/game-stats"
+              onClick={() => setOpen(false)}
+              style={{
+                display: "inline-block",
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "0.8rem",
+                fontWeight: 700,
+                color: "#1a472a",
+                textDecoration: "underline",
+                textUnderlineOffset: "3px",
+              }}
+            >
+              View game statistics
+            </Link>
             {stats && stats.totalCompletions > 0 ? (
-              <div
+              <p
                 style={{
                   fontFamily: "'IM Fell English', Georgia, serif",
-                  fontSize: "0.78rem",
-                  color: "#444",
-                  lineHeight: 1.5,
+                  fontSize: "0.72rem",
+                  color: "#888",
+                  margin: "0.35rem 0 0",
+                  lineHeight: 1.4,
                 }}
               >
-                <div>
-                  <strong>{stats.totalCompletions}</strong> puzzles finished
-                </div>
-                <div>
-                  Total time:{" "}
-                  <strong>{formatDuration(stats.totalSecondsPlayed)}</strong>
-                </div>
-                {Object.entries(stats.byType).map(([type, b]) => (
-                  <div key={type} style={{ marginTop: "0.25rem" }}>
-                    {type.replace(/_/g, " ")}: {b.completions} · avg{" "}
-                    {formatDuration(b.avgSeconds)}
-                  </div>
-                ))}
-              </div>
+                <strong>{stats.totalCompletions}</strong> puzzles ·{" "}
+                {formatDuration(stats.totalSecondsPlayed)} total
+              </p>
             ) : (
               <p
                 style={{
                   fontStyle: "italic",
                   color: "#aaa",
-                  fontSize: "0.78rem",
-                  margin: 0,
+                  fontSize: "0.72rem",
+                  margin: "0.35rem 0 0",
                 }}
               >
-                Complete a puzzle to see stats here.
+                Finish a puzzle to start your history (by difficulty).
               </p>
             )}
           </section>
