@@ -1,6 +1,14 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type { CSSProperties } from "react";
 import { CATEGORY_COLORS } from "@/lib/constants";
 import GameSlot from "./games/GameSlot";
 import { embeddedGamePickFromSeed } from "@/lib/games/feedPick";
@@ -20,6 +28,100 @@ const HERO_IMG_H = 450;
 
 /** When the hero cell is taller than editorial content (grid stretch), offer Sudoku in the slack. */
 const HERO_VERTICAL_GAP_PX = 280;
+
+function BookmarkOutlineIcon() {
+  return (
+    <svg
+      width={15}
+      height={18}
+      viewBox="0 0 15 18"
+      aria-hidden
+      style={{ flexShrink: 0 }}
+    >
+      <path
+        d="M2.25 1.25h10.5v14.15L7.5 11.35 2.25 15.4V1.25z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.2}
+        strokeLinejoin="miter"
+      />
+    </svg>
+  );
+}
+
+function BookmarkFilledIcon() {
+  return (
+    <svg
+      width={15}
+      height={18}
+      viewBox="0 0 15 18"
+      aria-hidden
+      style={{ flexShrink: 0 }}
+    >
+      <path
+        d="M2.25 1.25h10.5v14.15L7.5 11.35 2.25 15.4V1.25z"
+        fill="currentColor"
+        stroke="currentColor"
+        strokeWidth={0.85}
+        strokeLinejoin="miter"
+      />
+    </svg>
+  );
+}
+
+function HeartOutlineIcon() {
+  return (
+    <svg
+      width={18}
+      height={18}
+      viewBox="0 0 24 24"
+      aria-hidden
+      style={{ flexShrink: 0 }}
+    >
+      <path
+        d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.2}
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function HeartFilledIcon() {
+  return (
+    <svg
+      width={18}
+      height={18}
+      viewBox="0 0 24 24"
+      aria-hidden
+      style={{ flexShrink: 0 }}
+    >
+      <path
+        d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
+        fill="currentColor"
+        stroke="currentColor"
+        strokeWidth={1}
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+const iconActionStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: "2.35rem",
+  minHeight: "2.35rem",
+  padding: "0.25rem",
+  background: "transparent",
+  border: "none",
+  color: "#1a1a1a",
+  cursor: "pointer",
+  borderRadius: "4px",
+};
 
 interface ArticleCardProps {
   article: Article;
@@ -48,6 +150,14 @@ export default function ArticleCard({
   const [showHeroGapGame, setShowHeroGapGame] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [saveRowId, setSaveRowId] = useState<string | null>(null);
+  const [saveStatusLoaded, setSaveStatusLoaded] = useState(false);
+  const [liked, setLiked] = useState(false);
+  const [likeBusy, setLikeBusy] = useState(false);
+  /** 401 → hide like (not signed in). */
+  const [showLikeButton, setShowLikeButton] = useState(false);
+  const [likeStatusLoaded, setLikeStatusLoaded] = useState(false);
 
   /** Try AI image from prompt first, then deterministic stock photo, then text fallback */
   const [imageStage, setImageStage] = useState<
@@ -128,12 +238,147 @@ export default function ArticleCard({
     sourceUrls[0] ? toClickableSourceUrl(sourceUrls[0]) : "";
 
   const canSave = "id" in article && Boolean(article.id);
+  const articleId = "id" in article && article.id ? article.id : null;
 
-  const saveArticle = useCallback(async () => {
-    if (!canSave || !("id" in article) || !article.id) return;
+  useEffect(() => {
+    if (!articleId) {
+      setShowLikeButton(false);
+      setLikeStatusLoaded(false);
+      setLiked(false);
+      return;
+    }
+    let cancelled = false;
+    setLikeStatusLoaded(false);
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/user/article-likes?articleId=${encodeURIComponent(articleId)}`,
+          { credentials: "include" }
+        );
+        if (cancelled) return;
+        if (res.status === 401) {
+          setShowLikeButton(false);
+          setLiked(false);
+          return;
+        }
+        setShowLikeButton(true);
+        if (res.ok) {
+          const j = (await res.json()) as { liked?: boolean };
+          setLiked(Boolean(j.liked));
+        } else {
+          setLiked(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setShowLikeButton(true);
+          setLiked(false);
+        }
+      } finally {
+        if (!cancelled) setLikeStatusLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [articleId]);
+
+  useEffect(() => {
+    if (!articleId) {
+      setSaved(false);
+      setSaveRowId(null);
+      setSaveStatusLoaded(false);
+      return;
+    }
+    let cancelled = false;
+    setSaveStatusLoaded(false);
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/user/article-saves?articleId=${encodeURIComponent(articleId)}`,
+          { credentials: "include" }
+        );
+        if (cancelled) return;
+        if (res.ok) {
+          const j = (await res.json()) as {
+            saved?: boolean;
+            saveId?: string | null;
+          };
+          setSaved(Boolean(j.saved));
+          setSaveRowId(typeof j.saveId === "string" ? j.saveId : null);
+        } else {
+          setSaved(false);
+          setSaveRowId(null);
+        }
+      } catch {
+        if (!cancelled) {
+          setSaved(false);
+          setSaveRowId(null);
+        }
+      } finally {
+        if (!cancelled) setSaveStatusLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [articleId]);
+
+  const toggleLike = useCallback(async () => {
+    if (!articleId || likeBusy || !likeStatusLoaded) return;
+    setLikeBusy(true);
+    try {
+      if (liked) {
+        const res = await fetch(
+          `/api/user/article-likes?articleId=${encodeURIComponent(articleId)}`,
+          { method: "DELETE", credentials: "include" }
+        );
+        if (res.ok) setLiked(false);
+      } else {
+        const res = await fetch("/api/user/article-likes", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            articleId,
+            articleTitle: article.headline,
+          }),
+        });
+        if (res.ok) setLiked(true);
+      }
+    } finally {
+      setLikeBusy(false);
+    }
+  }, [articleId, article.headline, liked, likeBusy, likeStatusLoaded]);
+
+  const toggleSave = useCallback(async () => {
+    if (!canSave || !("id" in article) || !article.id || saveBusy || !saveStatusLoaded) {
+      return;
+    }
     setSaveBusy(true);
     setSaveMsg(null);
     try {
+      if (saved && saveRowId) {
+        const res = await fetch(
+          `/api/user/article-saves?id=${encodeURIComponent(saveRowId)}`,
+          { method: "DELETE", credentials: "include" }
+        );
+        if (!res.ok) {
+          const j = (await res.json().catch(() => ({}))) as {
+            error?: string;
+            hint?: string;
+          };
+          const err =
+            typeof j.error === "string" ? j.error : "Could not remove save.";
+          const hint = typeof j.hint === "string" ? j.hint : "";
+          setSaveMsg(hint ? `${err} — ${hint}` : err);
+          return;
+        }
+        setSaved(false);
+        setSaveRowId(null);
+        setSaveMsg("Removed from your library.");
+        return;
+      }
+
       const primaryUrl = sourceUrls[0]
         ? toClickableSourceUrl(sourceUrls[0])
         : "";
@@ -152,17 +397,33 @@ export default function ArticleCard({
         }),
       });
       if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        setSaveMsg(typeof j.error === "string" ? j.error : "Could not save.");
+        const j = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          hint?: string;
+        };
+        const err = typeof j.error === "string" ? j.error : "Could not save.";
+        const hint = typeof j.hint === "string" ? j.hint : "";
+        setSaveMsg(hint ? `${err} — ${hint}` : err);
         return;
       }
+      const body = (await res.json().catch(() => ({}))) as { id?: string };
+      if (typeof body.id === "string") setSaveRowId(body.id);
+      setSaved(true);
       setSaveMsg("Saved to your library.");
     } catch {
-      setSaveMsg("Could not save.");
+      setSaveMsg("Could not update library.");
     } finally {
       setSaveBusy(false);
     }
-  }, [article, canSave, sourceUrls]);
+  }, [
+    article,
+    canSave,
+    saved,
+    saveRowId,
+    saveBusy,
+    saveStatusLoaded,
+    sourceUrls,
+  ]);
 
   const headlineStyle = {
     fontFamily: "'Playfair Display', Georgia, serif",
@@ -280,35 +541,61 @@ export default function ArticleCard({
           style={{
             display: "flex",
             alignItems: "center",
-            gap: "0.5rem",
+            gap: "0.1rem",
             flexWrap: "wrap",
           }}
         >
           <button
             type="button"
-            disabled={saveBusy}
-            onClick={() => void saveArticle()}
+            disabled={saveBusy || !saveStatusLoaded}
+            onClick={() => void toggleSave()}
+            aria-label={
+              saveBusy
+                ? "Updating library"
+                : saved
+                  ? "Remove from library"
+                  : "Save to library"
+            }
+            aria-pressed={saved}
             style={{
-              background: "transparent",
-              border: "1px solid #bbb",
-              color: "#555",
-              fontFamily: "'Playfair Display', Georgia, serif",
-              fontSize: "0.62rem",
-              letterSpacing: "0.06em",
-              textTransform: "uppercase",
-              padding: "0.25rem 0.55rem",
-              cursor: saveBusy ? "wait" : "pointer",
+              ...iconActionStyle,
+              opacity: saveBusy || !saveStatusLoaded ? 0.5 : 1,
+              cursor:
+                saveBusy || !saveStatusLoaded ? "wait" : "pointer",
+              color: "#1a1a1a",
             }}
           >
-            {saveBusy ? "Saving…" : "Save story"}
+            {saved ? <BookmarkFilledIcon /> : <BookmarkOutlineIcon />}
           </button>
+          {showLikeButton && (
+            <button
+              type="button"
+              disabled={likeBusy || !likeStatusLoaded}
+              onClick={() => void toggleLike()}
+              aria-label={liked ? "Remove like" : "Like article"}
+              aria-pressed={liked}
+              style={{
+                ...iconActionStyle,
+                opacity: likeBusy || !likeStatusLoaded ? 0.45 : 1,
+                cursor:
+                  likeBusy || !likeStatusLoaded ? "wait" : "pointer",
+                color: liked ? "#8b2942" : "#1a1a1a",
+              }}
+            >
+              {liked ? <HeartFilledIcon /> : <HeartOutlineIcon />}
+            </button>
+          )}
           {saveMsg && (
             <span
               style={{
                 fontFamily: "'IM Fell English', Georgia, serif",
                 fontStyle: "italic",
                 fontSize: "0.68rem",
-                color: saveMsg.startsWith("Saved") ? "#1a472a" : "#8b4513",
+                color:
+                  saveMsg.startsWith("Saved") ||
+                  saveMsg.startsWith("Removed")
+                    ? "#1a472a"
+                    : "#8b4513",
               }}
             >
               {saveMsg}

@@ -573,7 +573,7 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
                   margin: 0,
                 }}
               >
-                Use &ldquo;Save story&rdquo; on an article card.
+                Use <strong>Save</strong> on an article card.
               </p>
             ) : (
               <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
