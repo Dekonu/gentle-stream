@@ -22,8 +22,6 @@ type NoteMask = number;
 interface MistakeUndoSnapshot {
   values: number[][];
   notes: NoteMask[][];
-  mistakes: number;
-  failed: boolean;
 }
 
 interface BoardState {
@@ -209,6 +207,11 @@ function isSudokuNoteAddBlocked(
   return digitAppearsInSudokuPeers(values, r, c, num);
 }
 
+/** Identity for cloud bootstrap — avoids re-RESET when only object references change. */
+function stableSudokuPuzzleKey(p: SudokuPuzzle): string {
+  return p.solution.map((row) => row.join("")).join("");
+}
+
 function makeInitialState(puzzle: SudokuPuzzle): BoardState {
   return {
     values: puzzle.given.map((row) => [...row]),
@@ -270,8 +273,6 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
             {
               values: cloneValues(state.values),
               notes: cloneNotes(state.notes),
-              mistakes: state.mistakes,
-              failed: state.failed,
             },
           ]
         : state.mistakeUndoStack;
@@ -309,8 +310,8 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
       const mistakeUndoStack = state.mistakeUndoStack.slice(0, -1);
       const values = cloneValues(snap.values);
       const notes = cloneNotes(snap.notes);
-      const mistakes = snap.mistakes;
-      const failed = snap.failed;
+      const mistakes = Math.max(0, state.mistakes - 1);
+      const failed = mistakes >= MAX_MISTAKES;
       const errors = computeErrors(values, puzzle.given);
       const completed = isComplete(values, puzzle.solution);
       return {
@@ -412,6 +413,10 @@ export default function SudokuCard({
   stateRef.current = state;
   const completionLogged = useRef(false);
   const lineCompleteRef = useRef<Set<string>>(new Set());
+  const sudokuBootRef = useRef<{ puzzleKey: string; cloudHydrated: boolean }>({
+    puzzleKey: "",
+    cloudHydrated: false,
+  });
 
   // Timer
   useEffect(() => {
@@ -420,12 +425,34 @@ export default function SudokuCard({
     return () => clearInterval(id);
   }, [state.completed, state.failed, state.startedAt, dispatch]);
 
-  // Reset + optional hydrate when puzzle / saved slice changes
+  // Reset + optional hydrate: keyed by puzzle solution so a new object reference alone
+  // does not wipe progress / undo; cloud applies once per puzzle or when slice arrives late.
   useEffect(() => {
-    lineCompleteRef.current = new Set();
-    setLineFlashUnits([]);
-    dispatch({ type: "RESET", puzzle });
-    if (initialCloudSlice) {
+    const pk = stableSudokuPuzzleKey(puzzle);
+    const boot = sudokuBootRef.current;
+
+    if (boot.puzzleKey !== pk) {
+      boot.puzzleKey = pk;
+      boot.cloudHydrated = false;
+      lineCompleteRef.current = new Set();
+      setLineFlashUnits([]);
+      dispatch({ type: "RESET", puzzle });
+      if (initialCloudSlice) {
+        dispatch({
+          type: "HYDRATE",
+          values: initialCloudSlice.values,
+          notes: initialCloudSlice.notes,
+          elapsedSecs: initialCloudSlice.elapsedSecs,
+          startedAt: initialCloudSlice.startedAt,
+          mistakes: initialCloudSlice.mistakes,
+        });
+        boot.cloudHydrated = true;
+      }
+      completionLogged.current = false;
+      return;
+    }
+
+    if (initialCloudSlice && !boot.cloudHydrated) {
       dispatch({
         type: "HYDRATE",
         values: initialCloudSlice.values,
@@ -434,8 +461,8 @@ export default function SudokuCard({
         startedAt: initialCloudSlice.startedAt,
         mistakes: initialCloudSlice.mistakes,
       });
+      boot.cloudHydrated = true;
     }
-    completionLogged.current = false;
   }, [puzzle, initialCloudSlice, dispatch]);
 
   // Row / column / box just completed — celebration flash

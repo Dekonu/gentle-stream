@@ -17,8 +17,6 @@ const MAX_MISTAKES = 3;
 
 interface KillerMistakeUndoSnapshot {
   values: number[][];
-  mistakes: number;
-  failed: boolean;
 }
 
 interface BoardState {
@@ -128,6 +126,10 @@ function formatTime(secs: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+function stableKillerPuzzleKey(p: KillerSudokuPuzzle): string {
+  return p.solution.map((row) => row.join("")).join("");
+}
+
 function cloneValues(values: number[][]): number[][] {
   return values.map((row) => [...row]);
 }
@@ -178,11 +180,7 @@ function reducer(
       const mistakeUndoStack = !correct
         ? [
             ...state.mistakeUndoStack,
-            {
-              values: cloneValues(state.values),
-              mistakes: state.mistakes,
-              failed: state.failed,
-            },
+            { values: cloneValues(state.values) },
           ]
         : state.mistakeUndoStack;
 
@@ -279,6 +277,7 @@ export default function KillerSudokuCard({
   const dispatch = dispatchRaw;
   const [lineFlashUnits, setLineFlashUnits] = useState<string[]>([]);
   const lineCompleteRef = useRef<Set<string>>(new Set());
+  const lastKillerPuzzleKeyRef = useRef<string>("");
 
   const cageMap = useMemo(() => buildCageMap(puzzle.cages), [puzzle.cages]);
 
@@ -377,8 +376,11 @@ export default function KillerSudokuCard({
     return () => window.removeEventListener("keydown", handleKey);
   }, [state.selected, state.failed, state.mistakeUndoStack.length, dispatch]);
 
-  // Reset on new puzzle
+  // Reset only when the puzzle solution identity changes (stable vs object reference).
   useEffect(() => {
+    const pk = stableKillerPuzzleKey(puzzle);
+    if (lastKillerPuzzleKeyRef.current === pk) return;
+    lastKillerPuzzleKeyRef.current = pk;
     lineCompleteRef.current = new Set();
     setLineFlashUnits([]);
     dispatch({ type: "RESET" });
