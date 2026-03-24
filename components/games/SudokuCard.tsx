@@ -255,6 +255,10 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
         return { ...state, notes };
       }
 
+      // No-op if the cell already shows this digit — avoids double-counting mistakes
+      // and stacking duplicate undo snapshots (e.g. double-tapping the same wrong number).
+      if (state.values[r][c] === action.num) return state;
+
       const correct = action.num === puzzle.solution[r][c];
       let mistakes = state.mistakes;
       if (!correct) mistakes = Math.min(MAX_MISTAKES, mistakes + 1);

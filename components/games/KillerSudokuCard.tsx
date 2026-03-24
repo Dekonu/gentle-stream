@@ -168,6 +168,8 @@ function reducer(
     case "INPUT": {
       if (!state.selected || state.completed || state.failed) return state;
       const [r, c] = state.selected;
+      if (state.values[r][c] === action.num) return state;
+
       const correct = action.num === puzzle.solution[r][c];
       let mistakes = state.mistakes;
       if (!correct) mistakes = Math.min(MAX_MISTAKES, mistakes + 1);

@@ -1,12 +1,12 @@
 /**
- * lib/db/games.ts
+ * lib/db/games/games.ts
  *
  * Database helpers for the games table.
  * Used by game ingest agents (write) and game API routes (read).
  */
 
-import { db } from "./client";
-import type { CrosswordPuzzle } from "../games/crosswordIngestAgent";
+import { db } from "../client";
+import type { CrosswordPuzzle } from "@/lib/games/crosswordIngestAgent";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -64,24 +64,24 @@ export async function getGameFromPool(
  * Non-fatal on failure — we'd rather serve a duplicate than error.
  */
 export async function markGameUsed(id: string): Promise<void> {
-  await db
+  const rpcAttempt = await db
     .from("games")
     .update({ used_count: db.rpc("increment_used_count_game", { p_id: id }) as never })
+    .eq("id", id);
+
+  if (!rpcAttempt.error) return;
+
+  const { data } = await db
+    .from("games")
+    .select("used_count")
     .eq("id", id)
-    .catch(async () => {
-      // Fallback: read-increment-write
-      const { data } = await db
-        .from("games")
-        .select("used_count")
-        .eq("id", id)
-        .single();
-      if (data) {
-        await db
-          .from("games")
-          .update({ used_count: (data.used_count ?? 0) + 1 })
-          .eq("id", id);
-      }
-    });
+    .single();
+  if (data) {
+    await db
+      .from("games")
+      .update({ used_count: (data.used_count ?? 0) + 1 })
+      .eq("id", id);
+  }
 }
 
 /** Count available puzzles of a given type in the pool */
