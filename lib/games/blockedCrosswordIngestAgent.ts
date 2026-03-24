@@ -49,7 +49,7 @@ async function generateOneBlockedCrossword(
     clue: clueForSlot(
       slot,
       clues,
-      (s) => `Definition of ${s.answer.toLowerCase()}`
+      (s) => `Definition needed (${s.length} letters)`
     ),
   }));
 

@@ -24,7 +24,12 @@ const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 type SlotWithClue = CrosswordSlot & { clue: string };
 
 function mechanicalClue(slot: CrosswordSlot): string {
-  return `${slot.answer.toLowerCase()} (${slot.length} letters)`;
+  return `Definition needed (${slot.length} letters)`;
+}
+
+function clueLeaksAnswer(slot: CrosswordSlot, clue: string): boolean {
+  const answer = slot.answer.toLowerCase();
+  return clue.toLowerCase().includes(answer);
 }
 
 function slotsWithClues(
@@ -48,7 +53,12 @@ function normalizePoolPayload(puzzle: {
     ...puzzle,
     slots: puzzle.slots.map((s) => ({
       ...s,
-      clue: typeof s.clue === "string" && s.clue.trim() ? s.clue : mechanicalClue(s),
+      clue:
+        typeof s.clue === "string" &&
+        s.clue.trim() &&
+        !clueLeaksAnswer(s, s.clue)
+          ? s.clue
+          : mechanicalClue(s),
     })),
     fromPool: true,
   };
