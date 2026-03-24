@@ -2,10 +2,51 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db/client";
 import { getSessionUserId } from "@/lib/api/sessionUser";
 
-export async function GET() {
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function saveErrorPayload(message: string): { error: string; hint?: string } {
+  const m = message.toLowerCase();
+  if (
+    m.includes("article_saves") ||
+    m.includes("schema cache") ||
+    m.includes("does not exist")
+  ) {
+    return {
+      error: message,
+      hint: "Create the table: run lib/db/migrations/010_article_saves_and_likes.sql in the Supabase SQL Editor, then wait a few seconds.",
+    };
+  }
+  return { error: message };
+}
+
+export async function GET(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const articleId = request.nextUrl.searchParams.get("articleId");
+  if (articleId !== null && articleId !== "") {
+    if (!UUID_RE.test(articleId)) {
+      return NextResponse.json({ error: "Invalid articleId" }, { status: 400 });
+    }
+
+    const { data, error } = await db
+      .from("article_saves")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("article_id", articleId)
+      .maybeSingle();
+
+    if (error) {
+      return NextResponse.json(saveErrorPayload(error.message), { status: 500 });
+    }
+
+    return NextResponse.json({
+      saved: Boolean(data),
+      saveId: (data?.id as string | undefined) ?? null,
+    });
   }
 
   const { data, error } = await db
@@ -16,7 +57,7 @@ export async function GET() {
     .limit(100);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json(saveErrorPayload(error.message), { status: 500 });
   }
 
   const items = (data ?? []).map((r) => ({
@@ -75,7 +116,7 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json(saveErrorPayload(error.message), { status: 500 });
   }
 
   return NextResponse.json({ ok: true, id: data?.id });
@@ -99,7 +140,7 @@ export async function DELETE(request: NextRequest) {
     .eq("id", id);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json(saveErrorPayload(error.message), { status: 500 });
   }
 
   return NextResponse.json({ ok: true });

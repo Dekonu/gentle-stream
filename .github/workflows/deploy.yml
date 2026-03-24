@@ -1,0 +1,105 @@
+# deploy.yml
+#
+# On push to main: runs CI once (reusable workflow), then deploys to Vercel and
+# smoke-tests the live URL.
+#
+# Setup required (one-time):
+#   1. Install Vercel CLI: npm i -g vercel
+#   2. Link project: vercel link
+#   3. Get your token: vercel token create ci-deploy
+#   4. Add to GitHub secrets:
+#        VERCEL_TOKEN         — from step 3
+#        VERCEL_ORG_ID        — from .vercel/project.json after linking
+#        VERCEL_PROJECT_ID    — from .vercel/project.json after linking
+#        ANTHROPIC_API_KEY    — your Anthropic key
+#        NEXT_PUBLIC_SUPABASE_URL
+#        SUPABASE_SERVICE_ROLE_KEY
+#        NEXT_PUBLIC_SUPABASE_ANON_KEY
+#        CRON_SECRET
+
+name: deploy
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: production-deploy-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  quality:
+    uses: ./.github/workflows/ci-reusable.yml
+    secrets: inherit
+    with:
+      run-integration: true
+
+  deploy:
+    name: Deploy to Vercel
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [quality]
+    environment: Production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Pull Vercel environment
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Build project (Vercel)
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Deploy to production
+        id: deploy
+        run: |
+          DEPLOY_URL=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
+          echo "url=$DEPLOY_URL" >> $GITHUB_OUTPUT
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Smoke test — GET /api/feed
+        run: |
+          DEPLOY_URL="${{ steps.deploy.outputs.url }}"
+          echo "Testing $DEPLOY_URL/api/feed"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "$DEPLOY_URL/api/feed?userId=ci-smoke&sectionIndex=0&pageSize=1")
+          echo "HTTP status: $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "Smoke test failed — /api/feed returned $STATUS"
+            exit 1
+          fi
+          echo "Smoke test passed"
+
+      - name: Smoke test — GET /api/game/sudoku
+        run: |
+          DEPLOY_URL="${{ steps.deploy.outputs.url }}"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "$DEPLOY_URL/api/game/sudoku?difficulty=easy")
+          echo "HTTP status: $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "Smoke test failed — /api/game/sudoku returned $STATUS"
+            exit 1
+          fi
+          echo "Smoke test passed"

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SignOutButton } from "@/components/auth/SignOutButton";
 import {
@@ -9,6 +10,9 @@ import {
 import { isCreator } from "@/lib/user/creator";
 import type { UserProfile, SavedArticleListItem, UserGameStats } from "@/lib/types";
 import { AvatarInput } from "./AvatarInput";
+
+/** Max rows in the profile dropdown; full list lives at /me/saved */
+const DROPDOWN_SAVED_LIMIT = 8;
 
 interface ProfileMenuProps {
   userEmail: string;
@@ -48,7 +52,39 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
     displayName: "",
     username: "",
   });
+  /** Masthead avatar/name: false until initial GET /api/user/profile finishes */
+  const [headerLoading, setHeaderLoading] = useState(true);
+  /** After profile loads, hide shimmer once the image has painted (or failed). */
+  const [avatarPainted, setAvatarPainted] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!profile?.avatarUrl) setAvatarPainted(true);
+    else setAvatarPainted(false);
+  }, [profile?.avatarUrl]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/user/profile", { credentials: "include" });
+        if (cancelled) return;
+        if (res.ok) {
+          const data = (await res.json()) as UserProfile;
+          setProfile(data);
+          setProfileForm({
+            displayName: data.displayName ?? "",
+            username: data.username ?? "",
+          });
+        }
+      } finally {
+        if (!cancelled) setHeaderLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const loadAll = useCallback(async () => {
     setLoadError(null);
@@ -196,7 +232,8 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
         type="button"
         aria-expanded={open}
         aria-haspopup="dialog"
-        aria-label="Open profile menu"
+        aria-busy={headerLoading}
+        aria-label={headerLoading ? "Profile, loading" : "Open profile menu"}
         onClick={() => setOpen((o) => !o)}
         style={{
           display: "flex",
@@ -209,18 +246,45 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
           textAlign: "left",
         }}
       >
-        {profile?.avatarUrl ? (
-          <img
-            src={profile.avatarUrl}
-            alt=""
-            width={36}
-            height={36}
-            style={{
-              borderRadius: "50%",
-              objectFit: "cover",
-              border: "1px solid #ccc",
-            }}
+        {headerLoading ? (
+          <div
+            className="profile-header-shimmer profile-header-skeleton-avatar"
+            aria-hidden
           />
+        ) : profile?.avatarUrl ? (
+          <div
+            style={{
+              position: "relative",
+              width: 36,
+              height: 36,
+              flexShrink: 0,
+            }}
+          >
+            {!avatarPainted && (
+              <div
+                className="profile-header-shimmer profile-header-skeleton-avatar"
+                style={{ position: "absolute", inset: 0 }}
+                aria-hidden
+              />
+            )}
+            <img
+              src={profile.avatarUrl}
+              alt=""
+              width={36}
+              height={36}
+              onLoad={() => setAvatarPainted(true)}
+              onError={() => setAvatarPainted(true)}
+              style={{
+                position: "relative",
+                display: "block",
+                borderRadius: "50%",
+                objectFit: "cover",
+                border: "1px solid #ccc",
+                opacity: avatarPainted ? 1 : 0,
+                transition: "opacity 0.28s ease",
+              }}
+            />
+          </div>
         ) : (
           <div
             style={{
@@ -248,33 +312,48 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
             lineHeight: 1.2,
           }}
         >
-          <span
-            style={{
-              fontFamily: "'Playfair Display', Georgia, serif",
-              fontSize: "0.72rem",
-              fontWeight: 700,
-              color: "#1a1a1a",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              maxWidth: "min(36vw, 160px)",
-            }}
-          >
-            {label}
-          </span>
-          <span
-            style={{
-              fontFamily: "'IM Fell English', Georgia, serif",
-              fontSize: "0.62rem",
-              color: "#888",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              maxWidth: "min(36vw, 160px)",
-            }}
-          >
-            {sublabel}
-          </span>
+          {headerLoading ? (
+            <>
+              <span
+                className="profile-header-shimmer profile-header-skeleton-line profile-header-skeleton-line--primary"
+                aria-hidden
+              />
+              <span
+                className="profile-header-shimmer profile-header-skeleton-line profile-header-skeleton-line--secondary"
+                aria-hidden
+              />
+            </>
+          ) : (
+            <>
+              <span
+                style={{
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: "0.72rem",
+                  fontWeight: 700,
+                  color: "#1a1a1a",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  maxWidth: "min(36vw, 160px)",
+                }}
+              >
+                {label}
+              </span>
+              <span
+                style={{
+                  fontFamily: "'IM Fell English', Georgia, serif",
+                  fontSize: "0.62rem",
+                  color: "#888",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  maxWidth: "min(36vw, 160px)",
+                }}
+              >
+                {sublabel}
+              </span>
+            </>
+          )}
         </span>
         <span style={{ color: "#999", fontSize: "0.55rem" }} aria-hidden>
           ▾
@@ -433,105 +512,145 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
             >
               Game stats
             </h3>
+            <Link
+              href="/me/game-stats"
+              onClick={() => setOpen(false)}
+              style={{
+                display: "inline-block",
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "0.8rem",
+                fontWeight: 700,
+                color: "#1a472a",
+                textDecoration: "underline",
+                textUnderlineOffset: "3px",
+              }}
+            >
+              View game statistics
+            </Link>
             {stats && stats.totalCompletions > 0 ? (
-              <div
+              <p
                 style={{
                   fontFamily: "'IM Fell English', Georgia, serif",
-                  fontSize: "0.78rem",
-                  color: "#444",
-                  lineHeight: 1.5,
+                  fontSize: "0.72rem",
+                  color: "#888",
+                  margin: "0.35rem 0 0",
+                  lineHeight: 1.4,
                 }}
               >
-                <div>
-                  <strong>{stats.totalCompletions}</strong> puzzles finished
-                </div>
-                <div>
-                  Total time:{" "}
-                  <strong>{formatDuration(stats.totalSecondsPlayed)}</strong>
-                </div>
-                {Object.entries(stats.byType).map(([type, b]) => (
-                  <div key={type} style={{ marginTop: "0.25rem" }}>
-                    {type.replace(/_/g, " ")}: {b.completions} · avg{" "}
-                    {formatDuration(b.avgSeconds)}
-                  </div>
-                ))}
-              </div>
+                <strong>{stats.totalCompletions}</strong> puzzles ·{" "}
+                {formatDuration(stats.totalSecondsPlayed)} total
+              </p>
             ) : (
               <p
                 style={{
                   fontStyle: "italic",
                   color: "#aaa",
-                  fontSize: "0.78rem",
-                  margin: 0,
+                  fontSize: "0.72rem",
+                  margin: "0.35rem 0 0",
                 }}
               >
-                Complete a puzzle to see stats here.
+                Finish a puzzle to start your history (by difficulty).
               </p>
             )}
           </section>
 
           <section style={{ marginBottom: "1rem" }}>
-            <h3
+            <Link
+              href="/me/saved"
+              onClick={() => setOpen(false)}
               style={{
                 fontFamily: "'Playfair Display', Georgia, serif",
                 fontSize: "0.78rem",
                 margin: "0 0 0.45rem",
                 letterSpacing: "0.04em",
                 textTransform: "uppercase",
-                color: "#555",
+                color: "#1a472a",
+                textDecoration: "underline",
+                textUnderlineOffset: "3px",
+                display: "inline-block",
               }}
             >
               Saved articles
-            </h3>
+            </Link>
             {saves.length === 0 ? (
               <p
                 style={{
                   fontStyle: "italic",
                   color: "#aaa",
                   fontSize: "0.78rem",
-                  margin: 0,
+                  margin: "0.35rem 0 0",
                 }}
               >
-                Use &ldquo;Save story&rdquo; on an article card.
+                Use <strong>Save</strong> on an article card.
               </p>
             ) : (
-              <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                {saves.map((s) => (
-                  <li
-                    key={s.id}
-                    style={{
-                      borderBottom: "1px solid #e8e4dc",
-                      padding: "0.4rem 0",
-                      fontSize: "0.75rem",
-                    }}
-                  >
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: "0.35rem" }}>
-                      <a
-                        href={s.articleUrl || "#"}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ color: "#1a472a", fontWeight: 600 }}
-                      >
-                        {s.articleTitle}
-                      </a>
-                      <button
-                        type="button"
-                        onClick={() => void removeSave(s.id)}
+              <>
+                <ul style={{ listStyle: "none", margin: "0.35rem 0 0", padding: 0 }}>
+                  {saves.slice(0, DROPDOWN_SAVED_LIMIT).map((s) => (
+                    <li
+                      key={s.id}
+                      style={{
+                        borderBottom: "1px solid #e8e4dc",
+                        padding: "0.4rem 0",
+                        fontSize: "0.75rem",
+                      }}
+                    >
+                      <div
                         style={{
-                          background: "none",
-                          border: "none",
-                          color: "#999",
-                          cursor: "pointer",
-                          fontSize: "0.65rem",
-                          textTransform: "uppercase",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: "0.35rem",
+                          alignItems: "flex-start",
                         }}
                       >
-                        Remove
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+                        <Link
+                          href={`/me/read/${encodeURIComponent(s.articleId)}`}
+                          onClick={() => setOpen(false)}
+                          style={{
+                            color: "#1a472a",
+                            fontWeight: 600,
+                            textDecoration: "none",
+                            lineHeight: 1.35,
+                          }}
+                        >
+                          {s.articleTitle}
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => void removeSave(s.id)}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "#999",
+                            cursor: "pointer",
+                            fontSize: "0.65rem",
+                            textTransform: "uppercase",
+                            flexShrink: 0,
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                {saves.length > DROPDOWN_SAVED_LIMIT ? (
+                  <Link
+                    href="/me/saved"
+                    onClick={() => setOpen(false)}
+                    style={{
+                      display: "inline-block",
+                      marginTop: "0.45rem",
+                      fontFamily: "'IM Fell English', Georgia, serif",
+                      fontSize: "0.72rem",
+                      color: "#666",
+                      textDecoration: "underline",
+                    }}
+                  >
+                    View all {saves.length} saved →
+                  </Link>
+                ) : null}
+              </>
             )}
           </section>
 

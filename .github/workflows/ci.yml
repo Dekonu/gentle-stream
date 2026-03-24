@@ -1,0 +1,33 @@
+# ci.yml
+#
+# Triggers (avoids duplicate runs when a branch has an open PR: both `push` and
+# `pull_request` would fire for the same commit).
+#
+# - pull_request — all PRs; primary signal while iterating on a feature branch.
+# - push (develop only) — validates develop after a merge or a direct push; main
+#   is excluded here and validated in deploy.yml instead.
+#
+# If you push to a branch before opening a PR, CI does not run until the PR exists.
+#
+# Deliberately not covered in integration (see ci-reusable / former integration.yml):
+#   - Ingest / LLM (expensive, non-deterministic)
+#   - Supabase Storage / avatars (needs dedicated test project)
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - develop
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  quality:
+    uses: ./.github/workflows/ci-reusable.yml
+    secrets: inherit
+    with:
+      run-integration: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
