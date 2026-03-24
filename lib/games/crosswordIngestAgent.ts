@@ -10,23 +10,16 @@
  * Claude is given the answer words and category for context so clues
  * can be thematic and interesting rather than generic.
  *
- * Run via:
- *   - GET /api/cron/games   (production cron, every 2h)
- *   - npm run games:ingest  (manual dev run)
+ * Run via manual script if you need legacy word-square top-up (see package.json).
+ * Production cron uses blocked 7×7 ingest (`blockedCrosswordIngestAgent`).
  */
 
-import {
-  buildCluePromptBlock,
-  canonicalizeClueKeys,
-  clueForSlot,
-} from "./crosswordClueMerge";
+import { clueForSlot } from "./crosswordClueMerge";
+import { fetchCrosswordCluesFromAnthropic } from "./crosswordAnthropicClues";
 import { fillCrosswordGrid, type CrosswordSlot } from "./crosswordGridFiller";
-import { getWordBank } from "./crosswordWordList";
 import { db } from "../db/client";
 import type { Category } from "../constants";
 import { CATEGORIES } from "../constants";
-
-const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 
 // How many crosswords to pre-generate per category per run
 const PUZZLES_PER_CATEGORY = 2;
@@ -35,15 +28,13 @@ export const MIN_CROSSWORD_POOL = 5;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface ClueMap {
-  [answer: string]: string; // e.g. { "ATOM": "Smallest unit of matter" }
-}
-
 export interface CrosswordPuzzle {
   grid: string[][];
   slots: (CrosswordSlot & { clue: string })[];
   category: string;
   difficulty: "medium"; // crosswords are always medium difficulty
+  /** word_square (5×5) vs blocked_mini (7×7 asymmetric) */
+  variant?: "word_square" | "blocked_mini";
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -107,7 +98,7 @@ async function generateOneCrossword(
   const { grid, slots } = filled;
 
   // Step 2: get clues from Claude
-  const clues = await fetchClues(apiKey, slots, category);
+  const clues = await fetchCrosswordCluesFromAnthropic(apiKey, slots, category);
 
   // Step 3: merge clues into slots (per slot id — answer alone can repeat in word squares)
   const slotsWithClues = slots.map((slot) => ({
@@ -119,70 +110,13 @@ async function generateOneCrossword(
     ),
   }));
 
-  return { grid, slots: slotsWithClues, category, difficulty: "medium" };
-}
-
-async function fetchClues(
-  apiKey: string,
-  slots: CrosswordSlot[],
-  category: string
-): Promise<ClueMap> {
-  const wordList = buildCluePromptBlock(slots);
-
-  const prompt =
-    `You are writing clues for a newspaper crossword puzzle with a "${category}" theme.\n\n` +
-    `For each ENTRY below, write ONE short crossword clue (5–10 words).\n` +
-    `Rules:\n` +
-    `- Clues must be fair — a solver who knows the answer should recognise it immediately\n` +
-    `- Vary the style: some definitions, some wordplay, some fill-in-the-blank\n` +
-    `- Do NOT include the answer word in the clue\n` +
-    `- Theme the clue to "${category}" where natural, but don't force it\n` +
-    `- Each key is NUMBER-direction (e.g. 1-across and 1-down are different entries even if the word is the same)\n\n` +
-    `Entries:\n${wordList}\n\n` +
-    `Return ONLY JSON with keys like "1-across","1-down","2-down", etc. No preamble, no markdown:\n` +
-    `{"1-across":"clue one","1-down":"clue two",...}`;
-
-  const res = await fetch(ANTHROPIC_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1024,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-
-  if (!res.ok) {
-    throw new Error(`Claude API ${res.status}: ${await res.text()}`);
-  }
-
-  const data = await res.json();
-  const text = (data.content ?? [])
-    .filter((b: { type: string }) => b.type === "text")
-    .map((b: { text: string }) => b.text)
-    .join("");
-
-  try {
-    const start = text.indexOf("{");
-    const end = text.lastIndexOf("}");
-    if (start === -1 || end === -1) throw new Error("No JSON object found");
-    const parsed = JSON.parse(text.slice(start, end + 1)) as Record<
-      string,
-      unknown
-    >;
-    const strMap: Record<string, string> = {};
-    for (const [k, v] of Object.entries(parsed)) {
-      if (typeof v === "string") strMap[k] = v;
-    }
-    return canonicalizeClueKeys(strMap) as ClueMap;
-  } catch {
-    console.error("[CrosswordIngest] Failed to parse clues JSON:", text.slice(0, 300));
-    return {};
-  }
+  return {
+    grid,
+    slots: slotsWithClues,
+    category,
+    difficulty: "medium",
+    variant: "word_square",
+  };
 }
 
 // ─── DB storage ───────────────────────────────────────────────────────────────

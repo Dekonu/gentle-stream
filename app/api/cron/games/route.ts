@@ -1,16 +1,20 @@
 /**
  * GET /api/cron/games
  *
- * Cron job: top up the crossword puzzle pool.
+ * Cron job: top up precomputed games (blocked 7×7 crosswords + word pool).
  * Runs every 2 hours via vercel.json.
- * Only generates new puzzles if the pool is below MIN_CROSSWORD_POOL.
+ * Crosswords cap at MAX_CROSSWORDS_IN_POOL (demo limit).
  *
  * Requires x-cron-secret header matching CRON_SECRET env var.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { MIN_WORD_POOL_TOTAL, getWordPoolTotalCount } from "@/lib/db/gameWordPool";
-import { runCrosswordIngest, MIN_CROSSWORD_POOL, getCrosswordPoolSize } from "@/lib/games/crosswordIngestAgent";
+import { getCrosswordPoolSize } from "@/lib/games/crosswordIngestAgent";
+import {
+  runBlockedCrosswordIngest,
+  MAX_CROSSWORDS_IN_POOL,
+} from "@/lib/games/blockedCrosswordIngestAgent";
 import {
   runWordSearchPoolIngest,
   shouldRunWordPoolIngest,
@@ -32,9 +36,11 @@ export async function GET(request: NextRequest) {
     let crosswordsInserted = 0;
     let wordRowsInserted = 0;
 
-    if (crosswordPool < MIN_CROSSWORD_POOL) {
-      console.log("[/api/cron/games] Crossword pool below threshold — generating");
-      crosswordsInserted = await runCrosswordIngest();
+    if (crosswordPool < MAX_CROSSWORDS_IN_POOL) {
+      console.log(
+        `[/api/cron/games] Crossword pool ${crosswordPool}/${MAX_CROSSWORDS_IN_POOL} — blocked ingest`
+      );
+      crosswordsInserted = await runBlockedCrosswordIngest();
     }
 
     if (await shouldRunWordPoolIngest()) {

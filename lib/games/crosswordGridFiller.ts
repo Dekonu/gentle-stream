@@ -57,14 +57,15 @@ export function fillCrosswordGrid(category?: string): FilledGrid | null {
   }
 
   // Number slots: top-left of each slot in reading order
-  numberSlots(slots);
+  numberCrosswordSlots(slots);
 
   return { grid, slots, category };
 }
 
 // ─── Numbering ────────────────────────────────────────────────────────────────
 
-function numberSlots(slots: CrosswordSlot[]): void {
+/** Assign standard crossword numbers from unique (row,col) starts, row-major order. */
+export function numberCrosswordSlots(slots: CrosswordSlot[]): void {
   // In a fully-open 5×5 grid, every cell at (r,0) starts an across AND every
   // cell at (0,c) starts a down. The top-left corner (0,0) starts both.
   // Standard numbering: left-to-right, top-to-bottom, by starting cell.
