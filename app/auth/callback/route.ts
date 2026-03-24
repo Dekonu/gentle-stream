@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { getPublicOriginFromRequest } from "@/lib/auth/redirect-origin";
 import {
   SESSION_START_COOKIE,
   sessionStartCookieOptions,
@@ -47,7 +48,8 @@ async function redirectToLoginCleared(
  * verifier from storage, so the exchange always fails and the old session remains.
  */
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = request.nextUrl;
+  const { searchParams } = request.nextUrl;
+  const origin = getPublicOriginFromRequest(request);
   const code = searchParams.get("code");
   const next = safeNextPath(searchParams.get("next"));
 

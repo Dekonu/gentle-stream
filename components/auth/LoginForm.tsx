@@ -10,7 +10,7 @@ function safeNextPath(raw: string | null): string {
 }
 
 /**
- * Server sends the canonical OAuth return origin (see `getAuthRedirectOriginServer`).
+ * Server sends the canonical OAuth return origin (see `getAuthRedirectBaseFromRequest`).
  * Client fallbacks only if the server hint is empty (e.g. prod without SITE_URL).
  */
 function resolveAuthRedirectBase(serverHint: string): string {
@@ -54,9 +54,6 @@ export function LoginForm({
   const [oauthBusy, setOauthBusy] = useState(false);
   const [emailBusy, setEmailBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-
-  const origin =
-    typeof window !== "undefined" ? window.location.origin : "";
 
   /**
    * Do not call signOut before OAuth: signOut removes the PKCE code_verifier from

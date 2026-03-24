@@ -1,5 +1,4 @@
 /**
- * File must live under `public/`. Replace `logo.svg` with your asset (keep the name or
- * change this path to e.g. `/logo.png`).
+ * File under `public/` — served at this URL path. Change if you use another name/format.
  */
-export const APP_LOGO_SRC = "/logo.svg";
+export const APP_LOGO_SRC = "/logo.png";
