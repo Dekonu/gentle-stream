@@ -76,6 +76,7 @@ interface SudokuCardProps {
   cloudSaveEnabled?: boolean;
   /** Log finished puzzles to `/api/user/game-completion` (feed metrics). */
   metricsEnabled?: boolean;
+  puzzleSignature?: string;
 }
 
 function CellNotes({ mask }: { mask: NoteMask }) {
@@ -445,6 +446,7 @@ export default function SudokuCard({
   initialCloudSlice = null,
   cloudSaveEnabled = false,
   metricsEnabled = true,
+  puzzleSignature,
 }: SudokuCardProps) {
   const puzzleRef = useRef(puzzle);
   puzzleRef.current = puzzle;
@@ -587,7 +589,7 @@ export default function SudokuCard({
           gameType: "sudoku",
           difficulty: p.difficulty,
           durationSeconds: state.elapsedSecs,
-          metadata: { difficulty: p.difficulty },
+          metadata: { difficulty: p.difficulty, puzzleSignature },
         }),
       });
     }

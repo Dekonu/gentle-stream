@@ -40,6 +40,7 @@ interface CrosswordCardProps {
   puzzle: CrosswordPuzzle;
   onNewPuzzle?: (difficulty: Difficulty) => void;
   metricsEnabled?: boolean;
+  puzzleSignature?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -439,6 +440,7 @@ export default function CrosswordCard({
   puzzle,
   onNewPuzzle,
   metricsEnabled = true,
+  puzzleSignature,
 }: CrosswordCardProps) {
   const puzzleRef = useRef(puzzle);
   puzzleRef.current = puzzle;
@@ -475,6 +477,7 @@ export default function CrosswordCard({
           variant: p.variant ?? "unknown",
           revealedCells: state.revealed.size,
           revealAll: state.fullGridReveal,
+          puzzleSignature,
         },
       }),
     });

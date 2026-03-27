@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
           const sig = makeWordSearchSignature(
             candidate.words.map((p) => p.word)
           );
-          if (!avoid.has(sig) || i === 3) {
+          if (!avoid.has(sig)) {
             puzzle = { ...candidate, uniquenessSignature: sig };
             break;
           }
@@ -71,6 +71,12 @@ export async function GET(request: NextRequest) {
         }
 
         if (picked) {
+          if (!puzzle.uniquenessSignature || avoid.has(puzzle.uniquenessSignature)) {
+            return NextResponse.json(
+              { error: "No unseen Word Search puzzle available right now." },
+              { status: 409 }
+            );
+          }
           const placed = puzzle.words.map((p) => p.word);
           if (placed.length > 0) {
             await recordWordSearchExposure(userId, placed, category);
@@ -86,12 +92,18 @@ export async function GET(request: NextRequest) {
     const avoid = new Set<string>(excludeSignatures);
     for (let i = 0; i < 4; i++) {
       const sig = makeWordSearchSignature(puzzle.words.map((p) => p.word));
-      if (!avoid.has(sig) || i === 3) {
+      if (!avoid.has(sig)) {
         puzzle = { ...puzzle, uniquenessSignature: sig };
         break;
       }
       avoid.add(sig);
       puzzle = generateWordSearch(difficulty, category);
+    }
+    if (!puzzle.uniquenessSignature || avoid.has(puzzle.uniquenessSignature)) {
+      return NextResponse.json(
+        { error: "No unseen Word Search puzzle available right now." },
+        { status: 409 }
+      );
     }
     return NextResponse.json(puzzle);
   } catch (error: unknown) {

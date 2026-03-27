@@ -112,20 +112,39 @@ export default function GameSlot({
     useState<Difficulty>(difficulty);
   const [sudokuCloud, setSudokuCloud] = useState<SudokuCloudSlice | null>(null);
   const [wordCloud, setWordCloud] = useState<WordSearchCloudSlice | null>(null);
+  const [completedSignatures, setCompletedSignatures] = useState<string[]>([]);
+  const [hasNoUniqueAvailable, setHasNoUniqueAvailable] = useState(false);
+
+  const buildExcludeSignatures = useCallback(
+    (allowReplay: boolean): string[] => {
+      if (allowReplay) return [];
+      const recent = readRecentSignatures(gameType);
+      return Array.from(new Set([...completedSignatures, ...recent])).slice(-200);
+    },
+    [gameType, completedSignatures]
+  );
 
   const fetchPuzzleFromApi = useCallback(
-    async (diff: Difficulty) => {
+    async (diff: Difficulty, allowReplay = false) => {
       setError(null);
+      setHasNoUniqueAvailable(false);
       setSudokuCloud(null);
       setWordCloud(null);
       try {
+        const excludeSignatures = buildExcludeSignatures(allowReplay);
         const url = puzzleEndpoint(
           gameType,
           diff,
           category,
-          readRecentSignatures(gameType)
+          excludeSignatures
         );
         const res = await fetch(url);
+        if (res.status === 409 && !allowReplay) {
+          setHasNoUniqueAvailable(true);
+          setPuzzle(null);
+          setError("0 unique games available right now.");
+          return;
+        }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as PuzzleWithUniqueness;
         setPuzzle(data);
@@ -135,7 +154,7 @@ export default function GameSlot({
         setError("Could not load puzzle — try again.");
       }
     },
-    [gameType, category]
+    [gameType, category, buildExcludeSignatures]
   );
 
   useEffect(() => {
@@ -143,6 +162,21 @@ export default function GameSlot({
 
     async function bootstrap() {
       const useCloud = persistCloud && !embedded;
+      try {
+        const sigRes = await fetch(
+          `/api/user/game-completion?gameType=${gameType}`,
+          { credentials: "include" }
+        );
+        if (sigRes.ok && !cancelled) {
+          const body = (await sigRes.json()) as { signatures?: unknown };
+          const signatures = Array.isArray(body?.signatures)
+            ? body.signatures.filter((s): s is string => typeof s === "string")
+            : [];
+          setCompletedSignatures(signatures);
+        }
+      } catch {
+        // anonymous / network: continue with local recent signatures only
+      }
 
       if (useCloud && (gameType === "sudoku" || gameType === "word_search")) {
         try {
@@ -188,9 +222,16 @@ export default function GameSlot({
           gameType,
           difficulty,
           category,
-          readRecentSignatures(gameType)
+          buildExcludeSignatures(false)
         );
         const res = await fetch(url);
+        if (res.status === 409) {
+          if (!cancelled) {
+            setHasNoUniqueAvailable(true);
+            setError("0 unique games available right now.");
+          }
+          return;
+        }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as PuzzleWithUniqueness;
         if (!cancelled) {
@@ -211,13 +252,13 @@ export default function GameSlot({
     return () => {
       cancelled = true;
     };
-  }, [gameType, category, difficulty, persistCloud, embedded]);
+  }, [gameType, category, difficulty, persistCloud, embedded, buildExcludeSignatures]);
 
   const handleNewPuzzle = useCallback(
     async (diff: Difficulty) => {
       setLoading(true);
       setError(null);
-      await fetchPuzzleFromApi(diff);
+      await fetchPuzzleFromApi(diff, false);
       setLoading(false);
     },
     [fetchPuzzleFromApi]
@@ -267,23 +308,44 @@ export default function GameSlot({
         >
           {error ?? "Puzzle unavailable."}
         </p>
-        <button
-          type="button"
-          onClick={() => void fetchPuzzleFromApi(currentDifficulty)}
-          style={{
-            background: "#1a1a1a",
-            color: "#faf8f3",
-            border: "none",
-            padding: "0.4rem 1.2rem",
-            fontFamily: "'Playfair Display', Georgia, serif",
-            fontSize: "0.75rem",
-            letterSpacing: "0.06em",
-            cursor: "pointer",
-            textTransform: "uppercase",
-          }}
-        >
-          Try again
-        </button>
+        <div style={{ display: "flex", gap: "0.5rem", justifyContent: "center", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => void fetchPuzzleFromApi(currentDifficulty, false)}
+            style={{
+              background: "#1a1a1a",
+              color: "#faf8f3",
+              border: "none",
+              padding: "0.4rem 1.2rem",
+              fontFamily: "'Playfair Display', Georgia, serif",
+              fontSize: "0.75rem",
+              letterSpacing: "0.06em",
+              cursor: "pointer",
+              textTransform: "uppercase",
+            }}
+          >
+            Check again
+          </button>
+          {hasNoUniqueAvailable ? (
+            <button
+              type="button"
+              onClick={() => void fetchPuzzleFromApi(currentDifficulty, true)}
+              style={{
+                background: "transparent",
+                color: "#1a1a1a",
+                border: "1px solid #1a1a1a",
+                padding: "0.4rem 1.2rem",
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "0.75rem",
+                letterSpacing: "0.06em",
+                cursor: "pointer",
+                textTransform: "uppercase",
+              }}
+            >
+              Replay older puzzle
+            </button>
+          ) : null}
+        </div>
       </div>
     );
   }
@@ -291,6 +353,13 @@ export default function GameSlot({
   /** Always record completions for signed-in users; API returns 401 if anonymous.
    *  (Previously `!embedded` skipped hero puzzles — those never reached game stats.) */
   const metricsOn = true;
+  const puzzleSignature =
+    ("uniquenessSignature" in puzzle && typeof puzzle.uniquenessSignature === "string"
+      ? puzzle.uniquenessSignature
+      : undefined) ??
+    ("puzzleId" in puzzle && typeof puzzle.puzzleId === "string"
+      ? puzzle.puzzleId
+      : undefined);
 
   if (gameType === "sudoku") {
     return (
@@ -301,6 +370,7 @@ export default function GameSlot({
         initialCloudSlice={sudokuCloud}
         cloudSaveEnabled={cloudOn}
         metricsEnabled={metricsOn}
+        puzzleSignature={puzzleSignature}
       />
     );
   }
@@ -313,6 +383,7 @@ export default function GameSlot({
         initialCloudSlice={wordCloud}
         cloudSaveEnabled={cloudOn}
         metricsEnabled={metricsOn}
+        puzzleSignature={puzzleSignature}
       />
     );
   }
@@ -323,6 +394,7 @@ export default function GameSlot({
         puzzle={puzzle as KillerSudokuPuzzle}
         onNewPuzzle={handleNewPuzzle}
         metricsEnabled={metricsOn}
+        puzzleSignature={puzzleSignature}
       />
     );
   }
@@ -333,6 +405,7 @@ export default function GameSlot({
         puzzle={puzzle as NonogramPuzzle}
         onNewPuzzle={handleNewPuzzle}
         metricsEnabled={metricsOn}
+        puzzleSignature={puzzleSignature}
       />
     );
   }
@@ -343,6 +416,7 @@ export default function GameSlot({
         puzzle={puzzle as CrosswordPuzzle}
         onNewPuzzle={handleNewPuzzle}
         metricsEnabled={metricsOn}
+        puzzleSignature={puzzleSignature}
       />
     );
   }
@@ -353,6 +427,7 @@ export default function GameSlot({
         puzzle={puzzle as ConnectionsPuzzle}
         onNewPuzzle={handleNewPuzzle}
         metricsEnabled={metricsOn}
+        puzzleSignature={puzzleSignature}
       />
     );
   }

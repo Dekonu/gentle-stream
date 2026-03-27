@@ -7,16 +7,40 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateNonogram } from "@/lib/games/nonogramGenerator";
 import type { Difficulty } from "@/lib/games/types";
+import { makeNonogramSignature } from "@/lib/games/puzzleSignature";
 
 const VALID_DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];
+
+function parseExcludeSignatures(raw: string | null): Set<string> {
+  if (!raw) return new Set();
+  return new Set(
+    raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 200)
+  );
+}
 
 export async function GET(request: NextRequest) {
   const diff = (request.nextUrl.searchParams.get("difficulty") ?? "medium") as Difficulty;
   const difficulty = VALID_DIFFICULTIES.includes(diff) ? diff : "medium";
+  const excludeSignatures = parseExcludeSignatures(
+    request.nextUrl.searchParams.get("excludeSignatures")
+  );
 
   try {
-    const puzzle = generateNonogram(difficulty);
-    return NextResponse.json(puzzle);
+    for (let i = 0; i < 20; i++) {
+      const puzzle = generateNonogram(difficulty);
+      const uniquenessSignature = makeNonogramSignature(puzzle);
+      if (!excludeSignatures.has(uniquenessSignature)) {
+        return NextResponse.json({ ...puzzle, uniquenessSignature });
+      }
+    }
+    return NextResponse.json(
+      { error: "No unseen Nonogram puzzle available right now." },
+      { status: 409 }
+    );
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Generation failed";
     return NextResponse.json({ error: message }, { status: 500 });

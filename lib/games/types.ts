@@ -19,6 +19,7 @@ export interface SudokuPuzzle {
   solution: number[][];
   difficulty: Difficulty;
   givensCount: number;
+  uniquenessSignature?: string;
 }
 
 // ─── Killer Sudoku ────────────────────────────────────────────────────────────
@@ -42,6 +43,7 @@ export interface KillerSudokuPuzzle {
   solution: number[][];   // 9×9, fully solved
   cages: Cage[];
   difficulty: Difficulty;
+  uniquenessSignature?: string;
 }
 
 // ─── Word Search ──────────────────────────────────────────────────────────────
@@ -91,6 +93,7 @@ export interface NonogramPuzzle {
   rows: number;
   cols: number;
   difficulty: Difficulty;
+  uniquenessSignature?: string;
 }
 
 // ─── Crossword ────────────────────────────────────────────────────────────────
@@ -115,6 +118,7 @@ export interface CrosswordPuzzle {
   slots: CrosswordSlot[];
   category: string;
   difficulty: "medium";
+  uniquenessSignature?: string;
 }
 
 // ─── Connections ──────────────────────────────────────────────────────────────

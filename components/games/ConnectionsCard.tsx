@@ -39,6 +39,7 @@ interface ConnectionsCardProps {
   puzzle: ConnectionsPuzzle;
   onNewPuzzle?: (difficulty: Difficulty) => void;
   metricsEnabled?: boolean;
+  puzzleSignature?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -163,6 +164,7 @@ export default function ConnectionsCard({
   puzzle,
   onNewPuzzle,
   metricsEnabled = true,
+  puzzleSignature,
 }: ConnectionsCardProps) {
   const puzzleRef = useRef(puzzle);
   puzzleRef.current = puzzle;
@@ -206,6 +208,7 @@ export default function ConnectionsCard({
           solvedCount,
           won,
           mistakesUsed: 4 - state.mistakesLeft,
+          puzzleSignature,
         },
       }),
     });

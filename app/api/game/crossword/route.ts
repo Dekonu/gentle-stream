@@ -8,7 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { getCrosswordFromPool } from "@/lib/db/games";
+import { getGameFromPool, markGameUsed } from "@/lib/db/games";
 import {
   buildCluePromptBlock,
   canonicalizeClueKeys,
@@ -18,6 +18,8 @@ import {
   fillCrosswordGrid,
   type CrosswordSlot,
 } from "@/lib/games/crosswordGridFiller";
+import type { CrosswordPuzzle } from "@/lib/games/types";
+import { makeCrosswordSignature } from "@/lib/games/puzzleSignature";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 
@@ -49,7 +51,7 @@ function normalizePoolPayload(puzzle: {
   category: string;
   difficulty: "medium";
 }): Record<string, unknown> {
-  return {
+  const normalizedPuzzle: CrosswordPuzzle = {
     ...puzzle,
     slots: puzzle.slots.map((s) => ({
       ...s,
@@ -60,8 +62,32 @@ function normalizePoolPayload(puzzle: {
           ? s.clue
           : mechanicalClue(s),
     })),
+    uniquenessSignature: makeCrosswordSignature({
+      ...puzzle,
+      slots: puzzle.slots.map((s) => ({
+        ...s,
+        clue:
+          typeof s.clue === "string" &&
+          s.clue.trim() &&
+          !clueLeaksAnswer(s, s.clue)
+            ? s.clue
+            : mechanicalClue(s),
+      })),
+    }),
+  };
+  return {
+    ...normalizedPuzzle,
     fromPool: true,
   };
+}
+
+function parseExcludeSignatures(raw: string | null): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 200);
 }
 
 async function fetchClueMapFromClaude(
@@ -140,16 +166,31 @@ export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const category = searchParams.get("category") ?? undefined;
   const categoryLabel = category ?? "General";
+  const excludeSignatures = parseExcludeSignatures(
+    searchParams.get("excludeSignatures")
+  );
 
   try {
-    const poolPuzzle = await getCrosswordFromPool(category);
-    if (
-      poolPuzzle &&
-      Array.isArray(poolPuzzle.grid) &&
-      Array.isArray(poolPuzzle.slots) &&
-      poolPuzzle.slots.length > 0
-    ) {
-      return NextResponse.json(normalizePoolPayload(poolPuzzle));
+    const row = await getGameFromPool("crossword", category, {
+      randomTieBreak: true,
+      excludeSignatures,
+      allowExcludedFallback: false,
+    });
+    if (row) {
+      void markGameUsed(row.id);
+      const poolPuzzle = row.payload as {
+        grid: string[][];
+        slots: (CrosswordSlot & { clue?: string })[];
+        category: string;
+        difficulty: "medium";
+      };
+      if (
+        Array.isArray(poolPuzzle.grid) &&
+        Array.isArray(poolPuzzle.slots) &&
+        poolPuzzle.slots.length > 0
+      ) {
+        return NextResponse.json(normalizePoolPayload(poolPuzzle));
+      }
     }
   } catch (e) {
     console.warn("[/api/game/crossword] Pool fetch failed:", e);
@@ -185,11 +226,23 @@ export async function GET(request: NextRequest) {
 
   const hadAiClues = Object.keys(clueMap).length > 0;
 
-  return NextResponse.json({
+  const puzzle: CrosswordPuzzle = {
     grid,
     slots: slotsWithClues(slots, clueMap),
     category: categoryLabel,
     difficulty: "medium" as const,
+    uniquenessSignature: "",
+  };
+  puzzle.uniquenessSignature = makeCrosswordSignature(puzzle);
+  if (excludeSignatures.includes(puzzle.uniquenessSignature)) {
+    return NextResponse.json(
+      { error: "No unseen Crossword puzzle available right now." },
+      { status: 409 }
+    );
+  }
+
+  return NextResponse.json({
+    ...puzzle,
     fromPool: false,
     cluesFromAi: hadAiClues,
   });

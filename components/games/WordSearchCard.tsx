@@ -58,6 +58,7 @@ interface WordSearchCardProps {
   initialCloudSlice?: WordSearchCloudSlice | null;
   cloudSaveEnabled?: boolean;
   metricsEnabled?: boolean;
+  puzzleSignature?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -298,6 +299,7 @@ export default function WordSearchCard({
   initialCloudSlice = null,
   cloudSaveEnabled = false,
   metricsEnabled = true,
+  puzzleSignature,
 }: WordSearchCardProps) {
   const puzzleRef = useRef(puzzle);
   puzzleRef.current = puzzle;
@@ -377,7 +379,7 @@ export default function WordSearchCard({
           gameType: "word_search",
           difficulty: p.difficulty,
           durationSeconds: state.elapsedSecs,
-          metadata: { theme: p.theme },
+          metadata: { theme: p.theme, puzzleSignature },
         }),
       });
     }

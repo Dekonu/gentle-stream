@@ -45,6 +45,7 @@ interface KillerSudokuCardProps {
   puzzle: KillerSudokuPuzzle;
   onNewPuzzle?: (difficulty: Difficulty) => void;
   metricsEnabled?: boolean;
+  puzzleSignature?: string;
 }
 
 // ─── Cell → cage lookup ───────────────────────────────────────────────────────
@@ -275,6 +276,7 @@ export default function KillerSudokuCard({
   puzzle,
   onNewPuzzle,
   metricsEnabled = true,
+  puzzleSignature,
 }: KillerSudokuCardProps) {
   const puzzleRef = useRef(puzzle);
   puzzleRef.current = puzzle;
@@ -348,7 +350,7 @@ export default function KillerSudokuCard({
         gameType: "killer_sudoku",
         difficulty: p.difficulty,
         durationSeconds: state.elapsedSecs,
-        metadata: { difficulty: p.difficulty },
+        metadata: { difficulty: p.difficulty, puzzleSignature },
       }),
     });
   }, [metricsEnabled, state.completed, state.failed, state.elapsedSecs]);

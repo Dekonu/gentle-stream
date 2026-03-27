@@ -9,16 +9,40 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateSudoku } from "../../../../lib/games/sudokuGenerator";
 import type { Difficulty } from "../../../../lib/games/types";
+import { makeSudokuSignature } from "@/lib/games/puzzleSignature";
 
 const VALID_DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];
+
+function parseExcludeSignatures(raw: string | null): Set<string> {
+  if (!raw) return new Set();
+  return new Set(
+    raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 200)
+  );
+}
 
 export async function GET(request: NextRequest) {
   const diff = (request.nextUrl.searchParams.get("difficulty") ?? "medium") as Difficulty;
   const difficulty = VALID_DIFFICULTIES.includes(diff) ? diff : "medium";
+  const excludeSignatures = parseExcludeSignatures(
+    request.nextUrl.searchParams.get("excludeSignatures")
+  );
 
   try {
-    const puzzle = generateSudoku(difficulty);
-    return NextResponse.json(puzzle);
+    for (let i = 0; i < 20; i++) {
+      const puzzle = generateSudoku(difficulty);
+      const uniquenessSignature = makeSudokuSignature(puzzle);
+      if (!excludeSignatures.has(uniquenessSignature)) {
+        return NextResponse.json({ ...puzzle, uniquenessSignature });
+      }
+    }
+    return NextResponse.json(
+      { error: "No unseen Sudoku puzzle available right now." },
+      { status: 409 }
+    );
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Generation failed";
     return NextResponse.json({ error: message }, { status: 500 });

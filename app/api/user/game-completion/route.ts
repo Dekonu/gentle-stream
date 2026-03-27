@@ -12,6 +12,51 @@ const GAME_TYPES = new Set([
 ]);
 const DIFFS = new Set(["easy", "medium", "hard"]);
 
+export async function GET(request: NextRequest) {
+  const userId = await getSessionUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const gameType = request.nextUrl.searchParams.get("gameType");
+  if (gameType && !GAME_TYPES.has(gameType)) {
+    return NextResponse.json({ error: "Invalid gameType" }, { status: 400 });
+  }
+
+  let query = db
+    .from("game_completions")
+    .select("game_type,metadata")
+    .eq("user_id", userId)
+    .order("completed_at", { ascending: false })
+    .limit(800);
+
+  if (gameType) query = query.eq("game_type", gameType);
+
+  const { data, error } = await query;
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  const seen = new Set<string>();
+  const signatures: string[] = [];
+  for (const row of data ?? []) {
+    const metadata =
+      row && typeof row === "object"
+        ? (row as { metadata?: unknown }).metadata
+        : null;
+    if (!metadata || typeof metadata !== "object") continue;
+    const signature = (metadata as Record<string, unknown>).puzzleSignature;
+    if (typeof signature !== "string") continue;
+    const token = signature.trim();
+    if (!token || seen.has(token)) continue;
+    seen.add(token);
+    signatures.push(token);
+    if (signatures.length >= 500) break;
+  }
+
+  return NextResponse.json({ signatures });
+}
+
 export async function POST(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
