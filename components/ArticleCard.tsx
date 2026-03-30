@@ -25,6 +25,7 @@ import {
 import { CreatorBylineLink } from "@/components/articles/CreatorBylineLink";
 import { trackArticleEngagement } from "@/lib/engagement/client";
 import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
+import { ShareMenu } from "@/components/articles/ShareMenu";
 
 const HERO_IMG_W = 800;
 const HERO_IMG_H = 450;
@@ -844,7 +845,7 @@ export default function ArticleCard({
         {article.location && <span>&middot; {article.location}</span>}
       </div>
 
-      {canSave && (
+      {(canSave || articleId) && (
         <div
           style={{
             display: "flex",
@@ -853,29 +854,31 @@ export default function ArticleCard({
             flexWrap: "wrap",
           }}
         >
-          <button
-            type="button"
-            disabled={saveBusy || !saveStatusLoaded}
-            onClick={() => void toggleSave()}
-            aria-label={
-              saveBusy
-                ? "Updating library"
-                : saved
-                  ? "Remove from library"
-                  : "Save to library"
-            }
-            aria-pressed={saved}
-            style={{
-              ...iconActionStyle,
-              opacity: saveBusy || !saveStatusLoaded ? 0.5 : 1,
-              cursor:
-                saveBusy || !saveStatusLoaded ? "wait" : "pointer",
-              color: "#1a1a1a",
-            }}
-          >
-            {saved ? <BookmarkFilledIcon /> : <BookmarkOutlineIcon />}
-          </button>
-          {showLikeButton && (
+          {canSave ? (
+            <button
+              type="button"
+              disabled={saveBusy || !saveStatusLoaded}
+              onClick={() => void toggleSave()}
+              aria-label={
+                saveBusy
+                  ? "Updating library"
+                  : saved
+                    ? "Remove from library"
+                    : "Save to library"
+              }
+              aria-pressed={saved}
+              style={{
+                ...iconActionStyle,
+                opacity: saveBusy || !saveStatusLoaded ? 0.5 : 1,
+                cursor:
+                  saveBusy || !saveStatusLoaded ? "wait" : "pointer",
+                color: "#1a1a1a",
+              }}
+            >
+              {saved ? <BookmarkFilledIcon /> : <BookmarkOutlineIcon />}
+            </button>
+          ) : null}
+          {showLikeButton && canSave ? (
             <button
               type="button"
               disabled={likeBusy || !likeStatusLoaded}
@@ -892,7 +895,15 @@ export default function ArticleCard({
             >
               {liked ? <HeartFilledIcon /> : <HeartOutlineIcon />}
             </button>
-          )}
+          ) : null}
+          {articleId ? (
+            <ShareMenu
+              articleId={articleId}
+              headline={article.headline}
+              byline={article.byline}
+              body={article.body ?? ""}
+            />
+          ) : null}
           {saveMsg && (
             <span
               style={{
