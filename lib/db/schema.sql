@@ -80,7 +80,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_user_profiles_username_lower
 CREATE TABLE IF NOT EXISTS game_completions (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id           TEXT NOT NULL,
-  game_type         TEXT NOT NULL CHECK (game_type IN ('sudoku', 'word_search', 'killer_sudoku', 'nonogram')),
+  game_type         TEXT NOT NULL CHECK (game_type IN ('sudoku', 'word_search', 'killer_sudoku', 'nonogram', 'crossword', 'connections')),
   difficulty        TEXT NOT NULL CHECK (difficulty IN ('easy', 'medium', 'hard')),
   duration_seconds  INT NOT NULL CHECK (duration_seconds >= 0),
   score             DOUBLE PRECISION,
@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS game_completions (
 CREATE TABLE IF NOT EXISTS game_saves (
   id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id          TEXT NOT NULL,
-  game_type        TEXT NOT NULL CHECK (game_type IN ('sudoku', 'word_search', 'killer_sudoku', 'nonogram')),
+  game_type        TEXT NOT NULL CHECK (game_type IN ('sudoku', 'word_search', 'killer_sudoku', 'nonogram', 'crossword', 'connections')),
   difficulty       TEXT NOT NULL CHECK (difficulty IN ('easy', 'medium', 'hard')),
   elapsed_seconds  INT NOT NULL DEFAULT 0 CHECK (elapsed_seconds >= 0),
   game_state       JSONB NOT NULL DEFAULT '{}',

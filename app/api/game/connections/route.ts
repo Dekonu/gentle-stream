@@ -1,12 +1,9 @@
 /**
- * GET /api/game/connections?category=...
+ * GET /api/game/connections?daily=1
  *
- * Serves a Connections puzzle from the pre-generated pool.
- * Falls back to live generation (~12–20s, 3-4 API calls) if pool is empty.
- *
- * Unlike the algorithmic games, there is no instant live fallback here —
- * Connections requires multiple API calls. If the pool is empty the client
- * gets a loading state while generation runs. The cron keeps the pool full.
+ * Serves a Connections puzzle from the pre-generated pool (filtered by `games.flavor`
+ * from `game_flavor_defaults`, not article categories).
+ * Falls back to live generation if the pool is empty.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -15,13 +12,13 @@ import {
   getDailyConnectionsGameRow,
   markGameUsed,
 } from "@/lib/db/games";
+import { getPromptThemeForGameType } from "@/lib/db/gameFlavorDefaults";
 import {
   runConnectionsIngest,
   type ConnectionsPuzzle,
 } from "@/lib/games/connectionsIngestAgent";
 import { ensureConnectionsIdentity } from "@/lib/games/connectionsUniqueness";
 import type { Category } from "@/lib/constants";
-import { CATEGORIES } from "@/lib/constants";
 
 export const maxDuration = 60; // Vercel max for hobby plan
 
@@ -36,21 +33,17 @@ function parseExcludeSignatures(raw: string | null): string[] {
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
-  const rawCategory = searchParams.get("category") ?? undefined;
   const isDaily = searchParams.get("daily") === "1";
   const excludeSignatures = parseExcludeSignatures(
     searchParams.get("excludeSignatures")
   );
-  const category = rawCategory && CATEGORIES.includes(rawCategory as Category)
-    ? rawCategory
-    : undefined;
 
   const utcDateKey = new Date().toISOString().slice(0, 10);
 
   // ── 0. Daily puzzle (NYT-style: same for everyone on a calendar day, UTC) ─
   if (isDaily) {
     try {
-      const row = await getDailyConnectionsGameRow(utcDateKey, category);
+      const row = await getDailyConnectionsGameRow(utcDateKey);
       if (row) {
         void markGameUsed(row.id);
         const puzzle = ensureConnectionsIdentity(row.payload as ConnectionsPuzzle);
@@ -68,7 +61,7 @@ export async function GET(request: NextRequest) {
   } else {
     // ── 1. Try pool (random / exclude-aware) ─────────────────────────────────
     try {
-      const row = await getGameFromPool("connections", category, {
+      const row = await getGameFromPool("connections", undefined, {
         randomTieBreak: true,
         excludeSignatures,
         allowExcludedFallback: false,
@@ -100,8 +93,10 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const targetCategory = (category ?? "Science & Discovery") as Category;
-    const inserted = await runConnectionsIngest(targetCategory);
+    const promptTheme = (await getPromptThemeForGameType(
+      "connections"
+    )) as Category;
+    const inserted = await runConnectionsIngest(promptTheme);
 
     if (inserted === 0) {
       return NextResponse.json(
@@ -111,7 +106,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (isDaily) {
-      const row = await getDailyConnectionsGameRow(utcDateKey, category);
+      const row = await getDailyConnectionsGameRow(utcDateKey);
       if (row) {
         void markGameUsed(row.id);
         const puzzle = ensureConnectionsIdentity(row.payload as ConnectionsPuzzle);
@@ -124,8 +119,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Fetch the freshly generated puzzle
-    const row = await getGameFromPool("connections", category, {
+    const row = await getGameFromPool("connections", undefined, {
       randomTieBreak: true,
       excludeSignatures: isDaily ? [] : excludeSignatures,
       allowExcludedFallback: false,

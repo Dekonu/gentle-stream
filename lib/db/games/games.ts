@@ -3,9 +3,12 @@
  *
  * Database helpers for the games table.
  * Used by game ingest agents (write) and game API routes (read).
+ *
+ * Pool rows are filtered by `games.flavor` (see `game_flavor_defaults`), not article categories.
  */
 
 import { db } from "../client";
+import { resolveGameFlavor } from "@/lib/db/gameFlavorDefaults";
 import type { CrosswordPuzzle } from "@/lib/games/crosswordIngestAgent";
 import type { ConnectionsPuzzle } from "@/lib/games/connectionsIngestAgent";
 
@@ -15,7 +18,9 @@ interface GameRow {
   id: string;
   type: string;
   difficulty: string;
+  /** @deprecated Legacy; pool uses `flavor` */
   category: string | null;
+  flavor: string;
   payload: unknown;
   used_count: number;
   created_at: string;
@@ -35,16 +40,17 @@ function hashStringToUint32(s: string): number {
  */
 export async function getDailyConnectionsGameRow(
   utcDateKey: string,
-  category?: string
+  flavorOverride?: string | null
 ): Promise<GameRow | null> {
-  let query = db
+  const flavor = await resolveGameFlavor("connections", flavorOverride);
+
+  const query = db
     .from("games")
     .select("*")
     .eq("type", "connections")
+    .eq("flavor", flavor)
     .order("id", { ascending: true })
     .limit(400);
-
-  if (category) query = query.eq("category", category);
 
   const { data, error } = await query;
   if (error || !data?.length) return null;
@@ -60,7 +66,7 @@ function pickRowPreferringLowUse(
   rows: GameRow[],
   randomTieBreak: boolean
 ): GameRow {
-  const minUse = Math.min(...rows.map((r) => r.used_count ?? 0));
+  const minUse = Math.min(...rows.map((r) => (r.used_count ?? 0)));
   const tied = rows.filter((r) => (r.used_count ?? 0) === minUse);
   if (!randomTieBreak || tied.length <= 1) return tied[0]!;
   return tied[Math.floor(Math.random() * tied.length)]!;
@@ -68,15 +74,12 @@ function pickRowPreferringLowUse(
 
 /**
  * Fetch one unused (or least-used) puzzle of a given type from the pool.
- * Prefers puzzles that match the given category, falls back to any category.
- * Returns null if the pool is empty.
- *
- * `randomTieBreak`: when several rows share the lowest `used_count`, pick one at
- * random so the same crossword is not always served first (helps variety and load spread).
+ * Filters by `flavor` (defaults from `game_flavor_defaults`). Falls back to any row
+ * in the type if no flavor match (legacy DB rows).
  */
 export async function getGameFromPool(
   type: string,
-  category?: string,
+  flavorOverride?: string | null,
   options?: {
     randomTieBreak?: boolean;
     excludeSignatures?: string[];
@@ -88,6 +91,8 @@ export async function getGameFromPool(
   const batchLimit = randomTieBreak ? 40 : 1;
   const excludeSet = new Set((options?.excludeSignatures ?? []).filter(Boolean));
   const allowExcludedFallback = options?.allowExcludedFallback !== false;
+
+  const flavor = await resolveGameFlavor(type, flavorOverride);
 
   function signatureForRow(row: GameRow): string | null {
     const payload = row.payload as { uniquenessSignature?: unknown; puzzleId?: unknown } | null;
@@ -110,24 +115,23 @@ export async function getGameFromPool(
     });
     if (filtered.length > 0) return pickRowPreferringLowUse(filtered, randomTieBreak);
     if (!allowExcludedFallback) return null;
-    // Pool exhausted for this user/session history — optional graceful fallback.
     return pickRowPreferringLowUse(rows, randomTieBreak);
   }
 
-  // Try category match first
-  if (category) {
-    const { data: catRows } = await db
-      .from("games")
-      .select("*")
-      .eq("type", type)
-      .eq("category", category)
-      .order("used_count", { ascending: true })
-      .order("created_at", { ascending: true })
-      .limit(batchLimit);
-    if (catRows?.length) return pickFromRows(catRows as GameRow[]);
+  const { data: flavorRows } = await db
+    .from("games")
+    .select("*")
+    .eq("type", type)
+    .eq("flavor", flavor)
+    .order("used_count", { ascending: true })
+    .order("created_at", { ascending: true })
+    .limit(batchLimit);
+
+  if (flavorRows?.length) {
+    const picked = pickFromRows(flavorRows as GameRow[]);
+    if (picked) return picked;
   }
 
-  // Fall back to any category
   const { data: rows, error } = await db
     .from("games")
     .select("*")
@@ -177,21 +181,17 @@ export async function countGamePool(type: string): Promise<number> {
 
 // ─── Typed accessors ──────────────────────────────────────────────────────────
 
-export async function getCrosswordFromPool(
-  category?: string
-): Promise<CrosswordPuzzle | null> {
-  const row = await getGameFromPool("crossword", category, {
+export async function getCrosswordFromPool(): Promise<CrosswordPuzzle | null> {
+  const row = await getGameFromPool("crossword", undefined, {
     randomTieBreak: true,
   });
   if (!row) return null;
-  void markGameUsed(row.id); // fire-and-forget
+  void markGameUsed(row.id);
   return row.payload as CrosswordPuzzle;
 }
 
-export async function getConnectionsFromPool(
-  category?: string
-): Promise<ConnectionsPuzzle | null> {
-  const row = await getGameFromPool("connections", category, {
+export async function getConnectionsFromPool(): Promise<ConnectionsPuzzle | null> {
+  const row = await getGameFromPool("connections", undefined, {
     randomTieBreak: true,
   });
   if (!row) return null;

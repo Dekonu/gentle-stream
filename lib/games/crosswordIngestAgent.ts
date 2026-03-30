@@ -18,6 +18,7 @@ import {
 } from "./crosswordHeuristicClues";
 import { fillCrosswordGrid, type CrosswordSlot } from "./crosswordGridFiller";
 import { db } from "../db/client";
+import { getDefaultFlavorForGameType } from "../db/gameFlavorDefaults";
 import type { Category } from "../constants";
 import { CATEGORIES } from "../constants";
 
@@ -134,10 +135,12 @@ async function generateOneCrossword(
 // ─── DB storage ───────────────────────────────────────────────────────────────
 
 async function storePuzzle(puzzle: CrosswordPuzzle): Promise<void> {
+  const flavor = await getDefaultFlavorForGameType("crossword");
   const { error } = await db.from("games").insert({
     type: "crossword",
     difficulty: puzzle.difficulty,
-    category: puzzle.category,
+    flavor,
+    category: null,
     payload: puzzle as unknown as Record<string, unknown>,
     used_count: 0,
   });

@@ -1,5 +1,5 @@
 /**
- * GET /api/game/crossword?category=...
+ * GET /api/game/crossword
  *
  * Serves a crossword puzzle. Tries the DB pool first, then builds a grid locally
  * and attaches clues via Wiktionary/Datamuse heuristics by default, or Claude when
@@ -12,6 +12,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getGameFromPool, markGameUsed } from "@/lib/db/games";
+import { getPromptThemeForGameType } from "@/lib/db/gameFlavorDefaults";
 import {
   allCrosswordSlotsHaveRealClues,
   buildCluePromptBlock,
@@ -160,8 +161,8 @@ async function fetchClueMapFromClaude(
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
-  const category = searchParams.get("category") ?? undefined;
-  const categoryLabel = category ?? "General";
+  const themeForGeneration = await getPromptThemeForGameType("crossword");
+  const categoryLabel = themeForGeneration;
   const excludeSignatures = parseExcludeSignatures(
     searchParams.get("excludeSignatures")
   );
@@ -170,7 +171,7 @@ export async function GET(request: NextRequest) {
 
   try {
     for (let attempt = 0; attempt < MAX_POOL_ATTEMPTS; attempt++) {
-      const row = await getGameFromPool("crossword", category, {
+      const row = await getGameFromPool("crossword", undefined, {
         randomTieBreak: true,
         excludeSignatures: Array.from(skipSignatures),
         allowExcludedFallback: false,
@@ -228,10 +229,10 @@ export async function GET(request: NextRequest) {
   }
 
   console.log(
-    `[/api/game/crossword] Pool empty or no valid clues — live grid for "${category ?? "general"}"`
+    `[/api/game/crossword] Pool empty or no valid clues — live grid for "${themeForGeneration}"`
   );
 
-  const filled = fillCrosswordGrid(category);
+  const filled = fillCrosswordGrid(themeForGeneration);
   if (!filled) {
     return NextResponse.json(
       { error: "Grid generation failed" },
@@ -256,7 +257,7 @@ export async function GET(request: NextRequest) {
       );
     }
     try {
-      clueMap = await fetchClueMapFromClaude(apiKey, category, slots);
+      clueMap = await fetchClueMapFromClaude(apiKey, themeForGeneration, slots);
     } catch (e) {
       console.warn("[/api/game/crossword] Claude request error:", e);
     }
@@ -264,7 +265,7 @@ export async function GET(request: NextRequest) {
     if (!allCrosswordSlotsHaveRealClues(merged)) {
       console.warn("[/api/game/crossword] Retrying clue generation once…");
       try {
-        clueMap = await fetchClueMapFromClaude(apiKey, category, slots);
+        clueMap = await fetchClueMapFromClaude(apiKey, themeForGeneration, slots);
         merged = slotsWithClues(slots, clueMap);
       } catch (e) {
         console.warn("[/api/game/crossword] Claude retry error:", e);

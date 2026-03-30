@@ -96,7 +96,7 @@ export async function POST(request: NextRequest) {
   const score =
     typeof body.score === "number" && Number.isFinite(body.score) ? body.score : null;
 
-  const { error } = await db.from("game_completions").insert({
+  const { error: insertError } = await db.from("game_completions").insert({
     user_id: userId,
     game_type: body.gameType,
     difficulty: body.difficulty,
@@ -105,15 +105,21 @@ export async function POST(request: NextRequest) {
     metadata,
   });
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (insertError) {
+    console.error("[game-completion] insert failed:", insertError.message, insertError);
+    return NextResponse.json({ error: insertError.message }, { status: 500 });
   }
 
-  await db
+  const { error: deleteError } = await db
     .from("game_saves")
     .delete()
     .eq("user_id", userId)
     .eq("game_type", body.gameType);
+
+  if (deleteError) {
+    console.error("[game-completion] game_saves delete failed:", deleteError.message);
+    // Completion already recorded — don't fail the client
+  }
 
   return NextResponse.json({ ok: true });
 }

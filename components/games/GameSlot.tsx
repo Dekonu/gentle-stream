@@ -21,8 +21,6 @@ import type {
 interface GameSlotProps {
   gameType: GameType;
   difficulty?: Difficulty;
-  /** Article category of the surrounding feed section — used for word bank theming */
-  category?: string;
   /** Softer frame when embedded in an article card */
   embedded?: boolean;
   /** Load/save in-progress games to the signed-in user (off for hero embeds). */
@@ -92,12 +90,10 @@ function writeRecentSignature(
 function puzzleEndpoint(
   gameType: GameType,
   diff: Difficulty,
-  category?: string,
   excludeSignatures?: string[],
   connectionsDaily?: boolean
 ): string {
   const params = new URLSearchParams({ difficulty: diff });
-  if (category) params.set("category", category);
   if (gameType === "connections" && connectionsDaily) {
     params.set("daily", "1");
   } else if (excludeSignatures && excludeSignatures.length > 0) {
@@ -124,7 +120,6 @@ const LOADING_MESSAGES: Partial<Record<GameType, string>> = {
 export default function GameSlot({
   gameType,
   difficulty = "medium",
-  category,
   embedded = false,
   persistCloud = true,
   connectionsDaily = false,
@@ -163,7 +158,6 @@ export default function GameSlot({
         const url = puzzleEndpoint(
           gameType,
           diff,
-          category,
           excludeSignatures,
           connectionsDaily
         );
@@ -187,7 +181,7 @@ export default function GameSlot({
         setError("Could not load puzzle — try again.");
       }
     },
-    [gameType, category, buildExcludeSignatures, connectionsDaily]
+    [gameType, buildExcludeSignatures, connectionsDaily]
   );
 
   useEffect(() => {
@@ -300,7 +294,6 @@ export default function GameSlot({
     };
   }, [
     gameType,
-    category,
     difficulty,
     persistCloud,
     embedded,

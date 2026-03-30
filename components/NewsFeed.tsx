@@ -82,7 +82,6 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
   const feedBootstrapGenRef = useRef(0);
   const gameRatioRef = useRef(DEFAULT_GAME_RATIO);
   const feedReadyRef = useRef(false);
-  // Track the last article category so game slots can use a matching word bank
   const lastArticleCategoryRef = useRef<string | undefined>(undefined);
   // Hard de-dup across all rendered sections in this session/category view.
   const renderedArticleKeysRef = useRef<Set<string>>(new Set());
@@ -134,7 +133,6 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
         gameType,
         difficulty,
         index: currentIndex,
-        category: lastArticleCategoryRef.current,
         ...(connectionsDaily ? { connectionsDaily: true } : {}),
       };
       setSections((prev) => [...prev, gameSection]);
@@ -485,7 +483,6 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
                 key={`game-${section.index}`}
                 gameType={section.gameType}
                 difficulty={section.difficulty}
-                category={section.category}
                 connectionsDaily={section.connectionsDaily === true}
               />
             );

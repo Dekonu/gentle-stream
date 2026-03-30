@@ -1,5 +1,8 @@
 /**
- * GET /api/game/word-search?difficulty=easy|medium|hard&category=...
+ * GET /api/game/word-search?difficulty=easy|medium|hard
+ *
+ * Theme for word banks comes from `game_flavor_defaults.prompt_theme` (static; replace with
+ * engagement-driven selection later). Not tied to article feed categories.
  *
  * Signed-in: prefers words from `game_word_pool` weighted by `user_word_search_exposure`.
  * Anonymous / fallback: static banks in `wordSearchStaticBanks.ts`.
@@ -7,6 +10,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUserId } from "@/lib/api/sessionUser";
+import { getPromptThemeForGameType } from "@/lib/db/gameFlavorDefaults";
 import {
   buildWordSearchOptions,
   makeWordSearchSignature,
@@ -79,7 +83,7 @@ export async function GET(request: NextRequest) {
           }
           const placed = puzzle.words.map((p) => p.word);
           if (placed.length > 0) {
-            await recordWordSearchExposure(userId, placed, category);
+            await recordWordSearchExposure(userId, placed, promptTheme);
           }
           return NextResponse.json(puzzle);
         }
@@ -88,7 +92,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    let puzzle = generateWordSearch(difficulty, category);
+    let puzzle = generateWordSearch(difficulty, promptTheme);
     const avoid = new Set<string>(excludeSignatures);
     for (let i = 0; i < 4; i++) {
       const sig = makeWordSearchSignature(puzzle.words.map((p) => p.word));
@@ -97,7 +101,7 @@ export async function GET(request: NextRequest) {
         break;
       }
       avoid.add(sig);
-      puzzle = generateWordSearch(difficulty, category);
+      puzzle = generateWordSearch(difficulty, promptTheme);
     }
     if (!puzzle.uniquenessSignature || avoid.has(puzzle.uniquenessSignature)) {
       return NextResponse.json(

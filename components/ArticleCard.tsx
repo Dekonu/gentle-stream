@@ -930,7 +930,6 @@ export default function ArticleCard({
           <GameSlot
             gameType={embeddedGame.gameType}
             difficulty={embeddedGame.difficulty}
-            category={article.category}
             embedded
             persistCloud={false}
           />

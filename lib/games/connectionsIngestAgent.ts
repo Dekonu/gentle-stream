@@ -24,6 +24,7 @@
  */
 
 import { db } from "../db/client";
+import { getDefaultFlavorForGameType } from "../db/gameFlavorDefaults";
 import { trickinessScore } from "./connectionsWordProperties";
 import { ensureConnectionsIdentity } from "./connectionsUniqueness";
 import type { Category } from "../constants";
@@ -374,10 +375,12 @@ Return ONLY JSON:
 // ─── DB storage ───────────────────────────────────────────────────────────────
 
 async function storePuzzle(puzzle: ConnectionsPuzzle): Promise<void> {
+  const flavor = await getDefaultFlavorForGameType("connections");
   const { error } = await db.from("games").insert({
     type: "connections",
     difficulty: "medium",
-    category: puzzle.category,
+    flavor,
+    category: null,
     payload: puzzle as unknown as Record<string, unknown>,
     used_count: 0,
   });

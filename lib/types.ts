@@ -143,8 +143,6 @@ export interface GameFeedSection {
   gameType: "sudoku" | "killer_sudoku" | "word_search" | "nonogram" | "crossword" | "connections" | "cryptic" | "lateral";
   difficulty: "easy" | "medium" | "hard";
   index: number;
-  /** Article category of the preceding feed section — used for word bank theming */
-  category?: string;
   /** NYT-style daily Connections: fetch with ?daily=1, hide replay */
   connectionsDaily?: boolean;
 }
