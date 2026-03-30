@@ -21,6 +21,7 @@ const PUBLIC_PREFIXES = [
   "/terms",
   "/data-deletion",
   "/sms-consent",
+  "/sms-consent-screen",
 ];
 
 function isPublicPath(pathname: string): boolean {
