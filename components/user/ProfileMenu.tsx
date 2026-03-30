@@ -15,7 +15,8 @@ import {
   usernameChangeUnlocksAtIso,
   USERNAME_CHANGE_COOLDOWN_HOURS,
 } from "@/lib/user/username-policy";
-import type { UserProfile, UserGameStats } from "@/lib/types";
+import type { UserProfile, UserGameStats, WeatherFillerData } from "@/lib/types";
+import WeatherFillerCard from "@/components/feed/WeatherFillerCard";
 import { AvatarInput } from "./AvatarInput";
 
 interface ProfileMenuProps {
@@ -52,6 +53,7 @@ export function ProfileMenu({
 }: ProfileMenuProps) {
   const [open, setOpen] = useState(false);
   const [gameSettingsOpen, setGameSettingsOpen] = useState(false);
+  const [additionalGoodiesOpen, setAdditionalGoodiesOpen] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<UserGameStats | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -67,6 +69,9 @@ export function ProfileMenu({
   const [avatarPainted, setAvatarPainted] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [enabledGameTypes, setEnabledGameTypes] = useState<GameType[] | null>(null);
+  const [moduleLoading, setModuleLoading] = useState(false);
+  const [moduleError, setModuleError] = useState<string | null>(null);
+  const [weatherModuleData, setWeatherModuleData] = useState<WeatherFillerData | null>(null);
 
   useEffect(() => {
     if (!profile?.avatarUrl) setAvatarPainted(true);
@@ -130,6 +135,7 @@ export function ProfileMenu({
   useEffect(() => {
     if (open) return;
     setGameSettingsOpen(false);
+    setAdditionalGoodiesOpen(false);
   }, [open]);
 
   useEffect(() => {
@@ -219,6 +225,74 @@ export function ProfileMenu({
     if (next.length === 0) return; // keep at least one enabled
     setEnabledGameTypes(next);
     void saveEnabledGameTypes(next);
+  }
+
+  async function getBrowserCoordinates(): Promise<{ lat: number; lon: number } | null> {
+    try {
+      const stored = localStorage.getItem("gentle_stream_browser_geo");
+      if (stored) {
+        const parsed = JSON.parse(stored) as { lat?: unknown; lon?: unknown };
+        if (typeof parsed.lat === "number" && typeof parsed.lon === "number") {
+          return { lat: parsed.lat, lon: parsed.lon };
+        }
+      }
+    } catch {
+      /* ignore malformed cache */
+    }
+
+    if (typeof navigator === "undefined" || !navigator.geolocation) return null;
+    return await new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const coords = {
+            lat: position.coords.latitude,
+            lon: position.coords.longitude,
+          };
+          try {
+            localStorage.setItem("gentle_stream_browser_geo", JSON.stringify(coords));
+          } catch {
+            /* ignore storage issues */
+          }
+          resolve(coords);
+        },
+        () => resolve(null),
+        {
+          enableHighAccuracy: false,
+          timeout: 5_000,
+          maximumAge: 15 * 60 * 1000,
+        }
+      );
+    });
+  }
+
+  async function fetchAdditionalWeatherModule() {
+    setModuleError(null);
+    setModuleLoading(true);
+    try {
+      const params = new URLSearchParams();
+      const coords = await getBrowserCoordinates();
+      if (coords) {
+        params.set("lat", String(coords.lat));
+        params.set("lon", String(coords.lon));
+      }
+      const res = await fetch(`/api/feed/modules/weather?${params.toString()}`, {
+        cache: "no-store",
+        credentials: "include",
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        data?: WeatherFillerData;
+      };
+      if (!res.ok || !body.data) {
+        setModuleError(body.error ?? "Could not fetch weather module data.");
+        return;
+      }
+      setWeatherModuleData(body.data);
+    } catch {
+      setModuleError("Could not fetch weather module data.");
+    } finally {
+      setModuleLoading(false);
+    }
   }
 
   const displayGameTypes: Array<{ value: GameType; label: string; description: string }> = [
@@ -681,6 +755,27 @@ export function ProfileMenu({
               Game settings
             </button>
           </div>
+          <div style={{ margin: "0.2rem 0 1rem" }}>
+            <button
+              type="button"
+              onClick={() => setAdditionalGoodiesOpen(true)}
+              style={{
+                display: "inline-block",
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "0.8rem",
+                fontWeight: 700,
+                color: "#1a472a",
+                textDecoration: "underline",
+                textUnderlineOffset: "3px",
+                background: "transparent",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+              }}
+            >
+              Additional goodies
+            </button>
+          </div>
 
           <section style={{ marginBottom: "1rem" }}>
             <h3
@@ -1139,6 +1234,167 @@ export function ProfileMenu({
                 );
               })}
             </div>
+          </div>
+        </div>
+      )}
+
+      {open && additionalGoodiesOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Additional goodies"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setAdditionalGoodiesOpen(false);
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.42)",
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "1.2rem",
+          }}
+        >
+          <div
+            style={{
+              width: "min(620px, 96vw)",
+              background: "#faf8f3",
+              border: "1.5px solid #1a1a1a",
+              boxShadow: "0 18px 60px rgba(0,0,0,0.25)",
+              padding: "1rem 1rem 0.9rem",
+              maxHeight: "min(86vh, 760px)",
+              overflowY: "auto",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "0.75rem",
+                marginBottom: "0.75rem",
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    fontFamily: "'Playfair Display', Georgia, serif",
+                    fontSize: "1rem",
+                    fontWeight: 800,
+                    letterSpacing: "0.02em",
+                    color: "#1a1a1a",
+                  }}
+                >
+                  Additional goodies
+                </div>
+                <div
+                  style={{
+                    marginTop: "0.1rem",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    fontStyle: "italic",
+                    fontSize: "0.78rem",
+                    color: "#777",
+                  }}
+                >
+                  Manually summon little extras from live APIs.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAdditionalGoodiesOpen(false)}
+                style={{
+                  border: "1px solid #1a1a1a",
+                  background: "transparent",
+                  padding: "0.35rem 0.6rem",
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: "0.72rem",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  cursor: "pointer",
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+            <div style={{ display: "grid", gap: "0.6rem", marginBottom: "0.75rem" }}>
+              <button
+                type="button"
+                onClick={() => void fetchAdditionalWeatherModule()}
+                disabled={moduleLoading}
+                style={{
+                  textAlign: "left",
+                  padding: "0.55rem 0.65rem",
+                  border: "1px solid #d8d2c7",
+                  background: "#fff",
+                  cursor: moduleLoading ? "wait" : "pointer",
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: "0.75rem",
+                  fontWeight: 700,
+                }}
+              >
+                {moduleLoading ? "Fetching weather module..." : "Fetch weather module from API"}
+              </button>
+              <div
+                style={{
+                  padding: "0.45rem 0.55rem",
+                  border: "1px dashed #d6cfbf",
+                  background: "#f8f4ea",
+                  fontSize: "0.7rem",
+                  color: "#5e5547",
+                  fontFamily: "'IM Fell English', Georgia, serif",
+                }}
+              >
+                Upcoming: Marvel comic summon, NASA highlights, Spotify mood tile.
+              </div>
+            </div>
+
+            <a
+              href="/api/feed/modules/weather"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: "inline-block",
+                marginBottom: "0.7rem",
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontSize: "0.72rem",
+                color: "#1a472a",
+                textDecoration: "underline",
+                textUnderlineOffset: "2px",
+              }}
+            >
+              Open weather API endpoint directly
+            </a>
+
+            {moduleError && (
+              <p
+                style={{
+                  margin: "0.25rem 0 0.6rem",
+                  color: "#8b4513",
+                  fontSize: "0.74rem",
+                }}
+              >
+                {moduleError}
+              </p>
+            )}
+
+            {weatherModuleData ? (
+              <WeatherFillerCard data={weatherModuleData} reason="interval" />
+            ) : (
+              <p
+                style={{
+                  margin: "0.15rem 0 0",
+                  fontFamily: "'IM Fell English', Georgia, serif",
+                  fontStyle: "italic",
+                  color: "#888",
+                  fontSize: "0.75rem",
+                }}
+              >
+                Fetch weather data to preview the module.
+              </p>
+            )}
           </div>
         </div>
       )}

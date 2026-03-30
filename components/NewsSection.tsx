@@ -2,10 +2,21 @@
 
 import ArticleCard from "./ArticleCard";
 import type { Article } from "@/lib/types";
+import { chooseNewspaperLayout } from "@/lib/feed/newspaperLayout";
 
 interface NewsSectionProps {
   articles: Article[];
   sectionIndex: number;
+  layoutPlan?: {
+    templateId:
+      | "single-hero"
+      | "two-columns"
+      | "hero-left"
+      | "middle-wide"
+      | "hero-sidebar";
+    layouts: ("hero" | "wide" | "standard")[];
+    residualGapPx: number;
+  };
 }
 
 const borderStyles = {
@@ -16,11 +27,13 @@ const borderStyles = {
 export default function NewsSection({
   articles,
   sectionIndex,
+  layoutPlan,
 }: NewsSectionProps) {
   if (!articles || articles.length === 0) return null;
+  const plan = layoutPlan ?? chooseNewspaperLayout(articles, sectionIndex);
 
   // Fewer than 3: still render so infinite scroll can show partial pages
-  if (articles.length === 1) {
+  if (plan.templateId === "single-hero") {
     return (
       <div
         className="news-grid"
@@ -30,12 +43,12 @@ export default function NewsSection({
           ...borderStyles,
         }}
       >
-        <ArticleCard article={articles[0]} layout="hero" index={0} sectionIndex={sectionIndex} />
+        <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "hero"} index={0} sectionIndex={sectionIndex} />
       </div>
     );
   }
 
-  if (articles.length === 2) {
+  if (plan.templateId === "two-columns") {
     return (
       <div
         className="news-grid"
@@ -45,16 +58,13 @@ export default function NewsSection({
           ...borderStyles,
         }}
       >
-        <ArticleCard article={articles[0]} layout="standard" index={0} sectionIndex={sectionIndex} />
-        <ArticleCard article={articles[1]} layout="standard" index={1} sectionIndex={sectionIndex} />
+        <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "standard"} index={0} sectionIndex={sectionIndex} />
+        <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "standard"} index={1} sectionIndex={sectionIndex} />
       </div>
     );
   }
 
-  const layout = sectionIndex % 3;
-
-  // Layout 0: Hero left (1.6fr) + two stacked right columns
-  if (layout === 0) {
+  if (plan.templateId === "hero-left") {
     return (
       <div
         className="news-grid"
@@ -64,15 +74,14 @@ export default function NewsSection({
           ...borderStyles,
         }}
       >
-        <ArticleCard article={articles[0]} layout="hero" index={0} sectionIndex={sectionIndex} />
-        <ArticleCard article={articles[1]} layout="standard" index={1} sectionIndex={sectionIndex} />
-        <ArticleCard article={articles[2]} layout="standard" index={2} sectionIndex={sectionIndex} />
+        <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "hero"} index={0} sectionIndex={sectionIndex} />
+        <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "standard"} index={1} sectionIndex={sectionIndex} />
+        <ArticleCard article={articles[2]} layout={plan.layouts[2] ?? "standard"} index={2} sectionIndex={sectionIndex} />
       </div>
     );
   }
 
-  // Layout 1: Three equal columns, middle slightly wider
-  if (layout === 1) {
+  if (plan.templateId === "middle-wide") {
     return (
       <div
         className="news-grid"
@@ -82,14 +91,14 @@ export default function NewsSection({
           ...borderStyles,
         }}
       >
-        <ArticleCard article={articles[0]} layout="standard" index={0} sectionIndex={sectionIndex} />
-        <ArticleCard article={articles[1]} layout="wide" index={1} sectionIndex={sectionIndex} />
-        <ArticleCard article={articles[2]} layout="standard" index={2} sectionIndex={sectionIndex} />
+        <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "standard"} index={0} sectionIndex={sectionIndex} />
+        <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "wide"} index={1} sectionIndex={sectionIndex} />
+        <ArticleCard article={articles[2]} layout={plan.layouts[2] ?? "standard"} index={2} sectionIndex={sectionIndex} />
       </div>
     );
   }
 
-  // Layout 2: Wide hero (2fr) + narrow right sidebar with two stories
+  // Hero + sidebar stack
   return (
     <div
       className="news-grid"
@@ -99,11 +108,11 @@ export default function NewsSection({
         ...borderStyles,
       }}
     >
-      <ArticleCard article={articles[0]} layout="hero" index={0} sectionIndex={sectionIndex} />
+      <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "hero"} index={0} sectionIndex={sectionIndex} />
       <div style={{ display: "flex", flexDirection: "column" }}>
-        <ArticleCard article={articles[1]} layout="standard" index={1} sectionIndex={sectionIndex} />
+        <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "standard"} index={1} sectionIndex={sectionIndex} />
         <div style={{ borderTop: "1px solid #d4cfc4" }} />
-        <ArticleCard article={articles[2]} layout="standard" index={2} sectionIndex={sectionIndex} />
+        <ArticleCard article={articles[2]} layout={plan.layouts[2] ?? "standard"} index={2} sectionIndex={sectionIndex} />
       </div>
     </div>
   );

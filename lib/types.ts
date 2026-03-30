@@ -213,6 +213,16 @@ export interface ArticleFeedSection {
   sectionType: "articles";
   articles: Article[];
   index: number;
+  newspaperLayout?: {
+    templateId:
+      | "single-hero"
+      | "two-columns"
+      | "hero-left"
+      | "middle-wide"
+      | "hero-sidebar";
+    layouts: LayoutVariant[];
+    residualGapPx: number;
+  };
 }
 
 export interface GameFeedSection {
@@ -224,8 +234,28 @@ export interface GameFeedSection {
   connectionsDaily?: boolean;
 }
 
+export interface WeatherFillerData {
+  mode: "weather" | "generated_art";
+  title: string;
+  subtitle: string;
+  locationLabel?: string;
+  temperatureC?: number;
+  condition?: string;
+  humidity?: number;
+  windKph?: number;
+  imageUrl?: string;
+}
+
+export interface FillerFeedSection {
+  sectionType: "filler";
+  fillerType: "weather";
+  reason: "gap" | "interval";
+  index: number;
+  data: WeatherFillerData;
+}
+
 /** A single row in the infinite scroll feed — either articles or a game */
-export type FeedSection = ArticleFeedSection | GameFeedSection;
+export type FeedSection = ArticleFeedSection | GameFeedSection | FillerFeedSection;
 
 // ─── Agent job payloads ───────────────────────────────────────────────────────
 export interface IngestJobPayload {

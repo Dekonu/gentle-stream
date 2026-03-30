@@ -7,6 +7,7 @@ import CategoryDrawer from "./CategoryDrawer";
 import { MfaChallengeGate } from "./auth/mfa/MfaChallengeGate";
 import NewsSection from "./NewsSection";
 import GameSlot from "./games/GameSlot";
+import WeatherFillerCard from "./feed/WeatherFillerCard";
 import LoadingSection from "./LoadingSection";
 import ErrorBanner from "./ErrorBanner";
 import type { Category } from "@/lib/constants";
@@ -16,10 +17,12 @@ import type {
   FeedSection,
   ArticleFeedSection,
   GameFeedSection,
+  FillerFeedSection,
 } from "@/lib/types";
 import { DEFAULT_GAME_RATIO } from "@/lib/constants";
 import { feedGamePickForOrdinal } from "@/lib/games/feedPick";
 import type { GameType } from "@/lib/games/types";
+import { chooseNewspaperLayout } from "@/lib/feed/newspaperLayout";
 
 // Strip any <cite ...>...</cite> or bare </cite> tags that leak from Claude
 function stripCiteTags(text: string): string {
@@ -63,7 +66,24 @@ const FEED_FETCH_TIMEOUT_MS = 90_000;
 const SENTINEL_PREFETCH_PX = 900;
 const MIN_LOAD_GAP_MS = 650;
 const REACHED_END_COOLDOWN_MS = 20_000;
+const DEFAULT_GAP_MIN_PX = 180;
+const DEFAULT_FILLER_INTERVAL = 4;
 type FeedKindFilter = "all" | ArticleContentKind;
+
+function readTruthyFlag(input: string | undefined, defaultValue: boolean): boolean {
+  if (input == null) return defaultValue;
+  const value = input.trim().toLowerCase();
+  if (value === "1" || value === "true" || value === "yes" || value === "on") return true;
+  if (value === "0" || value === "false" || value === "no" || value === "off") return false;
+  return defaultValue;
+}
+
+function readPositiveInt(input: string | undefined, defaultValue: number): number {
+  if (!input) return defaultValue;
+  const parsed = Number.parseInt(input, 10);
+  if (Number.isNaN(parsed) || parsed <= 0) return defaultValue;
+  return parsed;
+}
 
 export interface NewsFeedProps {
   /** Stable id from Supabase `auth.users` — used for ranking, seen state, future metrics. */
@@ -109,10 +129,112 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   const lastLoadStartAtRef = useRef(0);
   const reachedEndTimeoutIdRef = useRef<number | null>(null);
   const minGapRetryTimeoutIdRef = useRef<number | null>(null);
+  const articleSectionsRenderedRef = useRef(0);
+  const fillerMetricsRef = useRef({
+    gapDetected: 0,
+    fillerInserted: 0,
+    weatherInserted: 0,
+    artFallbackUsed: 0,
+  });
+  const browserGeoRef = useRef<{ lat: number; lon: number } | null>(null);
+  const browserGeoAttemptedRef = useRef(false);
+
+  const fillerEnabled = readTruthyFlag(
+    process.env.NEXT_PUBLIC_FEED_GAP_FILL_ENABLED,
+    true
+  );
+  const fillerGapMinPx = readPositiveInt(
+    process.env.NEXT_PUBLIC_FEED_GAP_MIN_PX,
+    DEFAULT_GAP_MIN_PX
+  );
+  const fillerInterval = readPositiveInt(
+    process.env.NEXT_PUBLIC_FEED_FILLER_INTERVAL,
+    DEFAULT_FILLER_INTERVAL
+  );
 
   // Sentinel ref — plain IntersectionObserver (no library dependency on stale state)
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
+
+  const resolveBrowserGeo = useCallback(async (): Promise<{ lat: number; lon: number } | null> => {
+    if (browserGeoRef.current) return browserGeoRef.current;
+    try {
+      const stored = localStorage.getItem("gentle_stream_browser_geo");
+      if (stored) {
+        const parsed = JSON.parse(stored) as { lat?: unknown; lon?: unknown };
+        if (typeof parsed.lat === "number" && typeof parsed.lon === "number") {
+          browserGeoRef.current = { lat: parsed.lat, lon: parsed.lon };
+          return browserGeoRef.current;
+        }
+      }
+    } catch {
+      /* ignore malformed cache */
+    }
+
+    if (browserGeoAttemptedRef.current) return null;
+    browserGeoAttemptedRef.current = true;
+    if (typeof navigator === "undefined" || !navigator.geolocation) return null;
+
+    return await new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const coords = {
+            lat: position.coords.latitude,
+            lon: position.coords.longitude,
+          };
+          browserGeoRef.current = coords;
+          try {
+            localStorage.setItem("gentle_stream_browser_geo", JSON.stringify(coords));
+          } catch {
+            /* ignore storage write failures */
+          }
+          resolve(coords);
+        },
+        () => resolve(null),
+        {
+          enableHighAccuracy: false,
+          timeout: 5_000,
+          maximumAge: 15 * 60 * 1000,
+        }
+      );
+    });
+  }, []);
+
+  const fetchWeatherFillerSection = useCallback(
+    async (input: {
+      index: number;
+      reason: "gap" | "interval";
+      category?: string;
+      location?: string;
+    }): Promise<FillerFeedSection | null> => {
+      try {
+        const params = new URLSearchParams();
+        if (input.category) params.set("category", input.category);
+        if (input.location) params.set("location", input.location);
+        const browserCoords = await resolveBrowserGeo();
+        if (browserCoords) {
+          params.set("lat", String(browserCoords.lat));
+          params.set("lon", String(browserCoords.lon));
+        }
+        const res = await fetch(`/api/feed/modules/weather?${params.toString()}`, {
+          cache: "no-store",
+        });
+        if (!res.ok) return null;
+        const body = (await res.json()) as { data?: FillerFeedSection["data"] };
+        if (!body.data) return null;
+        return {
+          sectionType: "filler",
+          fillerType: "weather",
+          reason: input.reason,
+          index: input.index,
+          data: body.data,
+        };
+      } catch {
+        return null;
+      }
+    },
+    [resolveBrowserGeo]
+  );
 
   const loadMore = useCallback(async (overrideCategory?: Category | null) => {
     if (!feedReadyRef.current) return;
@@ -246,13 +368,51 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       // Remember the category for the next game slot's word bank
       if (data.category) lastArticleCategoryRef.current = data.category;
 
+      const layoutPlan = chooseNewspaperLayout(uniqueForView, currentIndex);
       const section: ArticleFeedSection = {
         sectionType: "articles",
         articles: uniqueForView,
         index: currentIndex,
+        newspaperLayout: layoutPlan,
       };
 
-      setSections((prev) => [...prev, section]);
+      const shouldInsertGapFiller =
+        fillerEnabled && layoutPlan.residualGapPx >= fillerGapMinPx;
+      const shouldInsertIntervalFiller =
+        fillerEnabled &&
+        !shouldInsertGapFiller &&
+        articleSectionsRenderedRef.current > 0 &&
+        articleSectionsRenderedRef.current % fillerInterval === 0;
+
+      const nextSections: FeedSection[] = [section];
+      if (shouldInsertGapFiller || shouldInsertIntervalFiller) {
+        if (shouldInsertGapFiller) fillerMetricsRef.current.gapDetected += 1;
+        const filler = await fetchWeatherFillerSection({
+          index: currentIndex + 1,
+          reason: shouldInsertGapFiller ? "gap" : "interval",
+          category: data.category,
+          location:
+            uniqueForView.find((entry) => entry.location?.trim())?.location ??
+            undefined,
+        });
+        if (filler) {
+          nextSections.push(filler);
+          fillerMetricsRef.current.fillerInserted += 1;
+          fillerMetricsRef.current.weatherInserted += 1;
+          if (filler.data.mode === "generated_art") {
+            fillerMetricsRef.current.artFallbackUsed += 1;
+          }
+          console.info("[feed-filler]", {
+            reason: filler.reason,
+            mode: filler.data.mode,
+            residualGapPx: layoutPlan.residualGapPx,
+            gapThresholdPx: fillerGapMinPx,
+            metricSnapshot: fillerMetricsRef.current,
+          });
+        }
+      }
+
+      setSections((prev) => [...prev, ...nextSections]);
       for (const article of uniqueForView) {
         const key = articleUniqKey(article);
         renderedArticleKeysRef.current.add(key);
@@ -264,7 +424,8 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           renderedDbArticleIdsRef.current.add(article.id);
         }
       }
-      sectionCountRef.current += 1;
+      articleSectionsRenderedRef.current += 1;
+      sectionCountRef.current += nextSections.length;
     } catch (e: unknown) {
       const aborted = e instanceof Error && e.name === "AbortError";
       const msg = aborted
@@ -296,7 +457,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         pendingLoadRef.current = false;
       }
     }
-  }, []); // stable — reads everything from refs
+  }, [fillerEnabled, fillerGapMinPx, fillerInterval, fetchWeatherFillerSection]); // stable refs + config
 
   // Resolve game ratio from server (or localStorage), then load — avoids first sections using DEFAULT_GAME_RATIO.
   useEffect(() => {
@@ -326,6 +487,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     pendingLoadRef.current = false;
     lastLoadStartAtRef.current = 0;
     sectionCountRef.current = 0;
+    articleSectionsRenderedRef.current = 0;
     gameSlotOrdinalRef.current = 0;
     lastArticleCategoryRef.current = undefined;
     renderedArticleKeysRef.current = new Set();
@@ -456,6 +618,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       setError(null);
       renderedArticleKeysRef.current = new Set();
       renderedDbArticleIdsRef.current = new Set();
+      articleSectionsRenderedRef.current = 0;
       void loadMore();
     }
 
@@ -527,6 +690,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       return [];
     });
     sectionCountRef.current = 0;
+    articleSectionsRenderedRef.current = 0;
     loadingRef.current = false;
     setLoading(false);
     lastArticleCategoryRef.current = undefined;
@@ -551,6 +715,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       pendingLoadRef.current = false;
       setSections([]);
       sectionCountRef.current = 0;
+      articleSectionsRenderedRef.current = 0;
       gameSlotOrdinalRef.current = 0;
       loadingRef.current = false;
       setError(null);
@@ -578,6 +743,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       pendingLoadRef.current = false;
       setSections([]);
       sectionCountRef.current = 0;
+      articleSectionsRenderedRef.current = 0;
       gameSlotOrdinalRef.current = 0;
       loadingRef.current = false;
       setLoading(false);
@@ -710,11 +876,21 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
               />
             );
           }
+          if (section.sectionType === "filler") {
+            return (
+              <WeatherFillerCard
+                key={`filler-${section.index}`}
+                data={section.data}
+                reason={section.reason}
+              />
+            );
+          }
           return (
             <NewsSection
               key={`news-${section.index}`}
               articles={section.articles}
               sectionIndex={section.index}
+              layoutPlan={section.newspaperLayout}
             />
           );
         })}
