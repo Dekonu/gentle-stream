@@ -16,8 +16,12 @@ const PUBLIC_PREFIXES = [
   "/login",
   "/auth/callback",
   "/auth/auth-code-error",
+  "/api/auth/email-link",
   "/privacy",
+  "/terms",
   "/data-deletion",
+  "/sms-consent",
+  "/sms-consent-screen",
 ];
 
 function isPublicPath(pathname: string): boolean {
@@ -117,7 +121,7 @@ export async function updateSession(request: NextRequest) {
     }
     // Puzzle generators are public — no user data; route handlers must still run (not 401).
     const isPublicGameApi = pathname.startsWith("/api/game");
-    if (pathname.startsWith("/api") && !isPublicGameApi) {
+    if (pathname.startsWith("/api") && !isPublicGameApi && !isPublicPath(pathname)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     if (!isPublicPath(pathname)) {
