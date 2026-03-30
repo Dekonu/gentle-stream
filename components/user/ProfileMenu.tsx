@@ -15,8 +15,14 @@ import {
   usernameChangeUnlocksAtIso,
   USERNAME_CHANGE_COOLDOWN_HOURS,
 } from "@/lib/user/username-policy";
-import type { UserProfile, UserGameStats, WeatherFillerData } from "@/lib/types";
+import type {
+  UserProfile,
+  UserGameStats,
+  WeatherModuleData,
+  SpotifyMoodTileData,
+} from "@/lib/types";
 import WeatherFillerCard from "@/components/feed/WeatherFillerCard";
+import SpotifyMoodTile from "@/components/feed/SpotifyMoodTile";
 import { AvatarInput } from "./AvatarInput";
 
 interface ProfileMenuProps {
@@ -70,8 +76,10 @@ export function ProfileMenu({
   const wrapRef = useRef<HTMLDivElement>(null);
   const [enabledGameTypes, setEnabledGameTypes] = useState<GameType[] | null>(null);
   const [moduleLoading, setModuleLoading] = useState(false);
+  const [spotifyLoading, setSpotifyLoading] = useState(false);
   const [moduleError, setModuleError] = useState<string | null>(null);
-  const [weatherModuleData, setWeatherModuleData] = useState<WeatherFillerData | null>(null);
+  const [weatherModuleData, setWeatherModuleData] = useState<WeatherModuleData | null>(null);
+  const [spotifyModuleData, setSpotifyModuleData] = useState<SpotifyMoodTileData | null>(null);
 
   useEffect(() => {
     if (!profile?.avatarUrl) setAvatarPainted(true);
@@ -292,6 +300,31 @@ export function ProfileMenu({
       setModuleError("Could not fetch weather module data.");
     } finally {
       setModuleLoading(false);
+    }
+  }
+
+  async function fetchAdditionalSpotifyModule() {
+    setModuleError(null);
+    setSpotifyLoading(true);
+    try {
+      const params = new URLSearchParams();
+      const res = await fetch(`/api/feed/modules/spotify?${params.toString()}`, {
+        cache: "no-store",
+        credentials: "include",
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        data?: SpotifyMoodTileData;
+      };
+      if (!res.ok || !body.data) {
+        setModuleError(body.error ?? "Could not fetch Spotify mood tile.");
+        return;
+      }
+      setSpotifyModuleData(body.data);
+    } catch {
+      setModuleError("Could not fetch Spotify mood tile.");
+    } finally {
+      setSpotifyLoading(false);
     }
   }
 
@@ -1335,7 +1368,26 @@ export function ProfileMenu({
                   fontWeight: 700,
                 }}
               >
-                {moduleLoading ? "Fetching weather module..." : "Fetch weather module from API"}
+                {moduleLoading ? "Fetching weather..." : "Weather"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void fetchAdditionalSpotifyModule()}
+                disabled={spotifyLoading}
+                style={{
+                  textAlign: "left",
+                  padding: "0.55rem 0.65rem",
+                  border: "1px solid #d8d2c7",
+                  background: "#fff",
+                  cursor: spotifyLoading ? "wait" : "pointer",
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: "0.75rem",
+                  fontWeight: 700,
+                }}
+              >
+                {spotifyLoading
+                  ? "Fetching Spotify mood tile..."
+                  : "Spotify Mood Tile"}
               </button>
               <div
                 style={{
@@ -1367,6 +1419,23 @@ export function ProfileMenu({
             >
               Open weather API endpoint directly
             </a>
+            <a
+              href="/api/feed/modules/spotify"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: "inline-block",
+                marginBottom: "0.7rem",
+                marginLeft: "0.8rem",
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontSize: "0.72rem",
+                color: "#1a472a",
+                textDecoration: "underline",
+                textUnderlineOffset: "2px",
+              }}
+            >
+              Open Spotify API endpoint directly
+            </a>
 
             {moduleError && (
               <p
@@ -1380,21 +1449,38 @@ export function ProfileMenu({
               </p>
             )}
 
-            {weatherModuleData ? (
-              <WeatherFillerCard data={weatherModuleData} reason="interval" />
-            ) : (
-              <p
-                style={{
-                  margin: "0.15rem 0 0",
-                  fontFamily: "'IM Fell English', Georgia, serif",
-                  fontStyle: "italic",
-                  color: "#888",
-                  fontSize: "0.75rem",
-                }}
-              >
-                Fetch weather data to preview the module.
-              </p>
-            )}
+            <div style={{ display: "grid", gap: "0.75rem" }}>
+              {weatherModuleData ? (
+                <WeatherFillerCard data={weatherModuleData} reason="interval" />
+              ) : (
+                <p
+                  style={{
+                    margin: "0.15rem 0 0",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    fontStyle: "italic",
+                    color: "#888",
+                    fontSize: "0.75rem",
+                  }}
+                >
+                  Fetch weather data to preview the module.
+                </p>
+              )}
+              {spotifyModuleData ? (
+                <SpotifyMoodTile data={spotifyModuleData} reason="interval" />
+              ) : (
+                <p
+                  style={{
+                    margin: "0.15rem 0 0",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    fontStyle: "italic",
+                    color: "#888",
+                    fontSize: "0.75rem",
+                  }}
+                >
+                  Fetch Spotify data to preview the mood tile.
+                </p>
+              )}
+            </div>
           </div>
         </div>
       )}

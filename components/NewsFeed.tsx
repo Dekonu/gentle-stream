@@ -8,6 +8,7 @@ import { MfaChallengeGate } from "./auth/mfa/MfaChallengeGate";
 import NewsSection from "./NewsSection";
 import GameSlot from "./games/GameSlot";
 import WeatherFillerCard from "./feed/WeatherFillerCard";
+import SpotifyMoodTile from "./feed/SpotifyMoodTile";
 import LoadingSection from "./LoadingSection";
 import ErrorBanner from "./ErrorBanner";
 import type { Category } from "@/lib/constants";
@@ -17,7 +18,10 @@ import type {
   FeedSection,
   ArticleFeedSection,
   GameFeedSection,
-  FillerFeedSection,
+  ModuleFeedSection,
+  FeedModuleData,
+  WeatherModuleData,
+  SpotifyMoodTileData,
 } from "@/lib/types";
 import { DEFAULT_GAME_RATIO } from "@/lib/constants";
 import { feedGamePickForOrdinal } from "@/lib/games/feedPick";
@@ -68,6 +72,8 @@ const MIN_LOAD_GAP_MS = 650;
 const REACHED_END_COOLDOWN_MS = 20_000;
 const DEFAULT_GAP_MIN_PX = 180;
 const DEFAULT_FILLER_INTERVAL = 4;
+const DEFAULT_WEATHER_WEIGHT = 3;
+const DEFAULT_SPOTIFY_WEIGHT = 1;
 type FeedKindFilter = "all" | ArticleContentKind;
 
 function readTruthyFlag(input: string | undefined, defaultValue: boolean): boolean {
@@ -132,8 +138,9 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   const articleSectionsRenderedRef = useRef(0);
   const fillerMetricsRef = useRef({
     gapDetected: 0,
-    fillerInserted: 0,
+    moduleInserted: 0,
     weatherInserted: 0,
+    spotifyInserted: 0,
     artFallbackUsed: 0,
   });
   const browserGeoRef = useRef<{ lat: number; lon: number } | null>(null);
@@ -150,6 +157,18 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   const fillerInterval = readPositiveInt(
     process.env.NEXT_PUBLIC_FEED_FILLER_INTERVAL,
     DEFAULT_FILLER_INTERVAL
+  );
+  const spotifyModuleEnabled = readTruthyFlag(
+    process.env.NEXT_PUBLIC_SPOTIFY_MODULE_ENABLED,
+    true
+  );
+  const weatherWeight = readPositiveInt(
+    process.env.NEXT_PUBLIC_WEATHER_MODULE_WEIGHT,
+    DEFAULT_WEATHER_WEIGHT
+  );
+  const spotifyWeight = readPositiveInt(
+    process.env.NEXT_PUBLIC_SPOTIFY_MODULE_WEIGHT,
+    DEFAULT_SPOTIFY_WEIGHT
   );
 
   // Sentinel ref — plain IntersectionObserver (no library dependency on stale state)
@@ -200,13 +219,14 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     });
   }, []);
 
-  const fetchWeatherFillerSection = useCallback(
+  const fetchModuleSection = useCallback(
     async (input: {
       index: number;
       reason: "gap" | "interval";
       category?: string;
       location?: string;
-    }): Promise<FillerFeedSection | null> => {
+      moduleType: "weather" | "spotify";
+    }): Promise<ModuleFeedSection | null> => {
       try {
         const params = new URLSearchParams();
         if (input.category) params.set("category", input.category);
@@ -216,15 +236,20 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           params.set("lat", String(browserCoords.lat));
           params.set("lon", String(browserCoords.lon));
         }
-        const res = await fetch(`/api/feed/modules/weather?${params.toString()}`, {
+        const path =
+          input.moduleType === "spotify"
+            ? "/api/feed/modules/spotify"
+            : "/api/feed/modules/weather";
+        const res = await fetch(`${path}?${params.toString()}`, {
           cache: "no-store",
         });
         if (!res.ok) return null;
-        const body = (await res.json()) as { data?: FillerFeedSection["data"] };
+        const body = (await res.json()) as { data?: FeedModuleData };
         if (!body.data) return null;
         return {
-          sectionType: "filler",
-          fillerType: "weather",
+          sectionType: "module",
+          moduleType: input.moduleType,
+          fillerType: input.moduleType,
           reason: input.reason,
           index: input.index,
           data: body.data,
@@ -234,6 +259,16 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       }
     },
     [resolveBrowserGeo]
+  );
+
+  const chooseModuleTypeForInsertion = useCallback(
+    (seed: number): "weather" | "spotify" => {
+      if (!spotifyModuleEnabled) return "weather";
+      const weightedSum = weatherWeight + spotifyWeight;
+      const bucket = Math.abs(seed % weightedSum);
+      return bucket < weatherWeight ? "weather" : "spotify";
+    },
+    [spotifyModuleEnabled, spotifyWeight, weatherWeight]
   );
 
   const loadMore = useCallback(async (overrideCategory?: Category | null) => {
@@ -387,24 +422,45 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       const nextSections: FeedSection[] = [section];
       if (shouldInsertGapFiller || shouldInsertIntervalFiller) {
         if (shouldInsertGapFiller) fillerMetricsRef.current.gapDetected += 1;
-        const filler = await fetchWeatherFillerSection({
+        const preferredModule = chooseModuleTypeForInsertion(currentIndex);
+        let moduleSection = await fetchModuleSection({
           index: currentIndex + 1,
           reason: shouldInsertGapFiller ? "gap" : "interval",
           category: data.category,
           location:
             uniqueForView.find((entry) => entry.location?.trim())?.location ??
             undefined,
+          moduleType: preferredModule,
         });
-        if (filler) {
-          nextSections.push(filler);
-          fillerMetricsRef.current.fillerInserted += 1;
-          fillerMetricsRef.current.weatherInserted += 1;
-          if (filler.data.mode === "generated_art") {
+
+        if (!moduleSection && preferredModule === "spotify") {
+          moduleSection = await fetchModuleSection({
+            index: currentIndex + 1,
+            reason: shouldInsertGapFiller ? "gap" : "interval",
+            category: data.category,
+            location:
+              uniqueForView.find((entry) => entry.location?.trim())?.location ??
+              undefined,
+            moduleType: "weather",
+          });
+        }
+
+        if (moduleSection) {
+          nextSections.push(moduleSection);
+          fillerMetricsRef.current.moduleInserted += 1;
+          if (moduleSection.moduleType === "weather")
+            fillerMetricsRef.current.weatherInserted += 1;
+          if (moduleSection.moduleType === "spotify")
+            fillerMetricsRef.current.spotifyInserted += 1;
+          if (
+            moduleSection.moduleType === "weather" &&
+            (moduleSection.data as WeatherModuleData).mode === "generated_art"
+          ) {
             fillerMetricsRef.current.artFallbackUsed += 1;
           }
           console.info("[feed-filler]", {
-            reason: filler.reason,
-            mode: filler.data.mode,
+            reason: moduleSection.reason,
+            moduleType: moduleSection.moduleType,
             residualGapPx: layoutPlan.residualGapPx,
             gapThresholdPx: fillerGapMinPx,
             metricSnapshot: fillerMetricsRef.current,
@@ -457,7 +513,13 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         pendingLoadRef.current = false;
       }
     }
-  }, [fillerEnabled, fillerGapMinPx, fillerInterval, fetchWeatherFillerSection]); // stable refs + config
+  }, [
+    fillerEnabled,
+    fillerGapMinPx,
+    fillerInterval,
+    fetchModuleSection,
+    chooseModuleTypeForInsertion,
+  ]); // stable refs + config
 
   // Resolve game ratio from server (or localStorage), then load — avoids first sections using DEFAULT_GAME_RATIO.
   useEffect(() => {
@@ -876,23 +938,35 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
               />
             );
           }
-          if (section.sectionType === "filler") {
+          if (section.sectionType === "module" || section.sectionType === "filler") {
+            if (section.moduleType === "spotify") {
+              return (
+                <SpotifyMoodTile
+                  key={`module-${section.index}-spotify`}
+                  data={section.data as SpotifyMoodTileData}
+                  reason={section.reason}
+                />
+              );
+            }
             return (
               <WeatherFillerCard
-                key={`filler-${section.index}`}
-                data={section.data}
+                key={`module-${section.index}-weather`}
+                data={section.data as WeatherModuleData}
                 reason={section.reason}
               />
             );
           }
-          return (
-            <NewsSection
-              key={`news-${section.index}`}
-              articles={section.articles}
-              sectionIndex={section.index}
-              layoutPlan={section.newspaperLayout}
-            />
-          );
+          if (section.sectionType === "articles") {
+            return (
+              <NewsSection
+                key={`news-${section.index}`}
+                articles={section.articles}
+                sectionIndex={section.index}
+                layoutPlan={section.newspaperLayout}
+              />
+            );
+          }
+          return null;
         })}
 
         {error && (

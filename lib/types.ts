@@ -234,7 +234,7 @@ export interface GameFeedSection {
   connectionsDaily?: boolean;
 }
 
-export interface WeatherFillerData {
+export interface WeatherModuleData {
   mode: "weather" | "generated_art";
   title: string;
   subtitle: string;
@@ -246,16 +246,43 @@ export interface WeatherFillerData {
   imageUrl?: string;
 }
 
-export interface FillerFeedSection {
-  sectionType: "filler";
-  fillerType: "weather";
+export interface SpotifyMoodTrack {
+  id: string;
+  name: string;
+  artist: string;
+  albumImageUrl?: string;
+  spotifyUrl: string;
+  previewUrl?: string | null;
+}
+
+export interface SpotifyMoodTileData {
+  mode: "spotify" | "fallback";
+  title: string;
+  subtitle: string;
+  mood: string;
+  market: string;
+  tracks: SpotifyMoodTrack[];
+  playlistUrl?: string;
+  imageUrl?: string;
+}
+
+export type FeedModuleData = WeatherModuleData | SpotifyMoodTileData;
+
+export interface ModuleFeedSection {
+  sectionType: "module" | "filler";
+  moduleType: "weather" | "spotify";
+  /** Legacy compatibility: prefer moduleType going forward. */
+  fillerType?: "weather" | "spotify";
   reason: "gap" | "interval";
   index: number;
-  data: WeatherFillerData;
+  data: FeedModuleData;
 }
 
 /** A single row in the infinite scroll feed — either articles or a game */
-export type FeedSection = ArticleFeedSection | GameFeedSection | FillerFeedSection;
+export type FeedSection = ArticleFeedSection | GameFeedSection | ModuleFeedSection;
+
+/** Back-compat alias while the old name is phased out. */
+export type WeatherFillerData = WeatherModuleData;
 
 // ─── Agent job payloads ───────────────────────────────────────────────────────
 export interface IngestJobPayload {
