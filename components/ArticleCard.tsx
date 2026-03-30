@@ -163,6 +163,10 @@ export default function ArticleCard({
   /** 401 → hide like (not signed in). */
   const [showLikeButton, setShowLikeButton] = useState(false);
   const [likeStatusLoaded, setLikeStatusLoaded] = useState(false);
+  const [showRecipeRating, setShowRecipeRating] = useState(false);
+  const [recipeRatingLoaded, setRecipeRatingLoaded] = useState(false);
+  const [recipeRatingBusy, setRecipeRatingBusy] = useState(false);
+  const [recipeRating, setRecipeRating] = useState<number | null>(null);
   const impressionLoggedRef = useRef(false);
   const openLoggedRef = useRef(false);
   const read30LoggedRef = useRef(false);
@@ -251,6 +255,8 @@ export default function ArticleCard({
 
   const canSave = "id" in article && Boolean(article.id);
   const articleId = "id" in article && article.id ? article.id : null;
+  const isRecipeCard =
+    "contentKind" in article && article.contentKind === "recipe";
   const engagementContext = useMemo(
     () => ({
       source: "feed" as const,
@@ -293,6 +299,71 @@ export default function ArticleCard({
     visibleSinceRef.current = null;
     visibleAccumMsRef.current = 0;
   }, [articleId]);
+
+  useEffect(() => {
+    if (!isRecipeCard) {
+      setShowRecipeRating(false);
+      setRecipeRating(null);
+      setRecipeRatingLoaded(false);
+      return;
+    }
+    if (!userApiAllowed) {
+      setShowRecipeRating(false);
+      setRecipeRating(null);
+      setRecipeRatingLoaded(true);
+      return;
+    }
+    if (!articleId) {
+      setShowRecipeRating(false);
+      setRecipeRating(null);
+      setRecipeRatingLoaded(false);
+      return;
+    }
+
+    let cancelled = false;
+    setRecipeRatingLoaded(false);
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/user/recipe-ratings?articleId=${encodeURIComponent(articleId)}`,
+          { credentials: "include" }
+        );
+        if (cancelled) return;
+        if (res.status === 401) {
+          userApiAllowed = false;
+          setShowRecipeRating(false);
+          setRecipeRating(null);
+          setRecipeRatingLoaded(true);
+          return;
+        }
+        if (!res.ok) {
+          setShowRecipeRating(false);
+          setRecipeRating(null);
+          return;
+        }
+        const body = (await res.json().catch(() => ({}))) as {
+          rating?: number | null;
+        };
+        setShowRecipeRating(true);
+        setRecipeRating(
+          typeof body.rating === "number" && body.rating >= 0 && body.rating <= 5
+            ? Math.round(body.rating)
+            : null
+        );
+      } catch {
+        if (!cancelled) {
+          setShowRecipeRating(false);
+          setRecipeRating(null);
+        }
+      } finally {
+        if (!cancelled) setRecipeRatingLoaded(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [articleId, isRecipeCard]);
 
   useEffect(() => {
     if (!userApiAllowed) {
@@ -611,6 +682,37 @@ export default function ArticleCard({
     sourceUrls,
   ]);
 
+  const rateRecipe = useCallback(
+    async (nextRating: number) => {
+      if (!userApiAllowed || !isRecipeCard || !articleId || recipeRatingBusy) return;
+      setRecipeRatingBusy(true);
+      const previousRating = recipeRating;
+      setRecipeRating(nextRating);
+      try {
+        const res = await fetch("/api/user/recipe-ratings", {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ articleId, rating: nextRating }),
+        });
+        if (res.status === 401) {
+          userApiAllowed = false;
+          setShowRecipeRating(false);
+          setRecipeRating(null);
+          return;
+        }
+        if (!res.ok) {
+          setRecipeRating(previousRating);
+        }
+      } catch {
+        setRecipeRating(previousRating);
+      } finally {
+        setRecipeRatingBusy(false);
+      }
+    },
+    [articleId, isRecipeCard, recipeRating, recipeRatingBusy]
+  );
+
   const headlineStyle = {
     fontFamily: "'Playfair Display', Georgia, serif",
     fontSize: headlineSizePx,
@@ -807,6 +909,62 @@ export default function ArticleCard({
               {saveMsg}
             </span>
           )}
+        </div>
+      )}
+
+      {isRecipeCard && showRecipeRating && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.45rem",
+            flexWrap: "wrap",
+            marginTop: "0.1rem",
+          }}
+        >
+          <span
+            style={{
+              fontFamily: "'IM Fell English', Georgia, serif",
+              fontSize: "0.72rem",
+              color: "#555",
+            }}
+          >
+            Rate recipe:
+          </span>
+          {[0, 1, 2, 3, 4, 5].map((value) => {
+            const active = (recipeRating ?? -1) >= value && value > 0;
+            return (
+              <button
+                key={value}
+                type="button"
+                onClick={() => void rateRecipe(value)}
+                disabled={recipeRatingBusy || !recipeRatingLoaded}
+                style={{
+                  border: "1px solid #d8d2c7",
+                  background: value === 0 ? "#fff" : active ? "#f7d26a" : "#fff",
+                  color: "#1a1a1a",
+                  padding: "0.2rem 0.42rem",
+                  lineHeight: 1,
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: value === 0 ? "0.72rem" : "0.82rem",
+                  cursor:
+                    recipeRatingBusy || !recipeRatingLoaded ? "wait" : "pointer",
+                }}
+                aria-label={`Rate recipe ${value} star${value === 1 ? "" : "s"}`}
+              >
+                {value === 0 ? "0" : "★"}
+              </button>
+            );
+          })}
+          <span
+            style={{
+              fontFamily: "'IM Fell English', Georgia, serif",
+              fontSize: "0.68rem",
+              color: "#666",
+            }}
+          >
+            {recipeRating == null ? "Not rated" : `${recipeRating}/5`}
+          </span>
         </div>
       )}
 

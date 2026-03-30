@@ -188,6 +188,15 @@ CREATE TABLE IF NOT EXISTS article_saves (
   UNIQUE (user_id, article_id)
 );
 
+CREATE TABLE IF NOT EXISTS recipe_ratings (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id        TEXT NOT NULL,
+  article_id     UUID NOT NULL REFERENCES articles (id) ON DELETE CASCADE,
+  rating         SMALLINT NOT NULL CHECK (rating >= 0 AND rating <= 5),
+  rated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, article_id)
+);
+
 -- ─── Auto-update updated_at ───────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
