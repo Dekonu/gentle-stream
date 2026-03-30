@@ -19,6 +19,7 @@ import type {
 } from "@/lib/types";
 import { DEFAULT_GAME_RATIO } from "@/lib/constants";
 import { feedGamePickForOrdinal } from "@/lib/games/feedPick";
+import type { GameType } from "@/lib/games/types";
 
 // Strip any <cite ...>...</cite> or bare </cite> tags that leak from Claude
 function stripCiteTags(text: string): string {
@@ -87,14 +88,12 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   const sectionCountRef = useRef(0);
   /** Counts game sections only — drives fair rotation in feedGamePickForOrdinal. */
   const gameSlotOrdinalRef = useRef(0);
-  /** NYT-style: at most one Connections slot per session; hide after completion today. */
-  const connectionsCompletedTodayRef = useRef(false);
-  const connectionsShownInSessionRef = useRef(false);
   const activeCategoryRef = useRef<Category | null>(null);
   const activeKindFilterRef = useRef<FeedKindFilter>("all");
   /** Bumps on each [userId] bootstrap so Strict Mode / fast remounts only run one initial loadMore. */
   const feedBootstrapGenRef = useRef(0);
   const gameRatioRef = useRef(DEFAULT_GAME_RATIO);
+  const enabledGameTypesRef = useRef<GameType[] | null>(null);
   const feedReadyRef = useRef(false);
   const lastArticleCategoryRef = useRef<string | undefined>(undefined);
   // Hard de-dup across all rendered sections in this session/category view.
@@ -109,6 +108,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   const pendingLoadRef = useRef(false);
   const lastLoadStartAtRef = useRef(0);
   const reachedEndTimeoutIdRef = useRef<number | null>(null);
+  const minGapRetryTimeoutIdRef = useRef<number | null>(null);
 
   // Sentinel ref — plain IntersectionObserver (no library dependency on stale state)
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -123,7 +123,18 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     }
 
     const now = Date.now();
-    if (now - lastLoadStartAtRef.current < MIN_LOAD_GAP_MS) return;
+    const gapMs = now - lastLoadStartAtRef.current;
+    if (gapMs < MIN_LOAD_GAP_MS) {
+      pendingLoadRef.current = true;
+      if (minGapRetryTimeoutIdRef.current != null) return;
+      const waitMs = Math.max(MIN_LOAD_GAP_MS - gapMs + 25, 25);
+      minGapRetryTimeoutIdRef.current = window.setTimeout(() => {
+        minGapRetryTimeoutIdRef.current = null;
+        if (loadingRef.current || reachedEndRef.current || !feedReadyRef.current) return;
+        void loadMore(overrideCategory);
+      }, waitMs);
+      return;
+    }
     lastLoadStartAtRef.current = now;
 
     loadingRef.current = true;
@@ -141,31 +152,18 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     try {
       // ── Decide: game slot or article section? ────────────────────────────────
       if (shouldBeGame(currentIndex, gameRatioRef.current)) {
-        const offerDailyConnections =
-          !connectionsCompletedTodayRef.current &&
-          !connectionsShownInSessionRef.current;
-
         let gameType: GameFeedSection["gameType"];
         let difficulty: GameFeedSection["difficulty"];
-        let connectionsDaily = false;
-
-        if (offerDailyConnections) {
-          connectionsShownInSessionRef.current = true;
-          gameType = "connections";
-          difficulty = "medium";
-          connectionsDaily = true;
-        } else {
-          const pick = feedGamePickForOrdinal(gameSlotOrdinalRef.current++);
-          gameType = pick.gameType;
-          difficulty = pick.difficulty;
-        }
+        const enabled = enabledGameTypesRef.current ?? [];
+        const pick = feedGamePickForOrdinal(gameSlotOrdinalRef.current++, enabled);
+        gameType = pick.gameType;
+        difficulty = pick.difficulty;
 
         const gameSection: GameFeedSection = {
           sectionType: "game",
           gameType,
           difficulty,
           index: currentIndex,
-          ...(connectionsDaily ? { connectionsDaily: true } : {}),
         };
         setSections((prev) => [...prev, gameSection]);
         sectionCountRef.current += 1;
@@ -321,11 +319,14 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       window.clearTimeout(reachedEndTimeoutIdRef.current);
       reachedEndTimeoutIdRef.current = null;
     }
+    if (minGapRetryTimeoutIdRef.current) {
+      window.clearTimeout(minGapRetryTimeoutIdRef.current);
+      minGapRetryTimeoutIdRef.current = null;
+    }
     pendingLoadRef.current = false;
     lastLoadStartAtRef.current = 0;
     sectionCountRef.current = 0;
     gameSlotOrdinalRef.current = 0;
-    connectionsShownInSessionRef.current = false;
     lastArticleCategoryRef.current = undefined;
     renderedArticleKeysRef.current = new Set();
     renderedDbArticleIdsRef.current = new Set();
@@ -356,6 +357,20 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
             localStorage.setItem("gentle_stream_game_ratio", String(r));
             usedServerRatio = true;
           }
+
+          if (Array.isArray(profile.enabledGameTypes)) {
+            enabledGameTypesRef.current = profile.enabledGameTypes.filter(
+              (v: unknown): v is GameType => typeof v === "string"
+            );
+            try {
+              localStorage.setItem(
+                "gentle_stream_enabled_game_types",
+                JSON.stringify(enabledGameTypesRef.current)
+              );
+            } catch {
+              /* ignore */
+            }
+          }
         }
       } catch {
         /* offline or unauthenticated preview */
@@ -373,32 +388,21 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         }
       }
 
-      let completedConnectionsToday = false;
-      try {
-        const cdRes = await fetch("/api/user/connections-daily", {
-          credentials: "include",
-        });
-        if (cdRes.ok) {
-          const cd = (await cdRes.json()) as { completedToday?: boolean };
-          if (cd.completedToday === true) completedConnectionsToday = true;
-        }
-      } catch {
-        /* offline */
-      }
-      if (!completedConnectionsToday) {
+      if (enabledGameTypesRef.current == null) {
         try {
-          const dayKey = new Date().toISOString().slice(0, 10);
-          if (
-            localStorage.getItem(`gentle_stream_connections_done_${dayKey}`) ===
-            "1"
-          ) {
-            completedConnectionsToday = true;
+          const storedEnabled = localStorage.getItem("gentle_stream_enabled_game_types");
+          if (storedEnabled) {
+            const parsed = JSON.parse(storedEnabled) as unknown;
+            if (Array.isArray(parsed)) {
+              enabledGameTypesRef.current = parsed.filter(
+                (v): v is GameType => typeof v === "string"
+              );
+            }
           }
         } catch {
           /* ignore */
         }
       }
-      connectionsCompletedTodayRef.current = completedConnectionsToday;
 
       if (cancelled || gen !== feedBootstrapGenRef.current) return;
 
@@ -417,19 +421,54 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   }, [userId]);
 
   useEffect(() => {
-    function onConnectionsCompleted() {
-      connectionsCompletedTodayRef.current = true;
+    function onEnabledTypesUpdated(e: Event) {
+      const ce = e as CustomEvent<{ enabledGameTypes?: unknown }>;
+      const enabled = ce.detail?.enabledGameTypes;
+      if (Array.isArray(enabled)) {
+        enabledGameTypesRef.current = enabled.filter(
+          (v): v is GameType => typeof v === "string"
+        );
+        try {
+          localStorage.setItem(
+            "gentle_stream_enabled_game_types",
+            JSON.stringify(enabledGameTypesRef.current)
+          );
+        } catch {
+          /* ignore */
+        }
+      }
+
+      reachedEndRef.current = false;
+      if (reachedEndTimeoutIdRef.current) {
+        window.clearTimeout(reachedEndTimeoutIdRef.current);
+        reachedEndTimeoutIdRef.current = null;
+      }
+      if (minGapRetryTimeoutIdRef.current) {
+        window.clearTimeout(minGapRetryTimeoutIdRef.current);
+        minGapRetryTimeoutIdRef.current = null;
+      }
+      pendingLoadRef.current = false;
+      setSections([]);
+      sectionCountRef.current = 0;
+      gameSlotOrdinalRef.current = 0;
+      loadingRef.current = false;
+      setLoading(false);
+      setError(null);
+      renderedArticleKeysRef.current = new Set();
+      renderedDbArticleIdsRef.current = new Set();
+      void loadMore();
     }
+
     window.addEventListener(
-      "gentle-stream-connections-completed",
-      onConnectionsCompleted
+      "gentle-stream-enabled-game-types",
+      onEnabledTypesUpdated as EventListener
     );
     return () =>
       window.removeEventListener(
-        "gentle-stream-connections-completed",
-        onConnectionsCompleted
+        "gentle-stream-enabled-game-types",
+        onEnabledTypesUpdated as EventListener
       );
-  }, []);
+  }, [loadMore]);
 
   // Keep activeCategoryRef in sync
   useEffect(() => {
@@ -463,6 +502,10 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         window.clearTimeout(reachedEndTimeoutIdRef.current);
         reachedEndTimeoutIdRef.current = null;
       }
+      if (minGapRetryTimeoutIdRef.current) {
+        window.clearTimeout(minGapRetryTimeoutIdRef.current);
+        minGapRetryTimeoutIdRef.current = null;
+      }
     };
   }, []);
 
@@ -475,15 +518,12 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       window.clearTimeout(reachedEndTimeoutIdRef.current);
       reachedEndTimeoutIdRef.current = null;
     }
+    if (minGapRetryTimeoutIdRef.current) {
+      window.clearTimeout(minGapRetryTimeoutIdRef.current);
+      minGapRetryTimeoutIdRef.current = null;
+    }
     pendingLoadRef.current = false;
     setSections((prev) => {
-      const hadConnections = prev.some(
-        (s) =>
-          s.sectionType === "game" &&
-          s.gameType === "connections" &&
-          s.connectionsDaily === true
-      );
-      if (!hadConnections) connectionsShownInSessionRef.current = false;
       return [];
     });
     sectionCountRef.current = 0;
@@ -504,11 +544,14 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         window.clearTimeout(reachedEndTimeoutIdRef.current);
         reachedEndTimeoutIdRef.current = null;
       }
+      if (minGapRetryTimeoutIdRef.current) {
+        window.clearTimeout(minGapRetryTimeoutIdRef.current);
+        minGapRetryTimeoutIdRef.current = null;
+      }
       pendingLoadRef.current = false;
       setSections([]);
       sectionCountRef.current = 0;
       gameSlotOrdinalRef.current = 0;
-      connectionsShownInSessionRef.current = false;
       loadingRef.current = false;
       setError(null);
       renderedArticleKeysRef.current = new Set();
@@ -528,11 +571,14 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         window.clearTimeout(reachedEndTimeoutIdRef.current);
         reachedEndTimeoutIdRef.current = null;
       }
+      if (minGapRetryTimeoutIdRef.current) {
+        window.clearTimeout(minGapRetryTimeoutIdRef.current);
+        minGapRetryTimeoutIdRef.current = null;
+      }
       pendingLoadRef.current = false;
       setSections([]);
       sectionCountRef.current = 0;
       gameSlotOrdinalRef.current = 0;
-      connectionsShownInSessionRef.current = false;
       loadingRef.current = false;
       setLoading(false);
       setError(null);
@@ -661,7 +707,6 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
                 key={`game-${section.index}`}
                 gameType={section.gameType}
                 difficulty={section.difficulty}
-                connectionsDaily={section.connectionsDaily === true}
               />
             );
           }
@@ -682,6 +727,10 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
               if (reachedEndTimeoutIdRef.current) {
                 window.clearTimeout(reachedEndTimeoutIdRef.current);
                 reachedEndTimeoutIdRef.current = null;
+              }
+              if (minGapRetryTimeoutIdRef.current) {
+                window.clearTimeout(minGapRetryTimeoutIdRef.current);
+                minGapRetryTimeoutIdRef.current = null;
               }
               pendingLoadRef.current = false;
               void loadMore();

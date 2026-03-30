@@ -1,4 +1,5 @@
 import type { Category } from "./constants";
+import type { GameType } from "./games/types";
 
 // ─── Raw shape returned by the ingest agent (LLM output) ─────────────────────
 export interface RawArticle {
@@ -68,6 +69,7 @@ export interface UserProfile {
   userId: string;
   categoryWeights: Record<Category, number>; // must sum to ~1.0
   gameRatio: number;                          // 0.0–1.0, portion of feed that is games
+  enabledGameTypes: GameType[];               // which game types can appear in the feed
   userRole: UserRole;
   displayName: string | null;
   username: string | null;

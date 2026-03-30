@@ -7,6 +7,8 @@ import {
   GAME_RATIO_PRESETS,
   nearestPresetValue,
 } from "@/lib/user/feed-settings";
+import { FEED_GAME_TYPES } from "@/lib/games/feedPick";
+import type { GameType } from "@/lib/games/types";
 import { isCreator } from "@/lib/user/creator";
 import {
   isUsernameChangeLocked,
@@ -49,6 +51,7 @@ export function ProfileMenu({
   isAdmin = false,
 }: ProfileMenuProps) {
   const [open, setOpen] = useState(false);
+  const [gameSettingsOpen, setGameSettingsOpen] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<UserGameStats | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -63,6 +66,7 @@ export function ProfileMenu({
   /** After profile loads, hide shimmer once the image has painted (or failed). */
   const [avatarPainted, setAvatarPainted] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const [enabledGameTypes, setEnabledGameTypes] = useState<GameType[] | null>(null);
 
   useEffect(() => {
     if (!profile?.avatarUrl) setAvatarPainted(true);
@@ -124,6 +128,19 @@ export function ProfileMenu({
   }, [open, loadAll]);
 
   useEffect(() => {
+    if (open) return;
+    setGameSettingsOpen(false);
+  }, [open]);
+
+  useEffect(() => {
+    if (!profile) return;
+    if (enabledGameTypes != null) return;
+    if (Array.isArray((profile as unknown as { enabledGameTypes?: unknown }).enabledGameTypes)) {
+      setEnabledGameTypes((profile as unknown as { enabledGameTypes: GameType[] }).enabledGameTypes);
+    }
+  }, [profile, enabledGameTypes]);
+
+  useEffect(() => {
     if (!open) return;
     function onDocMouseDown(e: MouseEvent) {
       const el = wrapRef.current;
@@ -164,6 +181,147 @@ export function ProfileMenu({
     } finally {
       setSaving(false);
     }
+  }
+
+  async function saveEnabledGameTypes(next: GameType[]) {
+    setSaveError(null);
+    setSaving(true);
+    try {
+      const res = await fetch("/api/user/preferences", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabledGameTypes: next }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSaveError(typeof data.error === "string" ? data.error : "Could not save.");
+        return;
+      }
+      setProfile(data as UserProfile);
+      setEnabledGameTypes(next);
+      window.dispatchEvent(
+        new CustomEvent("gentle-stream-enabled-game-types", {
+          detail: { enabledGameTypes: next },
+        })
+      );
+    } catch {
+      setSaveError("Could not save.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function toggleGameType(gameType: GameType) {
+    const current = enabledGameTypes ?? (["connections", ...FEED_GAME_TYPES] as GameType[]);
+    const has = current.includes(gameType);
+    const next = has ? current.filter((t) => t !== gameType) : [...current, gameType];
+    if (next.length === 0) return; // keep at least one enabled
+    setEnabledGameTypes(next);
+    void saveEnabledGameTypes(next);
+  }
+
+  const displayGameTypes: Array<{ value: GameType; label: string; description: string }> = [
+    { value: "connections", label: "Connections (daily)", description: "One daily puzzle per session." },
+    { value: "crossword", label: "Crossword", description: "Mini word-square crossword." },
+    { value: "sudoku", label: "Sudoku", description: "Classic 9×9 logic grid." },
+    { value: "killer_sudoku", label: "Killer Sudoku", description: "Cage-sum variant." },
+    { value: "word_search", label: "Word search", description: "Find themed words in a grid." },
+    { value: "nonogram", label: "Nonogram", description: "Picross-style picture logic." },
+  ];
+
+  function SwitchRow({
+    label,
+    description,
+    checked,
+    disabled,
+    onToggle,
+  }: {
+    label: string;
+    description: string;
+    checked: boolean;
+    disabled: boolean;
+    onToggle: () => void;
+  }) {
+    const trackOn = "#0ea5a4";
+    const trackOff = "#d1d5db";
+    const track = checked ? trackOn : trackOff;
+    return (
+      <button
+        type="button"
+        onClick={() => (!disabled ? onToggle() : null)}
+        disabled={disabled}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "0.75rem",
+          width: "100%",
+          textAlign: "left",
+          padding: "0.75rem 0.85rem",
+          border: "1px solid #e3dfd5",
+          background: "#fff",
+          cursor: disabled ? "not-allowed" : "pointer",
+          opacity: disabled ? 0.7 : 1,
+        }}
+      >
+        <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+          <span
+            style={{
+              fontFamily: "'Playfair Display', Georgia, serif",
+              fontSize: "0.82rem",
+              fontWeight: 700,
+              color: "#1a1a1a",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {label}
+          </span>
+          <span
+            style={{
+              fontFamily: "'IM Fell English', Georgia, serif",
+              fontStyle: "italic",
+              fontSize: "0.72rem",
+              color: "#7b7b7b",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {description}
+          </span>
+        </span>
+
+        <span
+          aria-hidden
+          style={{
+            position: "relative",
+            width: 56,
+            height: 32,
+            background: track,
+            borderRadius: 999,
+            transition: "background 180ms ease",
+            flexShrink: 0,
+          }}
+        >
+          <span
+            style={{
+              position: "absolute",
+              top: 3,
+              left: checked ? 28 : 3,
+              width: 26,
+              height: 26,
+              borderRadius: "50%",
+              background: "#fff",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.18)",
+              transition: "left 180ms ease",
+            }}
+          />
+        </span>
+      </button>
+    );
   }
 
   async function saveProfileFields() {
@@ -501,6 +659,28 @@ export function ProfileMenu({
               </li>
             </ul>
           </section>
+
+          <div style={{ margin: "0.2rem 0 1rem" }}>
+            <button
+              type="button"
+              onClick={() => setGameSettingsOpen(true)}
+              style={{
+                display: "inline-block",
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "0.8rem",
+                fontWeight: 700,
+                color: "#1a472a",
+                textDecoration: "underline",
+                textUnderlineOffset: "3px",
+                background: "transparent",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+              }}
+            >
+              Game settings
+            </button>
+          </div>
 
           <section style={{ marginBottom: "1rem" }}>
             <h3
@@ -858,6 +1038,108 @@ export function ProfileMenu({
           {saveError && (
             <p style={{ color: "#8b4513", fontSize: "0.75rem" }}>{saveError}</p>
           )}
+        </div>
+      )}
+
+      {open && gameSettingsOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Game settings"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setGameSettingsOpen(false);
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.42)",
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "1.2rem",
+          }}
+        >
+          <div
+            style={{
+              width: "min(520px, 96vw)",
+              background: "#faf8f3",
+              border: "1.5px solid #1a1a1a",
+              boxShadow: "0 18px 60px rgba(0,0,0,0.25)",
+              padding: "1rem 1rem 0.9rem",
+              maxHeight: "min(82vh, 720px)",
+              overflowY: "auto",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "0.75rem",
+                marginBottom: "0.75rem",
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    fontFamily: "'Playfair Display', Georgia, serif",
+                    fontSize: "1rem",
+                    fontWeight: 800,
+                    letterSpacing: "0.02em",
+                    color: "#1a1a1a",
+                  }}
+                >
+                  Game settings
+                </div>
+                <div
+                  style={{
+                    marginTop: "0.1rem",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    fontStyle: "italic",
+                    fontSize: "0.78rem",
+                    color: "#777",
+                  }}
+                >
+                  Toggle which puzzle types can appear in your stream.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setGameSettingsOpen(false)}
+                style={{
+                  border: "1px solid #1a1a1a",
+                  background: "transparent",
+                  padding: "0.35rem 0.6rem",
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: "0.72rem",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  cursor: "pointer",
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.55rem" }}>
+              {displayGameTypes.map((g) => {
+                const current = enabledGameTypes ?? (["connections", ...FEED_GAME_TYPES] as GameType[]);
+                const checked = current.includes(g.value);
+                const disableUncheck = checked && current.length <= 1;
+                return (
+                  <SwitchRow
+                    key={g.value}
+                    label={g.label}
+                    description={g.description}
+                    checked={checked}
+                    disabled={saving || disableUncheck}
+                    onToggle={() => toggleGameType(g.value)}
+                  />
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
     </div>
