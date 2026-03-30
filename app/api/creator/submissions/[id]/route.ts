@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUserId } from "@/lib/api/sessionUser";
 import { CATEGORIES, type Category } from "@/lib/constants";
+import type { SubmissionContentKind } from "@/lib/types";
 import { getOrCreateUserProfile } from "@/lib/db/users";
 import { updateSubmissionForAuthor } from "@/lib/db/creator";
 
 function isCategory(value: string): value is Category {
   return CATEGORIES.includes(value as Category);
+}
+
+function isSubmissionContentKind(value: string): value is SubmissionContentKind {
+  return value === "user_article" || value === "recipe";
 }
 
 function toSafeText(value: unknown, maxLen: number): string | undefined {
@@ -35,6 +40,7 @@ export async function PATCH(
     body?: unknown;
     pullQuote?: unknown;
     category?: unknown;
+    contentKind?: unknown;
     locale?: unknown;
     explicitHashtags?: unknown;
     withdraw?: unknown;
@@ -58,6 +64,7 @@ export async function PATCH(
   const pullQuote = toSafeText(body.pullQuote, 400);
   const locale = toSafeText(body.locale, 64);
   const categoryRaw = toSafeText(body.category, 80);
+  const contentKindRaw = toSafeText(body.contentKind, 40);
   if (headline !== undefined) updates.headline = headline;
   if (subheadline !== undefined) updates.subheadline = subheadline;
   if (articleBody !== undefined) updates.body = articleBody;
@@ -68,6 +75,12 @@ export async function PATCH(
       return NextResponse.json({ error: "Invalid category" }, { status: 400 });
     }
     updates.category = categoryRaw;
+  }
+  if (contentKindRaw !== undefined) {
+    if (!contentKindRaw || !isSubmissionContentKind(contentKindRaw)) {
+      return NextResponse.json({ error: "Invalid content kind" }, { status: 400 });
+    }
+    updates.contentKind = contentKindRaw;
   }
   if (Array.isArray(body.explicitHashtags)) {
     updates.explicitHashtags = body.explicitHashtags.filter(

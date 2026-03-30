@@ -17,6 +17,7 @@ interface FormState {
   body: string;
   pullQuote: string;
   category: string;
+  contentKind: "user_article" | "recipe";
   locale: string;
   explicitHashtags: string;
 }
@@ -27,6 +28,7 @@ const EMPTY_FORM: FormState = {
   body: "",
   pullQuote: "",
   category: CATEGORIES[0],
+  contentKind: "user_article",
   locale: "global",
   explicitHashtags: "",
 };
@@ -118,6 +120,7 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
             body: form.body,
             pullQuote: form.pullQuote,
             category: form.category,
+            contentKind: form.contentKind,
             locale: form.locale,
             explicitHashtags,
           }),
@@ -148,6 +151,7 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
       body: submission.body,
       pullQuote: submission.pullQuote,
       category: submission.category,
+      contentKind: submission.contentKind,
       locale: submission.locale,
       explicitHashtags: submission.explicitHashtags.join(", "),
     });
@@ -242,6 +246,20 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                   {category}
                 </option>
               ))}
+            </select>
+            <select
+              value={form.contentKind}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  contentKind:
+                    e.target.value === "recipe" ? "recipe" : "user_article",
+                }))
+              }
+              style={{ padding: "0.45rem", border: "1px solid #bbb" }}
+            >
+              <option value="user_article">User article</option>
+              <option value="recipe">Recipe</option>
             </select>
             <div style={{ border: "1px solid #d8d2c7", background: "#fff", padding: "0.6rem" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
@@ -373,7 +391,7 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                     <span style={{ fontSize: "0.75rem", textTransform: "uppercase", color: "#555" }}>{submission.status}</span>
                   </div>
                   <p style={{ margin: "0.35rem 0 0", color: "#666", fontSize: "0.86rem" }}>
-                    {submission.category} • {new Date(submission.createdAt).toLocaleString()}
+                    {submission.category} • {submission.contentKind === "recipe" ? "Recipe" : "Article"} • {new Date(submission.createdAt).toLocaleString()}
                   </p>
                   {submission.adminNote ? (
                     <p style={{ margin: "0.35rem 0 0", color: "#8b6d2f", fontSize: "0.84rem" }}>

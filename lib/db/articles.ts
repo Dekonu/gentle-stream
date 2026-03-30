@@ -1,7 +1,7 @@
 import { db } from "./client";
 import { getCreatorPenNamesByUserIds } from "./creator";
 import { getAuthorDisplayByUserIds } from "./users";
-import type { StoredArticle } from "../types";
+import type { ArticleContentKind, StoredArticle } from "../types";
 import type { Category } from "../constants";
 import { v4 as uuidv4 } from "uuid";
 
@@ -31,6 +31,7 @@ interface ArticleRow {
   fingerprint: string;
   source_urls: string[];
   source?: string;
+  content_kind?: string | null;
   author_user_id?: string | null;
   submission_id?: string | null;
   creator_explicit_tags?: string[];
@@ -95,6 +96,13 @@ async function hydrateCreatorAuthorDisplay(
 }
 
 function rowToArticle(row: ArticleRow): StoredArticle {
+  const contentKind: ArticleContentKind =
+    row.content_kind === "recipe" || row.content_kind === "user_article"
+      ? row.content_kind
+      : row.source === "creator"
+        ? "user_article"
+        : "news";
+
   return {
     id: row.id,
     headline: row.headline,
@@ -117,6 +125,7 @@ function rowToArticle(row: ArticleRow): StoredArticle {
     tagged: row.tagged ?? false,
     sourceUrls: row.source_urls ?? [],
     source: row.source === "creator" ? "creator" : "ingest",
+    contentKind,
     authorUserId: row.author_user_id ?? null,
     submissionId: row.submission_id ?? null,
     creatorExplicitTags: row.creator_explicit_tags ?? [],
@@ -331,6 +340,7 @@ export async function insertArticles(
     fingerprint: fp,
     source_urls: normUrls,
     source: "ingest",
+    content_kind: "news",
     author_user_id: null,
     submission_id: null,
     creator_explicit_tags: [],
@@ -395,7 +405,8 @@ export async function getRecentSourceUrls(
 export async function getArticlesForFeed(
   category: Category,
   limit: number,
-  excludeIds: string[] = []
+  excludeIds: string[] = [],
+  contentKinds?: ArticleContentKind[]
 ): Promise<StoredArticle[]> {
   let query = db
     .from("articles")
@@ -407,6 +418,9 @@ export async function getArticlesForFeed(
 
   if (excludeIds.length > 0) {
     query = query.notIn("id", excludeIds);
+  }
+  if (contentKinds && contentKinds.length > 0) {
+    query = query.in("content_kind", contentKinds);
   }
 
   const { data, error } = await query;
@@ -421,7 +435,8 @@ export async function getArticlesForFeed(
 export async function getUntaggedArticlesForFeed(
   category: Category,
   limit: number,
-  excludeIds: string[] = []
+  excludeIds: string[] = [],
+  contentKinds?: ArticleContentKind[]
 ): Promise<StoredArticle[]> {
   let query = db
     .from("articles")
@@ -433,6 +448,9 @@ export async function getUntaggedArticlesForFeed(
 
   if (excludeIds.length > 0) {
     query = query.notIn("id", excludeIds);
+  }
+  if (contentKinds && contentKinds.length > 0) {
+    query = query.in("content_kind", contentKinds);
   }
 
   const { data, error } = await query;
@@ -455,7 +473,8 @@ function shuffleInPlace<T>(items: T[]): void {
  */
 export async function getRandomAvailableArticles(
   limit: number,
-  excludeIds: string[] = []
+  excludeIds: string[] = [],
+  contentKinds?: ArticleContentKind[]
 ): Promise<StoredArticle[]> {
   const cap = Math.min(150, Math.max(40, limit * 12));
   let query = db
@@ -465,6 +484,9 @@ export async function getRandomAvailableArticles(
 
   if (excludeIds.length > 0) {
     query = query.notIn("id", excludeIds);
+  }
+  if (contentKinds && contentKinds.length > 0) {
+    query = query.in("content_kind", contentKinds);
   }
 
   const { data, error } = await query;
@@ -477,12 +499,19 @@ export async function getRandomAvailableArticles(
 /**
  * Random unexpired articles ignoring seen-list — last resort so the feed can still render.
  */
-export async function getRandomArticlesResurfacing(limit: number): Promise<StoredArticle[]> {
+export async function getRandomArticlesResurfacing(
+  limit: number,
+  contentKinds?: ArticleContentKind[]
+): Promise<StoredArticle[]> {
   const cap = Math.min(150, Math.max(40, limit * 12));
-  const { data, error } = await db
+  let query = db
     .from("articles")
     .select("*")
     .limit(cap);
+  if (contentKinds && contentKinds.length > 0) {
+    query = query.in("content_kind", contentKinds);
+  }
+  const { data, error } = await query;
 
   if (error) throw new Error(`getRandomArticlesResurfacing: ${error.message}`);
   const rows = await hydrateCreatorAuthorDisplay((data as ArticleRow[]).map(rowToArticle));
@@ -631,6 +660,7 @@ export interface CreatorPublishedArticleListItem {
   id: string;
   headline: string;
   category: string;
+  contentKind: ArticleContentKind;
   fetchedAt: string;
 }
 
@@ -639,16 +669,23 @@ export async function listCreatorPublishedArticles(
 ): Promise<CreatorPublishedArticleListItem[]> {
   const { data, error } = await db
     .from("articles")
-    .select("id, headline, category, fetched_at")
+    .select("id, headline, category, content_kind, fetched_at")
     .eq("author_user_id", authorUserId)
     .eq("source", "creator")
     .order("fetched_at", { ascending: false });
   if (error) throw new Error(`listCreatorPublishedArticles: ${error.message}`);
-  return (data as { id: string; headline: string; category: string; fetched_at: string }[]).map(
+  return (data as {
+    id: string;
+    headline: string;
+    category: string;
+    content_kind: string | null;
+    fetched_at: string;
+  }[]).map(
     (row) => ({
       id: row.id,
       headline: row.headline,
       category: row.category,
+      contentKind: row.content_kind === "recipe" ? "recipe" : "user_article",
       fetchedAt: row.fetched_at,
     })
   );

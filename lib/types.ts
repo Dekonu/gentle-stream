@@ -19,6 +19,7 @@ export interface StoredArticle extends RawArticle {
   fetchedAt: string;           // ISO timestamp
   expiresAt: string;           // ISO timestamp (fetchedAt + 7 days)
   source?: ArticleSource;
+  contentKind?: ArticleContentKind;
   authorUserId?: string | null;
   /** Filled when loading creator articles: display name (may differ from @username). */
   authorPenName?: string | null;
@@ -47,6 +48,8 @@ export type ArticleSentiment =
   | "triumphant";
 
 export type ArticleSource = "ingest" | "creator";
+export type ArticleContentKind = "news" | "user_article" | "recipe";
+export type SubmissionContentKind = "user_article" | "recipe";
 
 // ─── User profile ─────────────────────────────────────────────────────────────
 
@@ -102,6 +105,7 @@ export interface ArticleSubmission {
   body: string;
   pullQuote: string;
   category: Category;
+  contentKind: SubmissionContentKind;
   locale: string;
   explicitHashtags: string[];
   status: ArticleSubmissionStatus;
@@ -154,6 +158,7 @@ export interface UserGameStats {
 export interface FeedRequest {
   userId: string;
   category?: Category | null;
+  contentKinds?: ArticleContentKind[] | null;
   sectionIndex: number;
   pageSize?: number;           // default 3 (one newspaper section = 3 articles)
 }

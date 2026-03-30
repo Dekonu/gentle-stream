@@ -2,6 +2,7 @@ import type {
   ArticleSubmission,
   ArticleSubmissionStatus,
   CreatorProfile,
+  SubmissionContentKind,
   StoredArticle,
 } from "@/lib/types";
 import type { Category } from "@/lib/constants";
@@ -33,6 +34,7 @@ interface ArticleSubmissionRow {
   body: string;
   pull_quote: string;
   category: string;
+  content_kind: string | null;
   locale: string;
   explicit_hashtags: string[];
   status: string;
@@ -60,6 +62,10 @@ function toSubmissionStatus(value: string): ArticleSubmissionStatus {
     return value;
   }
   return "pending";
+}
+
+function toSubmissionContentKind(value: string | null | undefined): SubmissionContentKind {
+  return value === "recipe" ? "recipe" : "user_article";
 }
 
 function rowToCreatorProfile(row: CreatorProfileRow): CreatorProfile {
@@ -91,6 +97,7 @@ function rowToSubmission(row: ArticleSubmissionRow): ArticleSubmission {
     body: row.body,
     pullQuote: row.pull_quote,
     category: isCategory(row.category) ? row.category : CATEGORIES[0],
+    contentKind: toSubmissionContentKind(row.content_kind),
     locale: row.locale ?? "global",
     explicitHashtags: row.explicit_hashtags ?? [],
     status: toSubmissionStatus(row.status),
@@ -222,6 +229,7 @@ export async function createSubmission(input: {
   body: string;
   pullQuote: string;
   category: Category;
+  contentKind: SubmissionContentKind;
   locale: string;
   explicitHashtags: string[];
 }): Promise<ArticleSubmission> {
@@ -232,6 +240,7 @@ export async function createSubmission(input: {
     body: input.body,
     pull_quote: input.pullQuote,
     category: input.category,
+    content_kind: input.contentKind,
     locale: input.locale,
     explicit_hashtags: normaliseHashtags(input.explicitHashtags),
     status: "pending",
@@ -263,6 +272,7 @@ export async function updateSubmissionForAuthor(input: {
   body?: string;
   pullQuote?: string;
   category?: Category;
+  contentKind?: SubmissionContentKind;
   locale?: string;
   explicitHashtags?: string[];
   withdraw?: boolean;
@@ -285,6 +295,7 @@ export async function updateSubmissionForAuthor(input: {
   if (input.body !== undefined) updates.body = input.body;
   if (input.pullQuote !== undefined) updates.pull_quote = input.pullQuote;
   if (input.category !== undefined) updates.category = input.category;
+  if (input.contentKind !== undefined) updates.content_kind = input.contentKind;
   if (input.locale !== undefined) updates.locale = input.locale;
   if (input.explicitHashtags !== undefined) {
     updates.explicit_hashtags = normaliseHashtags(input.explicitHashtags);
@@ -398,6 +409,7 @@ export async function reviewSubmission(input: {
       byline,
       location,
       category: submission.category,
+      content_kind: toSubmissionContentKind(submission.content_kind),
       body: submission.body,
       pull_quote: submission.pull_quote,
       image_prompt: "",
@@ -444,6 +456,7 @@ export async function reviewSubmission(input: {
       byline,
       location,
       category: isCategory(submission.category) ? submission.category : CATEGORIES[0],
+      contentKind: toSubmissionContentKind(submission.content_kind),
       body: submission.body,
       pullQuote: submission.pull_quote,
       imagePrompt: "",

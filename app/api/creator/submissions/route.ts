@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUserId } from "@/lib/api/sessionUser";
 import { CATEGORIES, type Category } from "@/lib/constants";
+import type { SubmissionContentKind } from "@/lib/types";
 import { getOrCreateUserProfile } from "@/lib/db/users";
 import {
   countSubmissionsSince,
@@ -19,6 +20,10 @@ const DAILY_SUBMISSION_LIMIT = 10;
 
 function isCategory(value: string): value is Category {
   return CATEGORIES.includes(value as Category);
+}
+
+function isSubmissionContentKind(value: string): value is SubmissionContentKind {
+  return value === "user_article" || value === "recipe";
 }
 
 function toSafeText(value: unknown, maxLen: number): string {
@@ -93,6 +98,7 @@ export async function POST(request: NextRequest) {
     body?: unknown;
     pullQuote?: unknown;
     category?: unknown;
+    contentKind?: unknown;
     locale?: unknown;
     explicitHashtags?: unknown;
   };
@@ -112,6 +118,11 @@ export async function POST(request: NextRequest) {
   const locale = toSafeText(body.locale, 64) || "global";
   const categoryRaw = toSafeText(body.category, 80);
   const category = isCategory(categoryRaw) ? categoryRaw : null;
+  const contentKindRaw = toSafeText(body.contentKind, 40);
+  const contentKind: SubmissionContentKind =
+    contentKindRaw && isSubmissionContentKind(contentKindRaw)
+      ? contentKindRaw
+      : "user_article";
   const explicitHashtags = Array.isArray(body.explicitHashtags)
     ? body.explicitHashtags.filter((v): v is string => typeof v === "string")
     : [];
@@ -130,6 +141,7 @@ export async function POST(request: NextRequest) {
     body: articleBody,
     pullQuote,
     category,
+    contentKind,
     locale,
     explicitHashtags,
   });

@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS articles (
   -- Source metadata
   source          TEXT    NOT NULL DEFAULT 'ingest'
                     CHECK (source IN ('ingest', 'creator')),
+  content_kind    TEXT    NOT NULL DEFAULT 'news'
+                    CHECK (content_kind IN ('news', 'user_article', 'recipe')),
   author_user_id  TEXT,
   submission_id   UUID,
   creator_explicit_tags TEXT[] NOT NULL DEFAULT '{}'
@@ -54,6 +56,9 @@ CREATE INDEX IF NOT EXISTS idx_articles_category_expires
 
 CREATE INDEX IF NOT EXISTS idx_articles_source_tagged
   ON articles (source, tagged);
+
+CREATE INDEX IF NOT EXISTS idx_articles_content_kind_category_tagged
+  ON articles (content_kind, category, tagged);
 
 -- ─── User profiles ────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS user_profiles (
@@ -109,6 +114,8 @@ CREATE TABLE IF NOT EXISTS article_submissions (
   body                TEXT NOT NULL,
   pull_quote          TEXT NOT NULL DEFAULT '',
   category            TEXT NOT NULL,
+  content_kind        TEXT NOT NULL DEFAULT 'user_article'
+                      CHECK (content_kind IN ('user_article', 'recipe')),
   locale              TEXT NOT NULL DEFAULT 'global',
   explicit_hashtags   TEXT[] NOT NULL DEFAULT '{}',
   status              TEXT NOT NULL DEFAULT 'pending'

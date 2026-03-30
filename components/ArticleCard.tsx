@@ -167,6 +167,7 @@ export default function ArticleCard({
   const openLoggedRef = useRef(false);
   const read30LoggedRef = useRef(false);
   const read75LoggedRef = useRef(false);
+  const dwellLoggedRef = useRef(false);
   const visibleSinceRef = useRef<number | null>(null);
   const visibleAccumMsRef = useRef(0);
 
@@ -261,7 +262,10 @@ export default function ArticleCard({
   );
 
   const emitEngagement = useCallback(
-    (eventType: "impression" | "open" | "read_30s" | "read_75pct", eventValue?: number) => {
+    (
+      eventType: "impression" | "open" | "read_30s" | "read_75pct" | "read_dwell",
+      eventValue?: number
+    ) => {
       if (!userApiAllowed) return;
       if (!articleId) return;
       trackArticleEngagement({
@@ -285,6 +289,7 @@ export default function ArticleCard({
     openLoggedRef.current = false;
     read30LoggedRef.current = false;
     read75LoggedRef.current = false;
+    dwellLoggedRef.current = false;
     visibleSinceRef.current = null;
     visibleAccumMsRef.current = 0;
   }, [articleId]);
@@ -408,6 +413,11 @@ export default function ArticleCard({
       if (visibleSinceRef.current != null) {
         visibleAccumMsRef.current += Date.now() - visibleSinceRef.current;
         visibleSinceRef.current = null;
+      }
+      const totalVisibleSec = Math.round(visibleAccumMsRef.current / 1000);
+      if (!dwellLoggedRef.current && totalVisibleSec >= 5) {
+        dwellLoggedRef.current = true;
+        emitEngagement("read_dwell", totalVisibleSec);
       }
     };
   }, [articleId, emitEngagement]);
