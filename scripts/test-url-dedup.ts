@@ -16,8 +16,19 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import { insertArticles, normaliseUrl } from "../lib/db/articles";
-import { db } from "../lib/db/client";
+let insertArticles: typeof import("../lib/db/articles").insertArticles;
+let normaliseUrl: typeof import("../lib/db/articles").normaliseUrl;
+let db: typeof import("../lib/db/client").db;
+
+async function initDeps() {
+  const [articlesMod, clientMod] = await Promise.all([
+    import("../lib/db/articles"),
+    import("../lib/db/client"),
+  ]);
+  insertArticles = articlesMod.insertArticles;
+  normaliseUrl = articlesMod.normaliseUrl;
+  db = clientMod.db;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -254,6 +265,8 @@ async function main() {
   console.log("══════════════════════════════════════════════");
   console.log("  URL Deduplication Tests");
   console.log("══════════════════════════════════════════════");
+
+  await initDeps();
 
   // Unit tests (no DB)
   testNormaliseUrl();

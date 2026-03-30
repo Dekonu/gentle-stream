@@ -10,8 +10,17 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import { db } from "../lib/db/client";
-import { insertArticles } from "../lib/db/articles";
+let db: typeof import("../lib/db/client").db;
+let insertArticles: typeof import("../lib/db/articles").insertArticles;
+
+async function initDeps() {
+  const [articlesMod, clientMod] = await Promise.all([
+    import("../lib/db/articles"),
+    import("../lib/db/client"),
+  ]);
+  insertArticles = articlesMod.insertArticles;
+  db = clientMod.db;
+}
 
 let passed = 0;
 let failed = 0;
@@ -159,6 +168,7 @@ async function main() {
   console.log("══════════════════════════════════════════════");
 
   try {
+    await initDeps();
     await testSchemaPresence();
     await seedArticles();
     await testAffinityWeightingAndDecay();

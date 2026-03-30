@@ -15,8 +15,8 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import { insertArticles } from "../lib/db/articles";
-import { db } from "../lib/db/client";
+let insertArticles: typeof import("../lib/db/articles").insertArticles;
+let db: typeof import("../lib/db/client").db;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -52,6 +52,15 @@ const BASE = {
 
 // Track inserted IDs so we can clean up afterwards
 const insertedIds: string[] = [];
+
+async function initDeps() {
+  const [articlesMod, clientMod] = await Promise.all([
+    import("../lib/db/articles"),
+    import("../lib/db/client"),
+  ]);
+  insertArticles = articlesMod.insertArticles;
+  db = clientMod.db;
+}
 
 async function preCleanup() {
   // These integration tests run against a shared Supabase DB, so older runs can
@@ -181,6 +190,7 @@ async function main() {
   console.log("══════════════════════════════════════════════");
 
   try {
+    await initDeps();
     await preCleanup();
     await testExactDuplicate();
     await testCasingVariant();
