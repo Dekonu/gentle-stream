@@ -13,7 +13,6 @@ interface CreatorDashboardProps {
 
 interface FormState {
   headline: string;
-  subheadline: string;
   body: string;
   pullQuote: string;
   category: string;
@@ -32,7 +31,6 @@ interface FormState {
 
 const EMPTY_FORM: FormState = {
   headline: "",
-  subheadline: "",
   body: "",
   pullQuote: "",
   category: CATEGORIES[0],
@@ -60,6 +58,10 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
   const [recipeImagesBusy, setRecipeImagesBusy] = useState(false);
   const [recipeImagesError, setRecipeImagesError] = useState<string | null>(null);
   const [recipeImageInputKey, setRecipeImageInputKey] = useState(0);
+  const [recipeImportUrl, setRecipeImportUrl] = useState("");
+  const [recipeImportBusy, setRecipeImportBusy] = useState(false);
+  const [recipeImportMessage, setRecipeImportMessage] = useState<string | null>(null);
+  const [recipeImportIsError, setRecipeImportIsError] = useState(false);
   const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const bodyCharacterCount = form.body.length;
   const isBodyTooLong = bodyCharacterCount > MAX_SUBMISSION_BODY_CHARS;
@@ -196,10 +198,9 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             headline: form.headline,
-            subheadline: form.subheadline,
             body: bodyToSend,
             pullQuote: form.pullQuote,
-            category: form.category,
+            category: form.contentKind === "user_article" ? form.category : undefined,
             contentKind: form.contentKind,
             recipeServings: isRecipe ? recipeServings : undefined,
             recipeIngredients: isRecipe ? recipeIngredients : undefined,
@@ -233,7 +234,6 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
     setBodyEditorTab("write");
     setForm({
       headline: submission.headline,
-      subheadline: submission.subheadline,
       body: submission.body,
       pullQuote: submission.pullQuote,
       category: submission.category,
@@ -283,6 +283,93 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
       await loadSubmissions();
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function importRecipeFromLink() {
+    const url = recipeImportUrl.trim();
+    if (!url) {
+      setRecipeImportMessage("Paste a recipe URL first.");
+      setRecipeImportIsError(true);
+      return;
+    }
+    setRecipeImportBusy(true);
+    setRecipeImportMessage(null);
+    setRecipeImportIsError(false);
+    try {
+      const response = await fetch("/api/creator/recipe-import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ url }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        recipe?: {
+          headline?: string;
+          recipeServings?: number | null;
+          recipeIngredients?: string[];
+          recipeInstructions?: string[];
+          recipePrepTimeMinutes?: number | null;
+          recipeCookTimeMinutes?: number | null;
+          recipeImages?: string[];
+          sourceStage?: string;
+          warnings?: string[];
+        };
+      };
+      if (!response.ok || !payload.recipe) {
+        setRecipeImportMessage(
+          `Import failed (${response.status}): ${payload.error ?? "Could not import this recipe link."}`
+        );
+        setRecipeImportIsError(true);
+        return;
+      }
+
+      const recipe = payload.recipe;
+      setForm((prev) => ({
+        ...prev,
+        contentKind: "recipe",
+        headline: typeof recipe.headline === "string" && recipe.headline.trim().length > 0 ? recipe.headline : prev.headline,
+        recipeServings:
+          typeof recipe.recipeServings === "number" && Number.isFinite(recipe.recipeServings)
+            ? String(Math.trunc(recipe.recipeServings))
+            : prev.recipeServings,
+        recipeIngredientsText:
+          Array.isArray(recipe.recipeIngredients) && recipe.recipeIngredients.length > 0
+            ? recipe.recipeIngredients.join("\n")
+            : prev.recipeIngredientsText,
+        recipeInstructionsText:
+          Array.isArray(recipe.recipeInstructions) && recipe.recipeInstructions.length > 0
+            ? recipe.recipeInstructions.join("\n\n")
+            : prev.recipeInstructionsText,
+        recipePrepTimeMinutes:
+          typeof recipe.recipePrepTimeMinutes === "number" &&
+          Number.isFinite(recipe.recipePrepTimeMinutes)
+            ? String(Math.trunc(recipe.recipePrepTimeMinutes))
+            : prev.recipePrepTimeMinutes,
+        recipeCookTimeMinutes:
+          typeof recipe.recipeCookTimeMinutes === "number" &&
+          Number.isFinite(recipe.recipeCookTimeMinutes)
+            ? String(Math.trunc(recipe.recipeCookTimeMinutes))
+            : prev.recipeCookTimeMinutes,
+        recipeImages:
+          Array.isArray(recipe.recipeImages) && recipe.recipeImages.length > 0
+            ? recipe.recipeImages.slice(0, 3)
+            : prev.recipeImages,
+      }));
+
+      const stage = typeof recipe.sourceStage === "string" ? recipe.sourceStage : "extractor";
+      const warningText =
+        Array.isArray(recipe.warnings) && recipe.warnings.length > 0
+          ? ` (${recipe.warnings[0]})`
+          : "";
+      setRecipeImportMessage(`Imported via ${stage}.${warningText}`);
+      setRecipeImportIsError(false);
+    } catch {
+      setRecipeImportMessage("Could not import recipe right now.");
+      setRecipeImportIsError(true);
+    } finally {
+      setRecipeImportBusy(false);
     }
   }
 
@@ -344,34 +431,61 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
           <h2 style={{ marginTop: 0, fontFamily: "'Playfair Display', Georgia, serif", fontSize: "1.1rem" }}>
             {editingId ? "Edit pending submission" : "New submission"}
           </h2>
-          <div style={{ display: "grid", gap: "0.55rem" }}>
-            <input value={form.headline} onChange={(e) => setForm((f) => ({ ...f, headline: e.target.value }))} placeholder="Headline" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
-            <input value={form.subheadline} onChange={(e) => setForm((f) => ({ ...f, subheadline: e.target.value }))} placeholder="Subheadline (optional)" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
-            <select value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} style={{ padding: "0.45rem", border: "1px solid #bbb" }}>
-              {CATEGORIES.map((category) => (
-                <option key={category} value={category}>
-                  {category}
-                </option>
-              ))}
-            </select>
-            <select
-              value={form.contentKind}
-              onChange={(e) =>
-                setForm((f) => ({
-                  ...f,
-                  contentKind:
-                    e.target.value === "recipe" ? "recipe" : "user_article",
-                  body:
-                    e.target.value === "recipe"
-                      ? ""
-                      : f.body,
-                }))
-              }
-              style={{ padding: "0.45rem", border: "1px solid #bbb" }}
-            >
-              <option value="user_article">User article</option>
-              <option value="recipe">Recipe</option>
-            </select>
+          <div style={{ display: "grid", gap: "0.75rem" }}>
+            <div style={{ border: "1px solid #d8d2c7", background: "#fff", padding: "0.7rem" }}>
+              <p
+                style={{
+                  margin: 0,
+                  marginBottom: "0.5rem",
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: "0.9rem",
+                  color: "#222",
+                }}
+              >
+                Compose type
+              </p>
+              <div style={{ display: "flex", gap: "0.85rem", flexWrap: "wrap" }}>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: "0.42rem", cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="content-kind"
+                    checked={form.contentKind === "user_article"}
+                    onChange={() =>
+                      setForm((f) => ({ ...f, contentKind: "user_article" }))
+                    }
+                  />
+                  <span style={{ fontFamily: "'IM Fell English', Georgia, serif", fontSize: "0.9rem" }}>
+                    Article
+                  </span>
+                </label>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: "0.42rem", cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="content-kind"
+                    checked={form.contentKind === "recipe"}
+                    onChange={() =>
+                      setForm((f) => ({ ...f, contentKind: "recipe" }))
+                    }
+                  />
+                  <span style={{ fontFamily: "'IM Fell English', Georgia, serif", fontSize: "0.9rem" }}>
+                    Recipe
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div style={{ border: "1px solid #d8d2c7", background: "#fff", padding: "0.7rem", display: "grid", gap: "0.55rem" }}>
+              <input value={form.headline} onChange={(e) => setForm((f) => ({ ...f, headline: e.target.value }))} placeholder="Headline" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
+              {form.contentKind === "user_article" ? (
+                <select value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} style={{ padding: "0.45rem", border: "1px solid #bbb" }}>
+                  {CATEGORIES.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+            </div>
             {form.contentKind === "user_article" ? (
               <div
                 style={{
@@ -493,6 +607,57 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                 </h3>
 
                 <div style={{ display: "grid", gap: "0.55rem" }}>
+                  <div style={{ display: "grid", gap: "0.35rem" }}>
+                    <label style={{ fontSize: "0.85rem", color: "#555", fontWeight: 600 }}>
+                      Import recipe from link
+                    </label>
+                    <div style={{ display: "flex", gap: "0.45rem", flexWrap: "wrap" }}>
+                      <input
+                        value={recipeImportUrl}
+                        onChange={(e) => setRecipeImportUrl(e.target.value)}
+                        placeholder="https://example.com/recipe"
+                        style={{
+                          flex: "1 1 280px",
+                          padding: "0.45rem",
+                          border: "1px solid #bbb",
+                          minWidth: 0,
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void importRecipeFromLink()}
+                        disabled={recipeImportBusy}
+                        style={{
+                          padding: "0.45rem 0.65rem",
+                          border: "1px solid #1a472a",
+                          background: "#fff",
+                          cursor: recipeImportBusy ? "wait" : "pointer",
+                          fontFamily: "'Playfair Display', Georgia, serif",
+                        }}
+                      >
+                        {recipeImportBusy ? "Importing..." : "Import"}
+                      </button>
+                    </div>
+                    {recipeImportMessage ? (
+                      <p
+                        style={{
+                          margin: 0,
+                          fontSize: "0.8rem",
+                          color: recipeImportIsError ? "#8b4513" : "#2f5f3a",
+                          background: recipeImportIsError ? "#fff0e6" : "#edf7ef",
+                          border: `1px solid ${recipeImportIsError ? "#e4bf9a" : "#b6d7bf"}`,
+                          padding: "0.38rem 0.5rem",
+                        }}
+                      >
+                        {recipeImportMessage}
+                      </p>
+                    ) : (
+                      <p style={{ margin: 0, fontSize: "0.8rem", color: "#888" }}>
+                        Imports are limited to allowlisted domains.
+                      </p>
+                    )}
+                  </div>
+
                   <div style={{ display: "flex", gap: "0.55rem", flexWrap: "wrap" }}>
                     <div style={{ flex: "1 1 160px" }}>
                       <label style={{ fontSize: "0.85rem", color: "#555", fontWeight: 600 }}>
