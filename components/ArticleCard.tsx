@@ -22,6 +22,7 @@ import {
   toClickableSourceUrl,
   uniqueSourceUrls,
 } from "@/lib/source-links";
+import { CreatorBylineLink } from "@/components/articles/CreatorBylineLink";
 import { trackArticleEngagement } from "@/lib/engagement/client";
 import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
 
@@ -708,7 +709,16 @@ export default function ArticleCard({
           letterSpacing: "0.04em",
         }}
       >
-        <span style={{ fontWeight: 600, color: "#555" }}>{article.byline}</span>
+        <CreatorBylineLink
+          byline={article.byline}
+          authorUserId={"authorUserId" in article ? article.authorUserId : null}
+          linkToProfile={
+            "source" in article &&
+            article.source === "creator" &&
+            Boolean("authorUserId" in article && article.authorUserId)
+          }
+          accentColor={accentColor}
+        />
         {article.location && <span>&middot; {article.location}</span>}
       </div>
 

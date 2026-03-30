@@ -6,6 +6,11 @@ import { CATEGORIES } from "@/lib/constants";
 import type { ArticleSubmission } from "@/lib/types";
 import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
 
+interface CreatorDashboardProps {
+  /** Public creator profile URL (same for author byline links). */
+  publicProfileHref?: string;
+}
+
 interface FormState {
   headline: string;
   subheadline: string;
@@ -28,7 +33,7 @@ const EMPTY_FORM: FormState = {
 
 const MAX_SUBMISSION_BODY_CHARS = 15_000;
 
-export function CreatorDashboard() {
+export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = {}) {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [submissions, setSubmissions] = useState<ArticleSubmission[]>([]);
   const [loading, setLoading] = useState(true);
@@ -186,20 +191,38 @@ export function CreatorDashboard() {
             <h1 style={{ margin: 0, fontFamily: "'Playfair Display', Georgia, serif", fontSize: "1.5rem" }}>
               Creator studio
             </h1>
-            <Link
-              href="/"
-              style={{
-                padding: "0.36rem 0.62rem",
-                border: "1px solid #888",
-                background: "#fff",
-                color: "#1a1a1a",
-                textDecoration: "none",
-                fontSize: "0.82rem",
-                fontFamily: "'IM Fell English', Georgia, serif",
-              }}
-            >
-              Back to app
-            </Link>
+            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
+              {publicProfileHref ? (
+                <Link
+                  href={publicProfileHref}
+                  style={{
+                    padding: "0.36rem 0.62rem",
+                    border: "1px solid #1a472a",
+                    background: "#fff",
+                    color: "#1a472a",
+                    textDecoration: "none",
+                    fontSize: "0.82rem",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                  }}
+                >
+                  Public profile
+                </Link>
+              ) : null}
+              <Link
+                href="/"
+                style={{
+                  padding: "0.36rem 0.62rem",
+                  border: "1px solid #888",
+                  background: "#fff",
+                  color: "#1a1a1a",
+                  textDecoration: "none",
+                  fontSize: "0.82rem",
+                  fontFamily: "'IM Fell English', Georgia, serif",
+                }}
+              >
+                Back to app
+              </Link>
+            </div>
           </div>
           <p style={{ margin: "0.35rem 0 0", color: "#666", fontFamily: "'IM Fell English', Georgia, serif" }}>
             Draft and submit stories. Pending or revision-requested stories can still be edited or withdrawn.

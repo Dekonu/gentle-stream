@@ -351,13 +351,21 @@ export async function reviewSubmission(input: {
     submissionId: submission.id,
   });
   const explicitTags = normaliseHashtags(submission.explicit_hashtags ?? []);
+  const authorProfile = await getCreatorProfile(submission.author_user_id);
+  const penName = authorProfile?.penName?.trim() ?? "";
+  const byline = penName ? `By ${penName}` : "By Creator";
+  const location =
+    authorProfile?.locale?.trim() &&
+    authorProfile.locale.trim().toLowerCase() !== "global"
+      ? authorProfile.locale.trim()
+      : "";
   const { data: article, error: articleError } = await db
     .from("articles")
     .insert({
       headline: submission.headline,
       subheadline: submission.subheadline,
-      byline: "",
-      location: "",
+      byline,
+      location,
       category: submission.category,
       body: submission.body,
       pull_quote: submission.pull_quote,
@@ -402,8 +410,8 @@ export async function reviewSubmission(input: {
       id: (article as { id: string }).id,
       headline: submission.headline,
       subheadline: submission.subheadline,
-      byline: "",
-      location: "",
+      byline,
+      location,
       category: isCategory(submission.category) ? submission.category : CATEGORIES[0],
       body: submission.body,
       pullQuote: submission.pull_quote,

@@ -104,6 +104,17 @@ export async function getOrCreateUserProfile(
   return rowToProfile(created as UserProfileRow);
 }
 
+/** Read-only profile lookup (no insert). Used for public creator pages. */
+export async function getUserProfileById(userId: string): Promise<UserProfile | null> {
+  const { data, error } = await db
+    .from("user_profiles")
+    .select("*")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return rowToProfile(data as UserProfileRow);
+}
+
 /**
  * Mark article IDs as seen for a user.
  * Keeps the seen list capped at 500 (oldest dropped first).

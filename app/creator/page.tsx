@@ -23,5 +23,5 @@ export default async function CreatorPage() {
     redirect("/creator/onboarding");
   }
 
-  return <CreatorDashboard />;
+  return <CreatorDashboard publicProfileHref={`/creator/${user.id}`} />;
 }

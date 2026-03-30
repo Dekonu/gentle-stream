@@ -7,6 +7,7 @@ import {
   uniqueSourceUrls,
 } from "@/lib/source-links";
 import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
+import { CreatorBylineLink } from "@/components/articles/CreatorBylineLink";
 
 interface SavedArticleReaderProps {
   article: StoredArticle;
@@ -63,7 +64,13 @@ export function SavedArticleReader({
             letterSpacing: "0.04em",
           }}
         >
-          <span style={{ fontWeight: 600, color: "#444" }}>{article.byline}</span>
+          <CreatorBylineLink
+            byline={article.byline}
+            authorUserId={article.authorUserId}
+            linkToProfile={
+              article.source === "creator" && Boolean(article.authorUserId)
+            }
+          />
           {article.location ? <span> · {article.location}</span> : null}
         </div>
       </header>

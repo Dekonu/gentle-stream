@@ -565,6 +565,61 @@ export async function getArticleById(
   return rowToArticle(data as ArticleRow);
 }
 
+export interface CreatorPublishedArticleListItem {
+  id: string;
+  headline: string;
+  category: string;
+  fetchedAt: string;
+}
+
+export async function listCreatorPublishedArticles(
+  authorUserId: string
+): Promise<CreatorPublishedArticleListItem[]> {
+  const { data, error } = await db
+    .from("articles")
+    .select("id, headline, category, fetched_at")
+    .eq("author_user_id", authorUserId)
+    .eq("source", "creator")
+    .order("fetched_at", { ascending: false });
+  if (error) throw new Error(`listCreatorPublishedArticles: ${error.message}`);
+  return (data as { id: string; headline: string; category: string; fetched_at: string }[]).map(
+    (row) => ({
+      id: row.id,
+      headline: row.headline,
+      category: row.category,
+      fetchedAt: row.fetched_at,
+    })
+  );
+}
+
+export async function getCreatorArticleEngagementTotals(authorUserId: string): Promise<{
+  totalLikes: number;
+  totalSaves: number;
+}> {
+  const { data: rows, error } = await db
+    .from("articles")
+    .select("id")
+    .eq("author_user_id", authorUserId)
+    .eq("source", "creator");
+  if (error) throw new Error(`getCreatorArticleEngagementTotals articles: ${error.message}`);
+  const ids = (rows as { id: string }[] | null)?.map((r) => r.id) ?? [];
+  if (ids.length === 0) return { totalLikes: 0, totalSaves: 0 };
+
+  const { count: likeCount, error: likeErr } = await db
+    .from("article_likes")
+    .select("*", { count: "exact", head: true })
+    .in("article_id", ids);
+  if (likeErr) throw new Error(`getCreatorArticleEngagementTotals likes: ${likeErr.message}`);
+
+  const { count: saveCount, error: saveErr } = await db
+    .from("article_saves")
+    .select("*", { count: "exact", head: true })
+    .in("article_id", ids);
+  if (saveErr) throw new Error(`getCreatorArticleEngagementTotals saves: ${saveErr.message}`);
+
+  return { totalLikes: likeCount ?? 0, totalSaves: saveCount ?? 0 };
+}
+
 /**
  * Fetch untagged articles (for the tagger agent to process).
  */
