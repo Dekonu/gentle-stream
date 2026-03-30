@@ -35,6 +35,13 @@ interface ArticleRow {
   author_user_id?: string | null;
   submission_id?: string | null;
   creator_explicit_tags?: string[];
+
+  recipe_servings?: number | null;
+  recipe_ingredients?: string[] | null;
+  recipe_instructions?: string[] | null;
+  recipe_prep_time_minutes?: number | null;
+  recipe_cook_time_minutes?: number | null;
+  recipe_images?: string[] | null;
 }
 
 function isGenericCreatorByline(byline: string): boolean {
@@ -129,6 +136,13 @@ function rowToArticle(row: ArticleRow): StoredArticle {
     authorUserId: row.author_user_id ?? null,
     submissionId: row.submission_id ?? null,
     creatorExplicitTags: row.creator_explicit_tags ?? [],
+
+    recipeServings: row.recipe_servings ?? null,
+    recipeIngredients: row.recipe_ingredients ?? [],
+    recipeInstructions: row.recipe_instructions ?? [],
+    recipePrepTimeMinutes: row.recipe_prep_time_minutes ?? null,
+    recipeCookTimeMinutes: row.recipe_cook_time_minutes ?? null,
+    recipeImages: row.recipe_images ?? [],
   };
 }
 

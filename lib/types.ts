@@ -39,6 +39,14 @@ export interface StoredArticle extends RawArticle {
   // Feed mechanics
   usedCount: number;           // how many feed responses included this article
   tagged: boolean;             // false until tagger agent has run
+
+  // Recipe-specific fields (contentKind='recipe')
+  recipeServings?: number | null;
+  recipeIngredients?: string[];
+  recipeInstructions?: string[];
+  recipePrepTimeMinutes?: number | null;
+  recipeCookTimeMinutes?: number | null;
+  recipeImages?: string[];
 }
 
 export type ArticleSentiment =
@@ -116,6 +124,14 @@ export interface ArticleSubmission {
   publishedArticleId: string | null;
   createdAt: string;
   updatedAt: string;
+
+  // Recipe-specific draft fields (contentKind='recipe')
+  recipeServings?: number | null;
+  recipeIngredients?: string[];
+  recipeInstructions?: string[];
+  recipePrepTimeMinutes?: number | null;
+  recipeCookTimeMinutes?: number | null;
+  recipeImages?: string[];
 }
 
 /** Row from `article_saves` for library UI */

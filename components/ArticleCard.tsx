@@ -1057,12 +1057,90 @@ export default function ArticleCard({
       {/* Body copy */}
       <div
         style={{
-          columns: isHero ? 2 : 1,
+          columns: isRecipeCard ? 1 : isHero ? 2 : 1,
           columnGap: "1.5rem",
           columnRule: "1px solid #d4cfc4",
         }}
       >
-        <ArticleBodyMarkdown markdown={article.body ?? ""} variant="feed" fontPreset="classic" />
+        {isRecipeCard ? (
+          <div style={{ display: "grid", gap: "0.65rem", breakInside: "avoid-column" }}>
+            {("recipeImages" in article && (article.recipeImages?.length ?? 0) > 0) ? (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "0.35rem" }}>
+                {(article.recipeImages ?? []).slice(0, 3).map((src, i) => (
+                  <img
+                    key={`${src}-${i}`}
+                    src={src}
+                    alt={`Recipe image ${i + 1}`}
+                    loading="lazy"
+                    decoding="async"
+                    width={210}
+                    height={140}
+                    style={{
+                      width: "100%",
+                      aspectRatio: "3 / 2",
+                      objectFit: "cover",
+                      borderRadius: 6,
+                      border: "1px solid #ddd",
+                      background: "#fff",
+                      display: "block",
+                    }}
+                    onError={(e) => {
+                      // Best-effort: hide broken thumbnails.
+                      const el = e.currentTarget;
+                      el.style.display = "none";
+                    }}
+                  />
+                ))}
+              </div>
+            ) : null}
+
+            <div style={{ display: "flex", gap: "0.85rem", flexWrap: "wrap" }}>
+              {("recipeServings" in article && article.recipeServings != null) ? (
+                <span style={{ fontFamily: "'Playfair Display', Georgia, serif", color: "#1a472a", fontWeight: 700 }}>
+                  Serves {article.recipeServings}
+                </span>
+              ) : null}
+              {("recipePrepTimeMinutes" in article && article.recipePrepTimeMinutes != null) ? (
+                <span style={{ color: "#555" }}>Prep {article.recipePrepTimeMinutes} min</span>
+              ) : null}
+              {("recipeCookTimeMinutes" in article && article.recipeCookTimeMinutes != null) ? (
+                <span style={{ color: "#555" }}>Cook {article.recipeCookTimeMinutes} min</span>
+              ) : null}
+            </div>
+
+            {("recipeIngredients" in article && (article.recipeIngredients?.length ?? 0) > 0) ? (
+              <div style={{ breakInside: "avoid" }}>
+                <div style={{ fontFamily: "'IM Fell English', Georgia, serif", fontWeight: 700, color: "#333", marginBottom: "0.25rem" }}>
+                  Ingredients
+                </div>
+                <ul style={{ margin: 0, paddingLeft: "1.15rem", color: "#1a1a1a", lineHeight: 1.6 }}>
+                  {(article.recipeIngredients ?? []).map((ing, i) => (
+                    <li key={`${ing}-${i}`}>{ing}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {("recipeInstructions" in article && (article.recipeInstructions?.length ?? 0) > 0) ? (
+              <div style={{ breakInside: "avoid-column" }}>
+                <div style={{ fontFamily: "'IM Fell English', Georgia, serif", fontWeight: 700, color: "#333", marginBottom: "0.25rem" }}>
+                  Instructions
+                </div>
+                <ol style={{ margin: 0, paddingLeft: "1.15rem", color: "#1a1a1a", lineHeight: 1.6 }}>
+                  {(article.recipeInstructions ?? []).map((step, i) => (
+                    <li key={`${step}-${i}`}>{step}</li>
+                  ))}
+                </ol>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <ArticleBodyMarkdown
+            markdown={article.body ?? ""}
+            variant="feed"
+            fontPreset="classic"
+          />
+        )}
       </div>
 
       {article.pullQuote?.trim() ? (

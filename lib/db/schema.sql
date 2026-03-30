@@ -43,7 +43,14 @@ CREATE TABLE IF NOT EXISTS articles (
                     CHECK (content_kind IN ('news', 'user_article', 'recipe')),
   author_user_id  TEXT,
   submission_id   UUID,
-  creator_explicit_tags TEXT[] NOT NULL DEFAULT '{}'
+  creator_explicit_tags TEXT[] NOT NULL DEFAULT '{}',
+  -- Recipe fields (used when content_kind='recipe')
+  recipe_servings INT,
+  recipe_ingredients TEXT[] NOT NULL DEFAULT '{}',
+  recipe_instructions TEXT[] NOT NULL DEFAULT '{}',
+  recipe_prep_time_minutes INT,
+  recipe_cook_time_minutes INT,
+  recipe_images TEXT[] NOT NULL DEFAULT '{}'
 );
 
 -- Index for fast per-category feed queries
@@ -126,7 +133,14 @@ CREATE TABLE IF NOT EXISTS article_submissions (
   reviewed_at         TIMESTAMPTZ,
   published_article_id UUID REFERENCES articles (id) ON DELETE SET NULL,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  -- Recipe fields (used when content_kind='recipe')
+  recipe_servings INT,
+  recipe_ingredients TEXT[] NOT NULL DEFAULT '{}',
+  recipe_instructions TEXT[] NOT NULL DEFAULT '{}',
+  recipe_prep_time_minutes INT,
+  recipe_cook_time_minutes INT,
+  recipe_images TEXT[] NOT NULL DEFAULT '{}'
 );
 
 CREATE INDEX IF NOT EXISTS idx_article_submissions_status_created_at

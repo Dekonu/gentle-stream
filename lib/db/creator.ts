@@ -45,6 +45,13 @@ interface ArticleSubmissionRow {
   published_article_id: string | null;
   created_at: string;
   updated_at: string;
+
+  recipe_servings?: number | null;
+  recipe_ingredients?: string[] | null;
+  recipe_instructions?: string[] | null;
+  recipe_prep_time_minutes?: number | null;
+  recipe_cook_time_minutes?: number | null;
+  recipe_images?: string[] | null;
 }
 
 function isCategory(value: string): value is Category {
@@ -108,6 +115,13 @@ function rowToSubmission(row: ArticleSubmissionRow): ArticleSubmission {
     publishedArticleId: row.published_article_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+
+    recipeServings: row.recipe_servings ?? null,
+    recipeIngredients: row.recipe_ingredients ?? [],
+    recipeInstructions: row.recipe_instructions ?? [],
+    recipePrepTimeMinutes: row.recipe_prep_time_minutes ?? null,
+    recipeCookTimeMinutes: row.recipe_cook_time_minutes ?? null,
+    recipeImages: row.recipe_images ?? [],
   };
 }
 
@@ -232,6 +246,12 @@ export async function createSubmission(input: {
   contentKind: SubmissionContentKind;
   locale: string;
   explicitHashtags: string[];
+  recipeServings?: number | null;
+  recipeIngredients?: string[];
+  recipeInstructions?: string[];
+  recipePrepTimeMinutes?: number | null;
+  recipeCookTimeMinutes?: number | null;
+  recipeImages?: string[];
 }): Promise<ArticleSubmission> {
   const row = {
     author_user_id: input.authorUserId,
@@ -244,6 +264,19 @@ export async function createSubmission(input: {
     locale: input.locale,
     explicit_hashtags: normaliseHashtags(input.explicitHashtags),
     status: "pending",
+
+    recipe_servings:
+      input.contentKind === "recipe" ? input.recipeServings ?? null : null,
+    recipe_ingredients:
+      input.contentKind === "recipe" ? input.recipeIngredients ?? [] : [],
+    recipe_instructions:
+      input.contentKind === "recipe" ? input.recipeInstructions ?? [] : [],
+    recipe_prep_time_minutes:
+      input.contentKind === "recipe" ? input.recipePrepTimeMinutes ?? null : null,
+    recipe_cook_time_minutes:
+      input.contentKind === "recipe" ? input.recipeCookTimeMinutes ?? null : null,
+    recipe_images:
+      input.contentKind === "recipe" ? input.recipeImages ?? [] : [],
   };
   const { data, error } = await db
     .from("article_submissions")
@@ -276,6 +309,13 @@ export async function updateSubmissionForAuthor(input: {
   locale?: string;
   explicitHashtags?: string[];
   withdraw?: boolean;
+
+  recipeServings?: number | null;
+  recipeIngredients?: string[];
+  recipeInstructions?: string[];
+  recipePrepTimeMinutes?: number | null;
+  recipeCookTimeMinutes?: number | null;
+  recipeImages?: string[];
 }): Promise<ArticleSubmission> {
   const { data: existing, error: existingError } = await db
     .from("article_submissions")
@@ -299,6 +339,25 @@ export async function updateSubmissionForAuthor(input: {
   if (input.locale !== undefined) updates.locale = input.locale;
   if (input.explicitHashtags !== undefined) {
     updates.explicit_hashtags = normaliseHashtags(input.explicitHashtags);
+  }
+
+  if (input.recipeServings !== undefined) {
+    updates.recipe_servings = input.recipeServings;
+  }
+  if (input.recipeIngredients !== undefined) {
+    updates.recipe_ingredients = input.recipeIngredients;
+  }
+  if (input.recipeInstructions !== undefined) {
+    updates.recipe_instructions = input.recipeInstructions;
+  }
+  if (input.recipePrepTimeMinutes !== undefined) {
+    updates.recipe_prep_time_minutes = input.recipePrepTimeMinutes;
+  }
+  if (input.recipeCookTimeMinutes !== undefined) {
+    updates.recipe_cook_time_minutes = input.recipeCookTimeMinutes;
+  }
+  if (input.recipeImages !== undefined) {
+    updates.recipe_images = input.recipeImages;
   }
   if (row.status === "changes_requested") {
     // Any creator edit after moderation feedback is treated as a resubmission.
@@ -427,6 +486,19 @@ export async function reviewSubmission(input: {
       author_user_id: submission.author_user_id,
       submission_id: submission.id,
       creator_explicit_tags: explicitTags,
+
+      recipe_servings:
+        submission.content_kind === "recipe" ? submission.recipe_servings ?? null : null,
+      recipe_ingredients:
+        submission.content_kind === "recipe" ? submission.recipe_ingredients ?? [] : [],
+      recipe_instructions:
+        submission.content_kind === "recipe" ? submission.recipe_instructions ?? [] : [],
+      recipe_prep_time_minutes:
+        submission.content_kind === "recipe" ? submission.recipe_prep_time_minutes ?? null : null,
+      recipe_cook_time_minutes:
+        submission.content_kind === "recipe" ? submission.recipe_cook_time_minutes ?? null : null,
+      recipe_images:
+        submission.content_kind === "recipe" ? submission.recipe_images ?? [] : [],
     })
     .select("*")
     .single();
@@ -475,6 +547,30 @@ export async function reviewSubmission(input: {
       authorUserId: submission.author_user_id,
       submissionId: submission.id,
       creatorExplicitTags: explicitTags,
+      recipeServings:
+        submission.content_kind === "recipe"
+          ? submission.recipe_servings ?? null
+          : null,
+      recipeIngredients:
+        submission.content_kind === "recipe"
+          ? submission.recipe_ingredients ?? []
+          : [],
+      recipeInstructions:
+        submission.content_kind === "recipe"
+          ? submission.recipe_instructions ?? []
+          : [],
+      recipePrepTimeMinutes:
+        submission.content_kind === "recipe"
+          ? submission.recipe_prep_time_minutes ?? null
+          : null,
+      recipeCookTimeMinutes:
+        submission.content_kind === "recipe"
+          ? submission.recipe_cook_time_minutes ?? null
+          : null,
+      recipeImages:
+        submission.content_kind === "recipe"
+          ? submission.recipe_images ?? []
+          : [],
     },
   };
 }
