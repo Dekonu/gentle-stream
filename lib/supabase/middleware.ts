@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { parseEnv } from "@/lib/env";
 import {
   parseSessionStart,
   SESSION_MAX_AGE_SEC,
@@ -31,13 +32,11 @@ function isPublicPath(pathname: string): boolean {
 }
 
 export async function updateSession(request: NextRequest) {
-  if (
-    process.env.NODE_ENV === "production" &&
-    (process.env.AUTH_DISABLED === "1" || process.env.AUTH_DISABLED === "true")
-  ) {
+  const env = parseEnv(process.env);
+  if (env.NODE_ENV === "production" && env.AUTH_DISABLED) {
     throw new Error("AUTH_DISABLED must never be enabled in production.");
   }
-  if (process.env.AUTH_DISABLED === "1") {
+  if (env.AUTH_DISABLED) {
     return NextResponse.next({ request });
   }
 
@@ -53,8 +52,8 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.next({ request });
   }
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const url = env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) {
     return NextResponse.next({ request });
   }

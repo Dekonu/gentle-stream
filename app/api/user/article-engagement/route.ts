@@ -1,14 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { db } from "@/lib/db/client";
 import { getSessionUserId } from "@/lib/api/sessionUser";
 import type { ArticleEngagementBatchRequest } from "@/lib/engagement/types";
-import { parseEngagementBatch } from "@/lib/engagement/contract";
+import {
+  ARTICLE_ENGAGEMENT_MAX_EVENTS_PER_REQUEST,
+  parseEngagementBatch,
+} from "@/lib/engagement/contract";
 import {
   buildRateLimitKey,
   consumeRateLimit,
   rateLimitExceededResponse,
 } from "@/lib/security/rateLimit";
 import { hasTrustedOrigin } from "@/lib/security/origin";
+import { parseJsonBody } from "@/lib/validation/http";
 
 /**
  * Engagement tracking is now rolled out to 100% of authenticated users.
@@ -23,7 +28,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const rateLimit = consumeRateLimit({
+  const rateLimit = await consumeRateLimit({
     policy: { id: "article-engagement", windowMs: 60_000, max: 180 },
     key: buildRateLimitKey({
       request,
@@ -33,12 +38,17 @@ export async function POST(request: NextRequest) {
   });
   if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit);
 
-  let body: ArticleEngagementBatchRequest | null = null;
-  try {
-    body = (await request.json()) as ArticleEngagementBatchRequest;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+  const parsedBody = await parseJsonBody({
+    request,
+    schema: z.object({
+      events: z
+        .array(z.unknown())
+        .min(1)
+        .max(ARTICLE_ENGAGEMENT_MAX_EVENTS_PER_REQUEST),
+    }),
+  });
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.data as ArticleEngagementBatchRequest;
 
   const parsed = parseEngagementBatch(body, userId);
   if (parsed.error) {

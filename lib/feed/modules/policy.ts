@@ -34,6 +34,28 @@ export function chooseModuleTypeByPolicy(
   return "todo";
 }
 
+/** Gap / interval rows in the feed: todo vs generated illustration only. */
+export function chooseGapIntervalModuleType(input: {
+  seed: number;
+  todoWeight: number;
+  todoEnabled: boolean;
+}): "todo" | "generated_art" {
+  if (!input.todoEnabled) return "generated_art";
+  const w = Math.max(1, input.todoWeight);
+  const total = w + 1;
+  const bucket = Math.abs(input.seed % total);
+  return bucket < w ? "todo" : "generated_art";
+}
+
+/** Inline column balance: follow layout hint when todo is enabled. */
+export function chooseInlineModuleType(input: {
+  layoutHint: "generated_art" | "todo";
+  todoEnabled: boolean;
+}): "todo" | "generated_art" {
+  if (!input.todoEnabled) return "generated_art";
+  return input.layoutHint === "todo" ? "todo" : "generated_art";
+}
+
 export function buildGeneratedImageModuleData(input: {
   category?: string | null;
   location?: string | null;

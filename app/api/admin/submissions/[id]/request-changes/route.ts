@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { isAdmin } from "@/lib/auth/admin";
 import { reviewSubmission } from "@/lib/db/creator";
+import { parseJsonBody } from "@/lib/validation/http";
+
+const requestChangesBodySchema = z.object({
+  adminNote: z.string().max(800).nullish(),
+});
 
 export async function POST(
   request: NextRequest,
@@ -19,9 +25,12 @@ export async function POST(
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
-  const body = (await request.json().catch(() => ({}))) as {
-    adminNote?: unknown;
-  };
+  const parsedBody = await parseJsonBody({
+    request,
+    schema: requestChangesBodySchema,
+  });
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.data;
   const adminNote =
     typeof body.adminNote === "string" && body.adminNote.trim()
       ? body.adminNote.trim().slice(0, 800)

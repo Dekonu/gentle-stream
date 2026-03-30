@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { getSessionUserId } from "@/lib/api/sessionUser";
 import { CATEGORIES, type Category } from "@/lib/constants";
 import type { SubmissionContentKind } from "@/lib/types";
 import { getOrCreateUserProfile } from "@/lib/db/users";
 import { updateSubmissionForAuthor } from "@/lib/db/creator";
+import { parseJsonBody } from "@/lib/validation/http";
 
 function isCategory(value: string): value is Category {
   return CATEGORIES.includes(value as Category);
@@ -18,6 +20,24 @@ function toSafeText(value: unknown, maxLen: number): string | undefined {
   if (typeof value !== "string") return undefined;
   return value.trim().slice(0, maxLen);
 }
+
+const updateSubmissionBodySchema = z.object({
+  headline: z.string().optional(),
+  subheadline: z.string().optional(),
+  body: z.string().optional(),
+  pullQuote: z.string().optional(),
+  category: z.string().optional(),
+  contentKind: z.string().optional(),
+  locale: z.string().optional(),
+  explicitHashtags: z.array(z.string()).optional(),
+  withdraw: z.boolean().optional(),
+  recipeServings: z.union([z.number(), z.string()]).optional(),
+  recipeIngredients: z.union([z.array(z.string()), z.string()]).optional(),
+  recipeInstructions: z.union([z.array(z.string()), z.string()]).optional(),
+  recipePrepTimeMinutes: z.union([z.number(), z.string()]).optional(),
+  recipeCookTimeMinutes: z.union([z.number(), z.string()]).optional(),
+  recipeImages: z.array(z.string()).optional(),
+});
 
 export async function PATCH(
   request: NextRequest,
@@ -34,24 +54,12 @@ export async function PATCH(
     return NextResponse.json({ error: "Creator access required" }, { status: 403 });
   }
 
-  const body = (await request.json()) as {
-    headline?: unknown;
-    subheadline?: unknown;
-    body?: unknown;
-    pullQuote?: unknown;
-    category?: unknown;
-    contentKind?: unknown;
-    locale?: unknown;
-    explicitHashtags?: unknown;
-    withdraw?: unknown;
-
-    recipeServings?: unknown;
-    recipeIngredients?: unknown;
-    recipeInstructions?: unknown;
-    recipePrepTimeMinutes?: unknown;
-    recipeCookTimeMinutes?: unknown;
-    recipeImages?: unknown;
-  };
+  const parsedBody = await parseJsonBody({
+    request,
+    schema: updateSubmissionBodySchema,
+  });
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.data;
   const rawArticleBody =
     typeof body.body === "string" ? body.body.trim() : undefined;
   if (rawArticleBody !== undefined && rawArticleBody.length > 15_000) {

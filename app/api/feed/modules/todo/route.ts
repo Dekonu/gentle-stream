@@ -1,10 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { getSessionUserId } from "@/lib/api/sessionUser";
 import {
   addDailyTodoItem,
   getOrCreateDailyTodos,
   updateDailyTodoItem,
 } from "@/lib/db/dailyTodos";
+import { parseJsonBody } from "@/lib/validation/http";
+
+const todoActionSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("add"),
+    timezone: z.string().optional(),
+    label: z.string().trim().min(1),
+  }),
+  z.object({
+    action: z.literal("toggle"),
+    timezone: z.string().optional(),
+    todoId: z.string().min(1),
+    done: z.boolean(),
+  }),
+  z.object({
+    action: z.literal("rename"),
+    timezone: z.string().optional(),
+    todoId: z.string().min(1),
+    label: z.string().trim().min(1),
+  }),
+]);
 
 function resolveTimezone(input: string | null): string {
   const value = input?.trim();
@@ -49,13 +71,12 @@ export async function POST(request: NextRequest) {
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const body = (await request.json()) as {
-      timezone?: string;
-      action?: "add" | "toggle" | "rename";
-      todoId?: string;
-      done?: boolean;
-      label?: string;
-    };
+    const parsedBody = await parseJsonBody({
+      request,
+      schema: todoActionSchema,
+    });
+    if (!parsedBody.ok) return parsedBody.response;
+    const body = parsedBody.data;
     const timezone = resolveTimezone(body.timezone ?? null);
     if (body.action === "add") {
       const label = body.label?.trim();

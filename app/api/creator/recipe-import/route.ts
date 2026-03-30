@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { getSessionUserId } from "@/lib/api/sessionUser";
 import { getOrCreateUserProfile } from "@/lib/db/users";
 import { importRecipeFromUrl } from "@/lib/recipes/importer";
+import { parseJsonBody } from "@/lib/validation/http";
 
 export const runtime = "nodejs";
 
@@ -12,6 +14,10 @@ function parseAllowlist(): string[] {
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
 }
+
+const recipeImportBodySchema = z.object({
+  url: z.string().trim().url(),
+});
 
 export async function POST(request: NextRequest) {
   const userId = await getSessionUserId();
@@ -30,15 +36,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let body: { url?: unknown };
-  try {
-    body = (await request.json()) as { url?: unknown };
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-  if (typeof body.url !== "string" || !body.url.trim()) {
-    return NextResponse.json({ error: "url is required." }, { status: 400 });
-  }
+  const parsedBody = await parseJsonBody({
+    request,
+    schema: recipeImportBodySchema,
+  });
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.data;
 
   try {
     const recipe = await importRecipeFromUrl({

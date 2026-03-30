@@ -10,6 +10,8 @@ import GameSlot from "./games/GameSlot";
 import WeatherFillerCard from "./feed/WeatherFillerCard";
 import SpotifyMoodTile from "./feed/SpotifyMoodTile";
 import TodoFillerCard from "./feed/TodoFillerCard";
+import GeneratedArtModuleCard from "./feed/GeneratedArtModuleCard";
+import NasaApodCard from "./feed/NasaApodCard";
 import LoadingSection from "./LoadingSection";
 import ErrorBanner from "./ErrorBanner";
 import type { Category } from "@/lib/constants";
@@ -21,6 +23,8 @@ import type {
   GameFeedSection,
   ModuleFeedSection,
   FeedModuleData,
+  GeneratedImageModuleData,
+  NasaModuleData,
   WeatherModuleData,
   SpotifyMoodTileData,
   TodoModuleData,
@@ -31,7 +35,8 @@ import type { GameType } from "@/lib/games/types";
 import { chooseNewspaperLayout } from "@/lib/feed/newspaperLayout";
 import {
   buildGeneratedImageModuleData,
-  chooseModuleTypeByPolicy,
+  chooseGapIntervalModuleType,
+  chooseInlineModuleType,
 } from "@/lib/feed/modules/policy";
 
 // Strip any <cite ...>...</cite> or bare </cite> tags that leak from Claude
@@ -81,10 +86,18 @@ const FEED_STALE_TTL_MS = 120_000;
 const DEFAULT_GAP_MIN_PX = 180;
 const DEFAULT_INLINE_GAP_MIN_PX = 140;
 const DEFAULT_FILLER_INTERVAL = 4;
-const DEFAULT_WEATHER_WEIGHT = 3;
-const DEFAULT_SPOTIFY_WEIGHT = 1;
 const DEFAULT_TODO_WEIGHT = 2;
+/** Article sections completed before we insert each cached singleton row (not at top of feed). */
+const SINGLETON_AFTER_ARTICLE_COUNT_WEATHER = 2;
+const SINGLETON_AFTER_ARTICLE_COUNT_SPOTIFY = 5;
+const SINGLETON_AFTER_ARTICLE_COUNT_NASA = 8;
 type FeedKindFilter = "all" | ArticleContentKind;
+
+interface SingletonFeedCache {
+  weather: WeatherModuleData | null;
+  spotify: SpotifyMoodTileData | null;
+  nasa: NasaModuleData | null;
+}
 
 interface FeedApiResponse {
   articles: Article[];
@@ -164,12 +177,24 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   const reachedEndTimeoutIdRef = useRef<number | null>(null);
   const minGapRetryTimeoutIdRef = useRef<number | null>(null);
   const articleSectionsRenderedRef = useRef(0);
+  /** Weather / Spotify / NASA for scroll feed — fetched once per user session; placement resets on feed refresh. */
+  const singletonFeedCacheRef = useRef<SingletonFeedCache>({
+    weather: null,
+    spotify: null,
+    nasa: null,
+  });
+  const singletonPrefetchedRef = useRef(false);
+  const singletonPrefetchPromiseRef = useRef<Promise<void> | null>(null);
+  const singletonPlacedRef = useRef({
+    weather: false,
+    spotify: false,
+    nasa: false,
+  });
   const fillerMetricsRef = useRef({
     gapDetected: 0,
     moduleInserted: 0,
-    weatherInserted: 0,
-    spotifyInserted: 0,
-    artFallbackUsed: 0,
+    todoInserted: 0,
+    artInserted: 0,
   });
   const browserGeoRef = useRef<{ lat: number; lon: number } | null>(null);
   const browserGeoAttemptedRef = useRef(false);
@@ -197,19 +222,6 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   const fillerInterval = readPositiveInt(
     process.env.NEXT_PUBLIC_FEED_FILLER_INTERVAL,
     DEFAULT_FILLER_INTERVAL
-  );
-  const modulePolicy = process.env.NEXT_PUBLIC_FEED_MODULE_POLICY ?? "hybrid";
-  const spotifyModuleEnabled = readTruthyFlag(
-    process.env.NEXT_PUBLIC_SPOTIFY_MODULE_ENABLED,
-    true
-  );
-  const weatherWeight = readPositiveInt(
-    process.env.NEXT_PUBLIC_WEATHER_MODULE_WEIGHT,
-    DEFAULT_WEATHER_WEIGHT
-  );
-  const spotifyWeight = readPositiveInt(
-    process.env.NEXT_PUBLIC_SPOTIFY_MODULE_WEIGHT,
-    DEFAULT_SPOTIFY_WEIGHT
   );
   const todoWeight = readPositiveInt(
     process.env.NEXT_PUBLIC_TODO_MODULE_WEIGHT,
@@ -274,7 +286,17 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       category?: string;
       location?: string;
     }): Promise<FeedModuleData | null> => {
-      if (input.moduleType === "generated_art" || input.moduleType === "nasa") {
+      if (input.moduleType === "nasa") {
+        try {
+          const res = await fetch("/api/feed/modules/apod", { cache: "no-store" });
+          if (!res.ok) return null;
+          const body = (await res.json()) as { data?: FeedModuleData };
+          return body.data ?? null;
+        } catch {
+          return null;
+        }
+      }
+      if (input.moduleType === "generated_art") {
         return buildGeneratedImageModuleData({
           category: input.category,
           location: input.location,
@@ -338,7 +360,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   const fetchModuleSection = useCallback(
     async (input: {
       index: number;
-      reason: "gap" | "interval";
+      reason: "gap" | "interval" | "singleton";
       category?: string;
       location?: string;
       moduleType: "weather" | "spotify" | "generated_art" | "nasa" | "todo";
@@ -360,6 +382,33 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     },
     [fetchModuleData]
   );
+
+  /** One parallel fetch for weather, Spotify, NASA — runs once per session (see bootstrap); not repeated on category/filter resets. */
+  const ensureSingletonFeedCached = useCallback(async () => {
+    if (singletonPrefetchedRef.current) return;
+    if (singletonPrefetchPromiseRef.current) {
+      await singletonPrefetchPromiseRef.current;
+      return;
+    }
+    const category = activeCategoryRef.current ?? undefined;
+    const p = (async () => {
+      const [w, s, n] = await Promise.all([
+        fetchModuleData({ moduleType: "weather", category }),
+        fetchModuleData({ moduleType: "spotify", category }),
+        fetchModuleData({ moduleType: "nasa" }),
+      ]);
+      singletonFeedCacheRef.current = {
+        weather: w as WeatherModuleData | null,
+        spotify: s as SpotifyMoodTileData | null,
+        nasa: n as NasaModuleData | null,
+      };
+      singletonPrefetchedRef.current = true;
+    })();
+    singletonPrefetchPromiseRef.current = p.then(() => {
+      singletonPrefetchPromiseRef.current = null;
+    });
+    await p;
+  }, [fetchModuleData]);
 
   const readCachedFeedResponse = useCallback((cacheKey: string): {
     data: FeedApiResponse;
@@ -467,6 +516,68 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     const currentIndex = sectionCountRef.current;
 
     try {
+      // ── Sprinkle cached singleton modules (one fetch per session; Profile menu can refetch separately) ──
+      if (searchQuery.length < 2) {
+        const ar = articleSectionsRenderedRef.current;
+        const needPrefetch =
+          !singletonPrefetchedRef.current &&
+          ((ar === SINGLETON_AFTER_ARTICLE_COUNT_WEATHER &&
+            !singletonPlacedRef.current.weather) ||
+            (ar === SINGLETON_AFTER_ARTICLE_COUNT_SPOTIFY &&
+              !singletonPlacedRef.current.spotify) ||
+            (ar === SINGLETON_AFTER_ARTICLE_COUNT_NASA && !singletonPlacedRef.current.nasa));
+        if (needPrefetch) await ensureSingletonFeedCached();
+        const cache = singletonFeedCacheRef.current;
+        if (ar === SINGLETON_AFTER_ARTICLE_COUNT_WEATHER && !singletonPlacedRef.current.weather) {
+          singletonPlacedRef.current.weather = true;
+          if (cache.weather) {
+            const mod: ModuleFeedSection = {
+              sectionType: "module",
+              moduleType: "weather",
+              fillerType: "weather",
+              reason: "singleton",
+              index: currentIndex,
+              data: cache.weather,
+            };
+            setSections((prev) => [...prev, mod]);
+            sectionCountRef.current += 1;
+            return;
+          }
+        }
+        if (ar === SINGLETON_AFTER_ARTICLE_COUNT_SPOTIFY && !singletonPlacedRef.current.spotify) {
+          singletonPlacedRef.current.spotify = true;
+          if (cache.spotify) {
+            const mod: ModuleFeedSection = {
+              sectionType: "module",
+              moduleType: "spotify",
+              fillerType: "spotify",
+              reason: "singleton",
+              index: currentIndex,
+              data: cache.spotify,
+            };
+            setSections((prev) => [...prev, mod]);
+            sectionCountRef.current += 1;
+            return;
+          }
+        }
+        if (ar === SINGLETON_AFTER_ARTICLE_COUNT_NASA && !singletonPlacedRef.current.nasa) {
+          singletonPlacedRef.current.nasa = true;
+          if (cache.nasa) {
+            const mod: ModuleFeedSection = {
+              sectionType: "module",
+              moduleType: "nasa",
+              fillerType: "nasa",
+              reason: "singleton",
+              index: currentIndex,
+              data: cache.nasa,
+            };
+            setSections((prev) => [...prev, mod]);
+            sectionCountRef.current += 1;
+            return;
+          }
+        }
+      }
+
       // ── Decide: game slot or article section? ────────────────────────────────
       if (shouldBeGame(currentIndex, gameRatioRef.current)) {
         let gameType: GameFeedSection["gameType"];
@@ -622,22 +733,11 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         layoutPlan.inlineTargetColumn !== null &&
         section.newspaperLayout
       ) {
-        const preferredInlineType = layoutPlan.inlineSuggestedModuleType;
-        const preferredType =
-          preferredInlineType === "weather" || preferredInlineType === "spotify"
-            ? preferredInlineType
-            : (() => {
-                const picked = chooseModuleTypeByPolicy({
-                seed: currentIndex + 101,
-                weatherWeight,
-                spotifyWeight,
-                todoWeight,
-                spotifyEnabled: spotifyModuleEnabled,
-                todoEnabled: todoModuleEnabled,
-                policy: modulePolicy,
-                });
-                return picked === "todo" ? "weather" : picked;
-              })();
+        const layoutHint = layoutPlan.inlineSuggestedModuleType ?? "generated_art";
+        const preferredType = chooseInlineModuleType({
+          layoutHint,
+          todoEnabled: todoModuleEnabled,
+        });
         let inlineData = await fetchModuleData({
           moduleType: preferredType,
           category: data.category,
@@ -649,11 +749,14 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
             location: inlineLocation,
           });
         }
+        const resolvedType: "generated_art" | "todo" =
+          inlineData.mode === "generated_art"
+            ? "generated_art"
+            : inlineData.mode === "todo"
+              ? "todo"
+              : "generated_art";
         section.newspaperLayout.inlineModule = {
-          moduleType:
-            "mode" in inlineData && inlineData.mode === "generated_art"
-              ? "generated_art"
-              : preferredType,
+          moduleType: resolvedType,
           reason: "inline",
           targetColumn: layoutPlan.inlineTargetColumn,
           data: inlineData,
@@ -663,33 +766,19 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       const nextSections: FeedSection[] = [section];
       if (shouldInsertGapFiller || shouldInsertIntervalFiller) {
         if (shouldInsertGapFiller) fillerMetricsRef.current.gapDetected += 1;
-        const preferredModule = chooseModuleTypeByPolicy({
+        const gapModuleType = chooseGapIntervalModuleType({
           seed: currentIndex,
-          weatherWeight,
-          spotifyWeight,
           todoWeight,
-          spotifyEnabled: spotifyModuleEnabled,
           todoEnabled: todoModuleEnabled,
-          policy: modulePolicy,
         });
         let moduleSection = await fetchModuleSection({
           index: currentIndex + 1,
           reason: shouldInsertGapFiller ? "gap" : "interval",
           category: data.category,
           location: inlineLocation,
-          moduleType: preferredModule,
+          moduleType: gapModuleType,
         });
-
-        if (!moduleSection && preferredModule === "spotify") {
-          moduleSection = await fetchModuleSection({
-            index: currentIndex + 1,
-            reason: shouldInsertGapFiller ? "gap" : "interval",
-            category: data.category,
-            location: inlineLocation,
-            moduleType: "weather",
-          });
-        }
-        if (!moduleSection) {
+        if (!moduleSection && gapModuleType === "todo") {
           moduleSection = await fetchModuleSection({
             index: currentIndex + 1,
             reason: shouldInsertGapFiller ? "gap" : "interval",
@@ -702,17 +791,11 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         if (moduleSection) {
           nextSections.push(moduleSection);
           fillerMetricsRef.current.moduleInserted += 1;
-          if (moduleSection.moduleType === "weather")
-            fillerMetricsRef.current.weatherInserted += 1;
-          if (moduleSection.moduleType === "spotify")
-            fillerMetricsRef.current.spotifyInserted += 1;
-          if (
-            moduleSection.moduleType === "weather" &&
-            (moduleSection.data as WeatherModuleData).mode === "generated_art"
-          ) {
-            fillerMetricsRef.current.artFallbackUsed += 1;
-          }
-          console.info("[feed-filler]", {
+          if (moduleSection.moduleType === "todo")
+            fillerMetricsRef.current.todoInserted += 1;
+          if (moduleSection.moduleType === "generated_art")
+            fillerMetricsRef.current.artInserted += 1;
+          console.info("[feed-singleton-gap]", {
             reason: moduleSection.reason,
             moduleType: moduleSection.moduleType,
             residualGapPx: layoutPlan.residualGapPx,
@@ -788,16 +871,23 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     inlineGapMinPx,
     inlineModulesEnabled,
     fillerInterval,
-    modulePolicy,
     fetchModuleSection,
     fetchModuleData,
     fetchFeedResponse,
-    weatherWeight,
-    spotifyWeight,
     todoWeight,
     todoModuleEnabled,
-    spotifyModuleEnabled,
+    ensureSingletonFeedCached,
   ]); // stable refs + config
+
+  const resetSectionsAndLoadMore = useCallback(
+    (overrideCategory?: Category | null) => {
+      setSections([]);
+      sectionCountRef.current = 0;
+      singletonPlacedRef.current = { weather: false, spotify: false, nasa: false };
+      void loadMore(overrideCategory);
+    },
+    [loadMore]
+  );
 
   // Resolve game ratio from server (or localStorage), then load — avoids first sections using DEFAULT_GAME_RATIO.
   useEffect(() => {
@@ -810,7 +900,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     feedReadyRef.current = false;
     setIsFeedReady(false);
 
-    // Fresh bootstrap for this user/session: reset feed cursors and visible sections.
+    // Fresh bootstrap for this user/session: reset feed cursors; singleton module data refetched once below.
     setSections([]);
     setError(null);
     setLoading(false);
@@ -833,6 +923,10 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     renderedArticleKeysRef.current = new Set();
     renderedDbArticleIdsRef.current = new Set();
     gameRatioRef.current = DEFAULT_GAME_RATIO;
+    singletonFeedCacheRef.current = { weather: null, spotify: null, nasa: null };
+    singletonPrefetchedRef.current = false;
+    singletonPrefetchPromiseRef.current = null;
+    singletonPlacedRef.current = { weather: false, spotify: false, nasa: false };
 
     const gen = ++feedBootstrapGenRef.current;
     let cancelled = false;
@@ -962,6 +1056,11 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         document.documentElement.setAttribute("data-theme", profileTheme);
       }
 
+      if (cancelled || gen !== feedBootstrapGenRef.current) return;
+
+      await ensureSingletonFeedCached();
+      if (cancelled || gen !== feedBootstrapGenRef.current) return;
+
       feedReadyRef.current = true;
       setIsFeedReady(true);
       void loadMore();
@@ -970,7 +1069,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     return () => {
       cancelled = true;
     };
-  }, [userId, mfaPassed, loadMore]);
+  }, [userId, mfaPassed, loadMore, ensureSingletonFeedCached]);
 
   useEffect(() => {
     setMfaPassed(userId === "dev-local");
@@ -1004,8 +1103,6 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         minGapRetryTimeoutIdRef.current = null;
       }
       pendingLoadRef.current = false;
-      setSections([]);
-      sectionCountRef.current = 0;
       gameSlotOrdinalRef.current = 0;
       loadingRef.current = false;
       setLoading(false);
@@ -1013,7 +1110,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       renderedArticleKeysRef.current = new Set();
       renderedDbArticleIdsRef.current = new Set();
       articleSectionsRenderedRef.current = 0;
-      void loadMore();
+      resetSectionsAndLoadMore();
     }
 
     window.addEventListener(
@@ -1025,7 +1122,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         "gentle-stream-enabled-game-types",
         onEnabledTypesUpdated as EventListener
       );
-  }, [loadMore]);
+  }, [resetSectionsAndLoadMore]);
 
   // Keep activeCategoryRef in sync
   useEffect(() => {
@@ -1137,17 +1234,13 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       minGapRetryTimeoutIdRef.current = null;
     }
     pendingLoadRef.current = false;
-    setSections((prev) => {
-      return [];
-    });
-    sectionCountRef.current = 0;
     articleSectionsRenderedRef.current = 0;
     loadingRef.current = false;
     setLoading(false);
     lastArticleCategoryRef.current = undefined;
     renderedArticleKeysRef.current = new Set();
     renderedDbArticleIdsRef.current = new Set();
-    loadMore(next);
+    resetSectionsAndLoadMore(next);
   };
 
   const handleGameRatioSaved = useCallback(
@@ -1164,17 +1257,15 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         minGapRetryTimeoutIdRef.current = null;
       }
       pendingLoadRef.current = false;
-      setSections([]);
-      sectionCountRef.current = 0;
       articleSectionsRenderedRef.current = 0;
       gameSlotOrdinalRef.current = 0;
       loadingRef.current = false;
       setError(null);
       renderedArticleKeysRef.current = new Set();
       renderedDbArticleIdsRef.current = new Set();
-      void loadMore();
+      resetSectionsAndLoadMore();
     },
-    [loadMore]
+    [resetSectionsAndLoadMore]
   );
 
   const handleKindFilterSelect = useCallback(
@@ -1192,8 +1283,6 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         minGapRetryTimeoutIdRef.current = null;
       }
       pendingLoadRef.current = false;
-      setSections([]);
-      sectionCountRef.current = 0;
       articleSectionsRenderedRef.current = 0;
       gameSlotOrdinalRef.current = 0;
       loadingRef.current = false;
@@ -1202,9 +1291,9 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       lastArticleCategoryRef.current = undefined;
       renderedArticleKeysRef.current = new Set();
       renderedDbArticleIdsRef.current = new Set();
-      void loadMore();
+      resetSectionsAndLoadMore();
     },
-    [loadMore]
+    [resetSectionsAndLoadMore]
   );
 
   const resetFeedAndLoad = useCallback(() => {
@@ -1218,8 +1307,6 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       minGapRetryTimeoutIdRef.current = null;
     }
     pendingLoadRef.current = false;
-    setSections([]);
-    sectionCountRef.current = 0;
     articleSectionsRenderedRef.current = 0;
     gameSlotOrdinalRef.current = 0;
     loadingRef.current = false;
@@ -1228,8 +1315,8 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     lastArticleCategoryRef.current = undefined;
     renderedArticleKeysRef.current = new Set();
     renderedDbArticleIdsRef.current = new Set();
-    void loadMore();
-  }, [loadMore]);
+    resetSectionsAndLoadMore();
+  }, [resetSectionsAndLoadMore]);
 
   const applySearch = useCallback(() => {
     const next = searchInput.trim();
@@ -1434,6 +1521,24 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
                 <TodoFillerCard
                   key={`module-${section.index}-todo`}
                   data={section.data as TodoModuleData}
+                  reason={section.reason}
+                />
+              );
+            }
+            if (section.moduleType === "generated_art") {
+              return (
+                <GeneratedArtModuleCard
+                  key={`module-${section.index}-art`}
+                  data={section.data as GeneratedImageModuleData}
+                  reason={section.reason}
+                />
+              );
+            }
+            if (section.moduleType === "nasa") {
+              return (
+                <NasaApodCard
+                  key={`module-${section.index}-nasa`}
+                  data={section.data as NasaModuleData}
                   reason={section.reason}
                 />
               );

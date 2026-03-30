@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { db } from "@/lib/db/client";
 import { getSessionUserId } from "@/lib/api/sessionUser";
+import { parseJsonBody, parseQuery } from "@/lib/validation/http";
 
 const GAME_TYPES = new Set([
   "sudoku",
@@ -11,6 +13,25 @@ const GAME_TYPES = new Set([
   "connections",
 ]);
 const DIFFS = new Set(["easy", "medium", "hard"]);
+const gameTypeEnum = z.enum([
+  "sudoku",
+  "word_search",
+  "killer_sudoku",
+  "nonogram",
+  "crossword",
+  "connections",
+]);
+const difficultyEnum = z.enum(["easy", "medium", "hard"]);
+const getQuerySchema = z.object({
+  gameType: gameTypeEnum.optional(),
+});
+const postBodySchema = z.object({
+  gameType: gameTypeEnum,
+  difficulty: difficultyEnum,
+  durationSeconds: z.number().finite().min(0),
+  score: z.number().finite().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
 
 export async function GET(request: NextRequest) {
   const userId = await getSessionUserId();
@@ -18,10 +39,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const gameType = request.nextUrl.searchParams.get("gameType");
-  if (gameType && !GAME_TYPES.has(gameType)) {
-    return NextResponse.json({ error: "Invalid gameType" }, { status: 400 });
-  }
+  const parsedQuery = parseQuery({
+    query: Object.fromEntries(request.nextUrl.searchParams.entries()),
+    schema: getQuerySchema,
+  });
+  if (!parsedQuery.ok) return parsedQuery.response;
+  const gameType = parsedQuery.data.gameType ?? null;
 
   let query = db
     .from("game_completions")
@@ -63,35 +86,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = (await request.json()) as {
-    gameType?: unknown;
-    difficulty?: unknown;
-    durationSeconds?: unknown;
-    score?: unknown;
-    metadata?: unknown;
-  };
+  const parsedBody = await parseJsonBody({
+    request,
+    schema: postBodySchema,
+  });
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.data;
 
-  if (
-    typeof body.gameType !== "string" ||
-    !GAME_TYPES.has(body.gameType) ||
-    typeof body.difficulty !== "string" ||
-    !DIFFS.has(body.difficulty)
-  ) {
-    return NextResponse.json({ error: "Invalid gameType or difficulty" }, { status: 400 });
-  }
-
-  if (
-    typeof body.durationSeconds !== "number" ||
-    body.durationSeconds < 0 ||
-    !Number.isFinite(body.durationSeconds)
-  ) {
-    return NextResponse.json({ error: "Invalid durationSeconds" }, { status: 400 });
-  }
-
-  const metadata =
-    body.metadata !== undefined && typeof body.metadata === "object" && body.metadata !== null
-      ? (body.metadata as Record<string, unknown>)
-      : {};
+  const metadata = body.metadata ?? {};
 
   const score =
     typeof body.score === "number" && Number.isFinite(body.score) ? body.score : null;

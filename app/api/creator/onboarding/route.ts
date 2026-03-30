@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { CATEGORIES, type Category } from "@/lib/constants";
 import {
@@ -7,6 +8,7 @@ import {
   upsertCreatorProfile,
 } from "@/lib/db/creator";
 import { getOrCreateUserProfile } from "@/lib/db/users";
+import { parseJsonBody } from "@/lib/validation/http";
 
 function isCategory(value: string): value is Category {
   return CATEGORIES.includes(value as Category);
@@ -19,6 +21,18 @@ function cleanNullableString(value: unknown, maxLen: number): string | null {
   if (!trimmed) return null;
   return trimmed.slice(0, maxLen);
 }
+
+const onboardingBodySchema = z.object({
+  penName: z.string().trim().min(1).max(80),
+  bio: z.string().trim().max(400).optional().nullable(),
+  interestCategories: z.array(z.string()).optional().default([]),
+  websiteUrl: z.string().trim().max(300).optional().nullable(),
+  locale: z.string().trim().max(64).optional().nullable(),
+  timezone: z.string().trim().max(64).optional().nullable(),
+  guidelinesAccepted: z.boolean(),
+  consentOptIn: z.boolean(),
+  consentProof: z.string().trim().max(500),
+});
 
 export async function GET() {
   const supabase = createClient();
@@ -56,17 +70,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const body = (await request.json()) as {
-    penName?: unknown;
-    bio?: unknown;
-    interestCategories?: unknown;
-    websiteUrl?: unknown;
-    locale?: unknown;
-    timezone?: unknown;
-    guidelinesAccepted?: unknown;
-    consentOptIn?: unknown;
-    consentProof?: unknown;
-  };
+  const parsedBody = await parseJsonBody({
+    request,
+    schema: onboardingBodySchema,
+  });
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.data;
 
   const penNameRaw = cleanNullableString(body.penName, 80);
   if (!penNameRaw) {
@@ -74,9 +83,7 @@ export async function POST(request: NextRequest) {
   }
 
   const bio = cleanNullableString(body.bio, 400) ?? "";
-  const interestValues = Array.isArray(body.interestCategories)
-    ? body.interestCategories.filter((v): v is string => typeof v === "string")
-    : [];
+  const interestValues = body.interestCategories;
   const interestCategories = interestValues
     .map((v) => v.trim())
     .filter(isCategory);

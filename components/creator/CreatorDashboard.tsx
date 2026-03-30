@@ -67,6 +67,15 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
   const [assistSuggestion, setAssistSuggestion] = useState<string | null>(null);
   const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const bodyCharacterCount = form.body.length;
+  /** ~200 wpm, aligned with typical reading-time estimates for multi-column heuristic. */
+  const previewReadingTimeSecs = useMemo(
+    () =>
+      Math.max(
+        1,
+        Math.round((form.body.trim().split(/\s+/).filter(Boolean).length / 200) * 60)
+      ),
+    [form.body]
+  );
   const isBodyTooLong = bodyCharacterCount > MAX_SUBMISSION_BODY_CHARS;
 
   const canSubmit = useMemo(() => {
@@ -660,6 +669,7 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                     markdown={form.body.trim() ? form.body : "*Preview appears here as you write.*"}
                     variant="reader"
                     fontPreset="literary"
+                    readingTimeSecs={previewReadingTimeSecs}
                   />
                 </div>
               )}

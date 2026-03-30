@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { getSessionUserId } from "@/lib/api/sessionUser";
 import { CATEGORIES, type Category } from "@/lib/constants";
 import type { SubmissionContentKind } from "@/lib/types";
@@ -15,8 +16,26 @@ import {
   rateLimitExceededResponse,
 } from "@/lib/security/rateLimit";
 import { hasTrustedOrigin } from "@/lib/security/origin";
+import { parseJsonBody } from "@/lib/validation/http";
 
 const DAILY_SUBMISSION_LIMIT = 10;
+
+const submissionBodySchema = z.object({
+  headline: z.string().optional(),
+  subheadline: z.string().optional(),
+  body: z.string().optional(),
+  pullQuote: z.string().optional(),
+  category: z.string().optional(),
+  contentKind: z.string().optional(),
+  locale: z.string().optional(),
+  explicitHashtags: z.array(z.string()).optional(),
+  recipeServings: z.union([z.number(), z.string()]).optional(),
+  recipeIngredients: z.union([z.array(z.string()), z.string()]).optional(),
+  recipeInstructions: z.union([z.array(z.string()), z.string()]).optional(),
+  recipePrepTimeMinutes: z.union([z.number(), z.string()]).optional(),
+  recipeCookTimeMinutes: z.union([z.number(), z.string()]).optional(),
+  recipeImages: z.array(z.string()).optional(),
+});
 
 function isCategory(value: string): value is Category {
   return CATEGORIES.includes(value as Category);
@@ -56,7 +75,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const rateLimit = consumeRateLimit({
+  const rateLimit = await consumeRateLimit({
     policy: { id: "creator-submission", windowMs: 60 * 60 * 1000, max: 25 },
     key: buildRateLimitKey({
       request,
@@ -92,23 +111,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const body = (await request.json()) as {
-    headline?: unknown;
-    subheadline?: unknown;
-    body?: unknown;
-    pullQuote?: unknown;
-    category?: unknown;
-    contentKind?: unknown;
-    locale?: unknown;
-    explicitHashtags?: unknown;
-
-    recipeServings?: unknown;
-    recipeIngredients?: unknown;
-    recipeInstructions?: unknown;
-    recipePrepTimeMinutes?: unknown;
-    recipeCookTimeMinutes?: unknown;
-    recipeImages?: unknown;
-  };
+  const parsedBody = await parseJsonBody({
+    request,
+    schema: submissionBodySchema,
+  });
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.data;
 
   const headline = toSafeText(body.headline, 180);
   const subheadline = toSafeText(body.subheadline, 220);
@@ -177,7 +185,7 @@ export async function POST(request: NextRequest) {
     : [];
 
   const explicitHashtags = Array.isArray(body.explicitHashtags)
-    ? body.explicitHashtags.filter((v): v is string => typeof v === "string")
+    ? body.explicitHashtags
     : [];
 
   if (!headline || (!isRecipe && !category)) {

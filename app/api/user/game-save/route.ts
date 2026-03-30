@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { db } from "@/lib/db/client";
 import { getSessionUserId } from "@/lib/api/sessionUser";
+import { parseJsonBody, parseQuery } from "@/lib/validation/http";
 
 const GAME_TYPES = new Set([
   "sudoku",
@@ -9,6 +11,15 @@ const GAME_TYPES = new Set([
   "nonogram",
 ]);
 const DIFFS = new Set(["easy", "medium", "hard"]);
+const gameTypeEnum = z.enum(["sudoku", "word_search", "killer_sudoku", "nonogram"]);
+const difficultyEnum = z.enum(["easy", "medium", "hard"]);
+const gameTypeQuerySchema = z.object({ gameType: gameTypeEnum });
+const putBodySchema = z.object({
+  gameType: gameTypeEnum,
+  difficulty: difficultyEnum,
+  elapsedSeconds: z.number().min(0).optional(),
+  gameState: z.record(z.string(), z.unknown()),
+});
 
 export async function GET(request: NextRequest) {
   const userId = await getSessionUserId();
@@ -16,10 +27,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const gameType = request.nextUrl.searchParams.get("gameType");
-  if (!gameType || !GAME_TYPES.has(gameType)) {
-    return NextResponse.json({ error: "Invalid gameType" }, { status: 400 });
-  }
+  const parsedQuery = parseQuery({
+    query: Object.fromEntries(request.nextUrl.searchParams.entries()),
+    schema: gameTypeQuerySchema,
+  });
+  if (!parsedQuery.ok) return parsedQuery.response;
+  const gameType = parsedQuery.data.gameType;
 
   const { data, error } = await db
     .from("game_saves")
@@ -41,30 +54,17 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = (await request.json()) as {
-    gameType?: unknown;
-    difficulty?: unknown;
-    elapsedSeconds?: unknown;
-    gameState?: unknown;
-  };
-
-  if (
-    typeof body.gameType !== "string" ||
-    !GAME_TYPES.has(body.gameType) ||
-    typeof body.difficulty !== "string" ||
-    !DIFFS.has(body.difficulty)
-  ) {
-    return NextResponse.json({ error: "Invalid gameType or difficulty" }, { status: 400 });
-  }
+  const parsedBody = await parseJsonBody({
+    request,
+    schema: putBodySchema,
+  });
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.data;
 
   const elapsed =
     typeof body.elapsedSeconds === "number" && body.elapsedSeconds >= 0
       ? Math.floor(body.elapsedSeconds)
       : 0;
-
-  if (body.gameState === undefined || typeof body.gameState !== "object" || body.gameState === null) {
-    return NextResponse.json({ error: "gameState must be an object" }, { status: 400 });
-  }
 
   const { error } = await db.from("game_saves").upsert(
     {
@@ -72,7 +72,7 @@ export async function PUT(request: NextRequest) {
       game_type: body.gameType,
       difficulty: body.difficulty,
       elapsed_seconds: elapsed,
-      game_state: body.gameState as Record<string, unknown>,
+      game_state: body.gameState,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "user_id,game_type" }
@@ -91,10 +91,12 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const gameType = request.nextUrl.searchParams.get("gameType");
-  if (!gameType || !GAME_TYPES.has(gameType)) {
-    return NextResponse.json({ error: "Invalid gameType" }, { status: 400 });
-  }
+  const parsedQuery = parseQuery({
+    query: Object.fromEntries(request.nextUrl.searchParams.entries()),
+    schema: gameTypeQuerySchema,
+  });
+  if (!parsedQuery.ok) return parsedQuery.response;
+  const gameType = parsedQuery.data.gameType;
 
   const { error } = await db
     .from("game_saves")

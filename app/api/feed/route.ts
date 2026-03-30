@@ -185,7 +185,7 @@ export async function GET(request: NextRequest) {
       ? process.env.DEV_USER_ID ?? "dev-local"
       : sessionUserId || ANONYMOUS_USER_ID;
 
-  const rateLimit = consumeRateLimit({
+  const rateLimit = await consumeRateLimit({
     policy:
       userId === ANONYMOUS_USER_ID
         ? { id: "feed-anon", windowMs: 60_000, max: 45 }

@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const rateLimit = consumeRateLimit({
+    const rateLimit = await consumeRateLimit({
       policy: { id: "creator-assist", windowMs: 60_000, max: 20 },
       key: buildRateLimitKey({
         request,

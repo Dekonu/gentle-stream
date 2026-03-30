@@ -8,7 +8,7 @@ import {
 } from "@/lib/security/rateLimit";
 
 export async function GET(request: NextRequest) {
-  const rateLimit = consumeRateLimit({
+  const rateLimit = await consumeRateLimit({
     policy: { id: "news-public", windowMs: 60_000, max: 24 },
     key: buildRateLimitKey({ request, routeId: "api-news" }),
   });

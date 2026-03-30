@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createPublicServerClient } from "@/lib/supabase/public-server";
 import {
   buildRateLimitKey,
@@ -8,12 +9,13 @@ import {
 } from "@/lib/security/rateLimit";
 import { verifyTurnstileToken } from "@/lib/security/turnstile";
 import { hasTrustedOrigin } from "@/lib/security/origin";
+import { parseJsonBody } from "@/lib/validation/http";
 
-interface EmailLinkBody {
-  email?: unknown;
-  redirectTo?: unknown;
-  turnstileToken?: unknown;
-}
+const emailLinkBodySchema = z.object({
+  email: z.string().trim().email(),
+  redirectTo: z.string().trim().url(),
+  turnstileToken: z.string().trim().min(1),
+});
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -52,23 +54,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   }
 
-  const ipLimit = consumeRateLimit({
+  const ipLimit = await consumeRateLimit({
     policy: { id: "auth-email-link-ip", windowMs: 10 * 60 * 1000, max: 16 },
     key: buildRateLimitKey({ request, routeId: "auth-email-link" }),
   });
   if (!ipLimit.allowed) return rateLimitExceededResponse(ipLimit);
 
-  let body: EmailLinkBody;
-  try {
-    body = (await request.json()) as EmailLinkBody;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
-  }
-
-  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
-  const redirectTo = typeof body.redirectTo === "string" ? body.redirectTo.trim() : "";
-  const turnstileToken =
-    typeof body.turnstileToken === "string" ? body.turnstileToken.trim() : "";
+  const parsedBody = await parseJsonBody({
+    request,
+    schema: emailLinkBodySchema,
+  });
+  if (!parsedBody.ok) return parsedBody.response;
+  const email = parsedBody.data.email.trim().toLowerCase();
+  const redirectTo = parsedBody.data.redirectTo.trim();
+  const turnstileToken = parsedBody.data.turnstileToken.trim();
 
   if (!isValidEmail(email)) {
     return NextResponse.json({ error: "Invalid email address." }, { status: 400 });
@@ -77,7 +76,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid auth redirect URL." }, { status: 400 });
   }
 
-  const emailLimit = consumeRateLimit({
+  const emailLimit = await consumeRateLimit({
     policy: { id: "auth-email-link-email", windowMs: 10 * 60 * 1000, max: 6 },
     key: `email:${email}`,
   });

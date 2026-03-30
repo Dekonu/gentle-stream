@@ -1,12 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import {
   getOrCreateUserProfile,
   updateUserDisplay,
   UsernameCooldownError,
 } from "@/lib/db/users";
 import { getSessionUserId } from "@/lib/api/sessionUser";
+import { parseJsonBody } from "@/lib/validation/http";
 
 const USERNAME_RE = /^[a-z0-9_]{3,30}$/;
+
+const profilePatchSchema = z.object({
+  displayName: z.union([z.string(), z.null()]).optional(),
+  username: z.union([z.string(), z.null()]).optional(),
+  avatarUrl: z.union([z.string(), z.null()]).optional(),
+  weatherLocation: z.union([z.string(), z.null()]).optional(),
+});
 
 export async function GET() {
   const userId = await getSessionUserId();
@@ -29,12 +38,12 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = (await request.json()) as {
-    displayName?: unknown;
-    username?: unknown;
-    avatarUrl?: unknown;
-    weatherLocation?: unknown;
-  };
+  const parsedBody = await parseJsonBody({
+    request,
+    schema: profilePatchSchema,
+  });
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.data;
 
   await getOrCreateUserProfile(userId);
 

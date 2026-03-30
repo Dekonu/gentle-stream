@@ -1,4 +1,5 @@
 import { picsumFallbackUrl, pollinationsImageUrl } from "@/lib/article-image";
+import { getEnv } from "@/lib/env";
 import type { WeatherFillerData } from "@/lib/types";
 
 interface WeatherSnapshot {
@@ -18,6 +19,7 @@ interface CachedEntry {
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const WEATHER_TIMEOUT_MS = 5_000;
 const cache = new Map<string, CachedEntry>();
+const env = getEnv();
 
 const CATEGORY_DEFAULT_CITY: Record<string, string> = {
   world: "London",
@@ -157,7 +159,7 @@ function fallbackArtData(input: {
   category?: string | null;
 }): WeatherFillerData {
   const fallbackMode =
-    process.env.NEXT_PUBLIC_FEED_FILLER_FALLBACK?.trim().toLowerCase() ??
+    env.NEXT_PUBLIC_FEED_FILLER_FALLBACK?.trim().toLowerCase() ??
     "generated_art";
   const city = (input.location ?? "").trim() || defaultCityForCategory(input.category);
   if (fallbackMode !== "generated_art") {
@@ -228,7 +230,7 @@ export async function getWeatherFillerData(input: {
   const cached = cache.get(cacheKey);
   if (cached && cached.expiresAt > now) return cached.data;
 
-  const apiKey = process.env.OPENWEATHER_API_KEY?.trim();
+  const apiKey = env.OPENWEATHER_API_KEY?.trim();
   if (!apiKey) {
     console.warn("[weather-module] OPENWEATHER_API_KEY is missing; serving generated_art fallback.");
     const fallback = fallbackArtData(input);

@@ -16,9 +16,11 @@ import type {
   UserGameStats,
   WeatherModuleData,
   SpotifyMoodTileData,
+  NasaModuleData,
 } from "@/lib/types";
 import WeatherFillerCard from "@/components/feed/WeatherFillerCard";
 import SpotifyMoodTile from "@/components/feed/SpotifyMoodTile";
+import NasaApodCard from "@/components/feed/NasaApodCard";
 import { AvatarInput } from "./AvatarInput";
 
 interface ProfileMenuProps {
@@ -59,7 +61,9 @@ export function ProfileMenu({
 }: ProfileMenuProps) {
   const [open, setOpen] = useState(false);
   const [gameSettingsOpen, setGameSettingsOpen] = useState(false);
-  const [additionalGoodiesOpen, setAdditionalGoodiesOpen] = useState(false);
+  const [feedModuleModal, setFeedModuleModal] = useState<
+    null | "weather" | "spotify" | "apod"
+  >(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<UserGameStats | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -85,6 +89,8 @@ export function ProfileMenu({
   const [moduleError, setModuleError] = useState<string | null>(null);
   const [weatherModuleData, setWeatherModuleData] = useState<WeatherModuleData | null>(null);
   const [spotifyModuleData, setSpotifyModuleData] = useState<SpotifyMoodTileData | null>(null);
+  const [apodModuleData, setApodModuleData] = useState<NasaModuleData | null>(null);
+  const [apodLoading, setApodLoading] = useState(false);
 
   useEffect(() => {
     if (!profile?.avatarUrl) {
@@ -154,7 +160,6 @@ export function ProfileMenu({
   useEffect(() => {
     if (open) return;
     setGameSettingsOpen(false);
-    setAdditionalGoodiesOpen(false);
     setEditingProfile(false);
   }, [open]);
 
@@ -364,6 +369,27 @@ export function ProfileMenu({
       setModuleError("Could not fetch Spotify mood tile.");
     } finally {
       setSpotifyLoading(false);
+    }
+  }
+
+  async function fetchApodModule() {
+    setModuleError(null);
+    setApodLoading(true);
+    try {
+      const res = await fetch("/api/feed/modules/apod", { cache: "no-store" });
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        data?: NasaModuleData;
+      };
+      if (!res.ok || !body.data) {
+        setModuleError(body.error ?? "Could not fetch NASA APOD.");
+        return;
+      }
+      setApodModuleData(body.data);
+    } catch {
+      setModuleError("Could not fetch NASA APOD.");
+    } finally {
+      setApodLoading(false);
     }
   }
 
@@ -842,25 +868,85 @@ export function ProfileMenu({
               Game settings
             </button>
           </div>
-          <div style={{ margin: "0.2rem 0 1rem" }}>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.4rem",
+              marginBottom: "1rem",
+            }}
+          >
             <button
               type="button"
-              onClick={() => setAdditionalGoodiesOpen(true)}
+              onClick={() => {
+                setOpen(false);
+                setFeedModuleModal("weather");
+                setModuleError(null);
+                void fetchAdditionalWeatherModule();
+              }}
               style={{
-                display: "inline-block",
-                fontFamily: "'Playfair Display', Georgia, serif",
-                fontSize: "0.8rem",
-                fontWeight: 700,
-                color: "#1a472a",
-                textDecoration: "underline",
-                textUnderlineOffset: "3px",
-                background: "transparent",
+                background: "none",
                 border: "none",
                 padding: 0,
                 cursor: "pointer",
+                color: "#1a472a",
+                fontWeight: 600,
+                textDecoration: "underline",
+                textUnderlineOffset: "2px",
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontSize: "0.74rem",
+                textAlign: "left",
               }}
             >
-              Additional goodies
+              Weather
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                setFeedModuleModal("spotify");
+                setModuleError(null);
+                void fetchAdditionalSpotifyModule();
+              }}
+              style={{
+                background: "none",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+                color: "#1a472a",
+                fontWeight: 600,
+                textDecoration: "underline",
+                textUnderlineOffset: "2px",
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontSize: "0.74rem",
+                textAlign: "left",
+              }}
+            >
+              Spotify mood
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                setFeedModuleModal("apod");
+                setModuleError(null);
+                void fetchApodModule();
+              }}
+              style={{
+                background: "none",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+                color: "#1a472a",
+                fontWeight: 600,
+                textDecoration: "underline",
+                textUnderlineOffset: "2px",
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontSize: "0.74rem",
+                textAlign: "left",
+              }}
+            >
+              NASA APOD
             </button>
           </div>
 
@@ -1538,13 +1624,13 @@ export function ProfileMenu({
         </div>
       )}
 
-      {open && additionalGoodiesOpen && (
+      {feedModuleModal !== null && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Additional goodies"
+          aria-label="Feed module"
           onMouseDown={(e) => {
-            if (e.target === e.currentTarget) setAdditionalGoodiesOpen(false);
+            if (e.target === e.currentTarget) setFeedModuleModal(null);
           }}
           style={{
             position: "fixed",
@@ -1571,39 +1657,13 @@ export function ProfileMenu({
             <div
               style={{
                 display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "0.75rem",
+                justifyContent: "flex-end",
                 marginBottom: "0.75rem",
               }}
             >
-              <div style={{ minWidth: 0 }}>
-                <div
-                  style={{
-                    fontFamily: "'Playfair Display', Georgia, serif",
-                    fontSize: "1rem",
-                    fontWeight: 800,
-                    letterSpacing: "0.02em",
-                    color: "#1a1a1a",
-                  }}
-                >
-                  Additional goodies
-                </div>
-                <div
-                  style={{
-                    marginTop: "0.1rem",
-                    fontFamily: "'IM Fell English', Georgia, serif",
-                    fontStyle: "italic",
-                    fontSize: "0.78rem",
-                    color: "#777",
-                  }}
-                >
-                  Manually summon little extras from live APIs.
-                </div>
-              </div>
               <button
                 type="button"
-                onClick={() => setAdditionalGoodiesOpen(false)}
+                onClick={() => setFeedModuleModal(null)}
                 style={{
                   border: "1px solid #1a1a1a",
                   background: "transparent",
@@ -1619,101 +1679,104 @@ export function ProfileMenu({
               </button>
             </div>
 
-            <div style={{ display: "grid", gap: "0.6rem", marginBottom: "0.75rem" }}>
-              <button
-                type="button"
-                onClick={() => void fetchAdditionalWeatherModule()}
-                disabled={moduleLoading}
-                style={{
-                  textAlign: "left",
-                  padding: "0.55rem 0.65rem",
-                  border: "1px solid #d8d2c7",
-                  background: "#fff",
-                  cursor: moduleLoading ? "wait" : "pointer",
-                  fontFamily: "'Playfair Display', Georgia, serif",
-                  fontSize: "0.75rem",
-                  fontWeight: 700,
-                }}
-              >
-                {moduleLoading ? "Fetching weather..." : "Weather"}
-              </button>
-              <button
-                type="button"
-                onClick={() => void fetchAdditionalSpotifyModule()}
-                disabled={spotifyLoading}
-                style={{
-                  textAlign: "left",
-                  padding: "0.55rem 0.65rem",
-                  border: "1px solid #d8d2c7",
-                  background: "#fff",
-                  cursor: spotifyLoading ? "wait" : "pointer",
-                  fontFamily: "'Playfair Display', Georgia, serif",
-                  fontSize: "0.75rem",
-                  fontWeight: 700,
-                }}
-              >
-                {spotifyLoading
-                  ? "Fetching Spotify mood tile..."
-                  : "Spotify Mood Tile"}
-              </button>
-              <div
-                style={{
-                  padding: "0.45rem 0.55rem",
-                  border: "1px dashed #d6cfbf",
-                  background: "#f8f4ea",
-                  fontSize: "0.7rem",
-                  color: "#5e5547",
-                  fontFamily: "'IM Fell English', Georgia, serif",
-                }}
-              >
-                Upcoming: Marvel comic summon, NASA highlights, Spotify mood tile.
-              </div>
-            </div>
-
-            {moduleError && (
+            {moduleError ? (
               <p
                 style={{
-                  margin: "0.25rem 0 0.6rem",
+                  margin: "0.25rem 0 0.75rem",
                   color: "#8b4513",
                   fontSize: "0.74rem",
                 }}
               >
                 {moduleError}
               </p>
-            )}
+            ) : null}
 
-            <div style={{ display: "grid", gap: "0.75rem" }}>
-              {weatherModuleData ? (
-                <WeatherFillerCard data={weatherModuleData} reason="interval" />
-              ) : (
+            {feedModuleModal === "weather" ? (
+              moduleLoading ? (
                 <p
                   style={{
-                    margin: "0.15rem 0 0",
+                    margin: "0.5rem 0 0",
                     fontFamily: "'IM Fell English', Georgia, serif",
                     fontStyle: "italic",
                     color: "#888",
-                    fontSize: "0.75rem",
+                    fontSize: "0.8rem",
                   }}
                 >
-                  Fetch weather data to preview the module.
+                  Loading weather&hellip;
                 </p>
-              )}
-              {spotifyModuleData ? (
-                <SpotifyMoodTile data={spotifyModuleData} reason="interval" />
+              ) : weatherModuleData ? (
+                <WeatherFillerCard data={weatherModuleData} reason="singleton" />
               ) : (
                 <p
                   style={{
-                    margin: "0.15rem 0 0",
+                    margin: "0.5rem 0 0",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    color: "#888",
+                    fontSize: "0.8rem",
+                  }}
+                >
+                  No weather data yet.
+                </p>
+              )
+            ) : null}
+
+            {feedModuleModal === "spotify" ? (
+              spotifyLoading ? (
+                <p
+                  style={{
+                    margin: "0.5rem 0 0",
                     fontFamily: "'IM Fell English', Georgia, serif",
                     fontStyle: "italic",
                     color: "#888",
-                    fontSize: "0.75rem",
+                    fontSize: "0.8rem",
                   }}
                 >
-                  Fetch Spotify data to preview the mood tile.
+                  Loading Spotify&hellip;
                 </p>
-              )}
-            </div>
+              ) : spotifyModuleData ? (
+                <SpotifyMoodTile data={spotifyModuleData} reason="singleton" />
+              ) : (
+                <p
+                  style={{
+                    margin: "0.5rem 0 0",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    color: "#888",
+                    fontSize: "0.8rem",
+                  }}
+                >
+                  No Spotify data yet.
+                </p>
+              )
+            ) : null}
+
+            {feedModuleModal === "apod" ? (
+              apodLoading ? (
+                <p
+                  style={{
+                    margin: "0.5rem 0 0",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    fontStyle: "italic",
+                    color: "#888",
+                    fontSize: "0.8rem",
+                  }}
+                >
+                  Loading NASA APOD&hellip;
+                </p>
+              ) : apodModuleData ? (
+                <NasaApodCard data={apodModuleData} reason="singleton" />
+              ) : (
+                <p
+                  style={{
+                    margin: "0.5rem 0 0",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    color: "#888",
+                    fontSize: "0.8rem",
+                  }}
+                >
+                  No APOD data yet.
+                </p>
+              )
+            ) : null}
           </div>
         </div>
       )}
