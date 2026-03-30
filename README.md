@@ -18,7 +18,7 @@ Gentle Stream curates real news from the web, filters for positive stories, and 
 
 | Area | Details |
 |------|---------|
-| **Auth** | Supabase Auth (e.g. Google, email). Session-aware APIs; optional local `AUTH_DISABLED` / `DEV_USER_ID` for development only. |
+| **Auth** | Supabase Auth (e.g. Google, email). Email sign-in clickwrap requires agreeing to the Terms of service + Privacy policy, and optionally Cloudflare Turnstile when enabled. Session-aware APIs; optional local `AUTH_DISABLED` / `DEV_USER_ID` for development only. |
 | **Profile** | Display name, **unique** `@username` (case-insensitive in DB), optional avatar (Storage + URL validation), **24-hour cooldown** after each username change. |
 | **Reading** | Save articles to a library, read saved pieces, optional likes — persisted in Postgres with RLS-oriented design. |
 | **Games** | **Sudoku**, **word search**, **killer sudoku**, and **nonogram** in the feed (and a hero puzzle beside the lead story). Difficulty presets, in-progress **cloud resume** for sudoku & word search where enabled, **completion logging** for stats. “How to play” links (Wikipedia) on sudoku, killer sudoku, and nonogram. |
@@ -110,6 +110,7 @@ The ingest agent tracks real `usage.input_tokens` against a conservative per-min
 | **Typecheck & build** | `tsc --noEmit` and `next build` with placeholder public env vars (no secrets on fork PRs). |
 | **Unit / generator tests** | `scripts/test-citations.ts`, `test-sudoku.ts`, `test-word-search.ts`, `test-killer-nonogram.ts` — no DB. |
 | **DB integration** | `test-dedup.ts`, `test-url-dedup.ts` — real Supabase; tagged test rows cleaned up in `finally`. |
+| **Security weekly audits** | Scheduled GitHub workflow `/.github/workflows/security-weekly.yml` runs `npm run security:inventory`, `npm run security:rls-audit`, and `npm run security:audit` weekly. |
 | **GitHub Actions** | Reusable workflow: **CI** on pull requests and pushes to `develop` (integration uses **Production** environment secrets when the repo is the source — fork PRs skip DB integration). **Deploy** on `push` to `main`: same quality gates, then `vercel deploy --prod`, then **smoke tests** against live `/api/feed` and `/api/game/sudoku`. |
 | **Vercel** | `vercel.json` sets `git.deploymentEnabled: false` so **only** the deploy workflow promotes production (no duplicate Git-triggered prod builds); crons still defined for scheduler/tagger/cleanup. |
 
@@ -189,6 +190,10 @@ See `.env.example` for documented variables. At minimum for a full local run:
 - `ANTHROPIC_API_KEY`
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
 - `CRON_SECRET`
+- `NEXT_PUBLIC_TURNSTILE_ENABLED=1` + `NEXT_PUBLIC_TURNSTILE_SITE_KEY` (client widget; optional)
+- `TURNSTILE_ENABLED=1` + `TURNSTILE_SECRET_KEY` (server verification; optional, required only when Turnstile is enabled)
+- `NEXT_PUBLIC_SUPPORT_EMAIL` (shown on `/data-deletion` and used for privacy contact mailto)
+- `NEXT_PUBLIC_LEGAL_LAST_UPDATED` (label used on `/privacy`, `/terms`, `/data-deletion`, `/sms-consent`)
 
 Configure **Auth providers** and **redirect URLs** in the Supabase dashboard to match your local or deployed origin.
 
@@ -266,6 +271,20 @@ Use this authenticated endpoint to inspect recent scheduler runs with per-catego
 - Returns run-level metadata (`ok`, `totalInserted`, duration notes) and category rows (`beforeCount`, `requestedCount`, `insertedCount`, `reason`, `errorMessage`)
 
 This is the fastest way to confirm whether low stock is caused by ingest failures, dedup skips, or tagger lag.
+
+---
+### Legal pages & clickwrap
+
+Public legal endpoints:
+- `/privacy`
+- `/terms`
+- `/data-deletion`
+- `/sms-consent`
+
+Clickwrap / consent behavior:
+- Social sign-in (Google/Facebook) redirects to `/terms/accept` until the user scrolls through Terms and agrees (cookie-backed gate).
+- Email sign-in (`/login` → “Email me a sign-in link”) requires checking the “I have read and agree…” box (Terms + Privacy) before the link is requested.
+- When Turnstile is enabled in env vars, the `/login` page renders the Cloudflare widget and `POST /api/auth/email-link` verifies the Turnstile token (rate-limited).
 
 ---
 
