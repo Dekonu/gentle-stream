@@ -16,6 +16,42 @@ function parseCommaTags(input: string): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Supabase Auth expects E.164 (+country, then digits). Sending anything else often yields 422.
+ */
+function normalizePhoneE164(input: string):
+  | { ok: true; e164: string }
+  | { ok: false; message: string } {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return { ok: false, message: "Enter a phone number." };
+  }
+  const collapsed = trimmed.replace(/[\s().-]/g, "");
+  const digitsOnly = collapsed.replace(/\D/g, "");
+
+  if (collapsed.startsWith("+")) {
+    const e164 = `+${digitsOnly}`;
+    if (!/^\+[1-9]\d{6,14}$/.test(e164)) {
+      return {
+        ok: false,
+        message:
+          "Invalid phone: after +, use a country code and 7–15 digits total (E.164).",
+      };
+    }
+    return { ok: true, e164 };
+  }
+
+  if (digitsOnly.length === 10) {
+    return { ok: true, e164: `+1${digitsOnly}` };
+  }
+
+  return {
+    ok: false,
+    message:
+      "Use international format with + and country code (e.g. +44 7911 123456). US/Canada: 10 digits without + is OK.",
+  };
+}
+
 export function CreatorOnboardingForm({ initialPhone }: CreatorOnboardingFormProps) {
   const router = useRouter();
   const [phone, setPhone] = useState(initialPhone);
@@ -38,14 +74,24 @@ export function CreatorOnboardingForm({ initialPhone }: CreatorOnboardingFormPro
 
   async function sendPhoneOtp() {
     setMessage(null);
+    const normalized = normalizePhoneE164(phone);
+    if (!normalized.ok) {
+      setMessage(normalized.message);
+      return;
+    }
     setPhoneBusy(true);
     try {
       const supabase = createClient();
-      const { error } = await supabase.auth.updateUser({ phone: phone.trim() });
+      const { error } = await supabase.auth.updateUser({ phone: normalized.e164 });
       if (error) {
-        setMessage(error.message);
+        const extra =
+          /invalid|phone|format|422/i.test(error.message)
+            ? " Enable Phone in Supabase (Authentication → Providers) and connect Twilio/MessageBird. Number must be E.164 (e.g. +15551234567)."
+            : "";
+        setMessage(`${error.message}${extra}`);
         return;
       }
+      setPhone(normalized.e164);
       setMessage("OTP sent to your phone. Enter it below to verify.");
     } finally {
       setPhoneBusy(false);
@@ -54,11 +100,16 @@ export function CreatorOnboardingForm({ initialPhone }: CreatorOnboardingFormPro
 
   async function verifyPhoneOtp() {
     setMessage(null);
+    const normalized = normalizePhoneE164(phone);
+    if (!normalized.ok) {
+      setMessage(normalized.message);
+      return;
+    }
     setPhoneBusy(true);
     try {
       const supabase = createClient();
       const token = otpToken.trim();
-      const phoneValue = phone.trim();
+      const phoneValue = normalized.e164;
       const firstAttempt = await supabase.auth.verifyOtp({
         phone: phoneValue,
         token,
@@ -131,8 +182,23 @@ export function CreatorOnboardingForm({ initialPhone }: CreatorOnboardingFormPro
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               placeholder="+1 555 123 4567"
+              autoComplete="tel"
+              inputMode="tel"
               style={{ padding: "0.45rem", border: "1px solid #bbb" }}
             />
+            <p
+              style={{
+                margin: 0,
+                fontSize: "0.75rem",
+                color: "#666",
+                fontFamily: "'IM Fell English', Georgia, serif",
+                lineHeight: 1.4,
+              }}
+            >
+              Use a full international number (E.164). US/Canada: 10 digits is fine; other
+              countries: start with + and country code. 422 errors are usually a bad format
+              or Phone/SMS not configured in the Supabase dashboard.
+            </p>
             <button
               onClick={sendPhoneOtp}
               disabled={phoneBusy || isPhoneVerified}
