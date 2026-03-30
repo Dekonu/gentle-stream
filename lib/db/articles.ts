@@ -102,7 +102,7 @@ async function hydrateCreatorAuthorDisplay(
   });
 }
 
-function rowToArticle(row: ArticleRow): StoredArticle {
+export function rowToArticle(row: ArticleRow): StoredArticle {
   const contentKind: ArticleContentKind =
     row.content_kind === "recipe" || row.content_kind === "user_article"
       ? row.content_kind

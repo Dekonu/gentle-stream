@@ -201,6 +201,22 @@ function weatherDataToCard(snapshot: WeatherSnapshot): WeatherFillerData {
   };
 }
 
+async function fetchDefaultLocationWeather(input: {
+  category?: string | null;
+  apiKey: string;
+}): Promise<WeatherFillerData | null> {
+  const defaultCity = defaultCityForCategory(input.category);
+  const geocoded = await resolveCoordinates(defaultCity, input.apiKey);
+  if (!geocoded) return null;
+  const onecall = await fetchOneCallWeather(geocoded.lat, geocoded.lon, input.apiKey);
+  const snapshot: WeatherSnapshot = {
+    city: geocoded.city,
+    country: geocoded.country,
+    ...onecall,
+  };
+  return weatherDataToCard(snapshot);
+}
+
 export async function getWeatherFillerData(input: {
   location?: string | null;
   category?: string | null;
@@ -266,7 +282,25 @@ export async function getWeatherFillerData(input: {
     return data;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[weather-module] One Call fetch failed: ${message}. Serving fallback.`);
+    console.warn(
+      `[weather-module] One Call fetch failed: ${message}. Retrying with default location.`
+    );
+    try {
+      const fallbackWeather = await fetchDefaultLocationWeather({
+        category: input.category,
+        apiKey,
+      });
+      if (fallbackWeather) {
+        cache.set(cacheKey, { data: fallbackWeather, expiresAt: now + CACHE_TTL_MS });
+        return fallbackWeather;
+      }
+    } catch (retryError) {
+      const retryMessage =
+        retryError instanceof Error ? retryError.message : String(retryError);
+      console.warn(
+        `[weather-module] Default-location retry failed: ${retryMessage}. Serving fallback art.`
+      );
+    }
     const fallback = fallbackArtData(input);
     return fallback;
   }

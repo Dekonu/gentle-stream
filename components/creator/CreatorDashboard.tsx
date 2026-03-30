@@ -62,6 +62,9 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
   const [recipeImportBusy, setRecipeImportBusy] = useState(false);
   const [recipeImportMessage, setRecipeImportMessage] = useState<string | null>(null);
   const [recipeImportIsError, setRecipeImportIsError] = useState(false);
+  const [assistBusy, setAssistBusy] = useState(false);
+  const [assistError, setAssistError] = useState<string | null>(null);
+  const [assistSuggestion, setAssistSuggestion] = useState<string | null>(null);
   const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const bodyCharacterCount = form.body.length;
   const isBodyTooLong = bodyCharacterCount > MAX_SUBMISSION_BODY_CHARS;
@@ -373,6 +376,36 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
     }
   }
 
+  async function requestAssist(mode: "improve" | "continue" | "headline") {
+    setAssistBusy(true);
+    setAssistError(null);
+    setAssistSuggestion(null);
+    try {
+      const response = await fetch("/api/creator/assist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          mode,
+          contentKind: form.contentKind,
+          headline: form.headline,
+          body: form.body,
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        result?: string;
+        error?: string;
+      };
+      if (!response.ok || !payload.result) {
+        setAssistError(payload.error ?? "AI assist is unavailable right now.");
+        return;
+      }
+      setAssistSuggestion(payload.result);
+    } finally {
+      setAssistBusy(false);
+    }
+  }
+
   return (
     <div style={{ minHeight: "100vh", background: "#ede9e1", padding: "1rem" }}>
       <div style={{ maxWidth: "980px", margin: "0 auto", display: "grid", gap: "1rem" }}>
@@ -475,7 +508,7 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
             </div>
 
             <div style={{ border: "1px solid #d8d2c7", background: "#fff", padding: "0.7rem", display: "grid", gap: "0.55rem" }}>
-              <input value={form.headline} onChange={(e) => setForm((f) => ({ ...f, headline: e.target.value }))} placeholder="Headline" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
+              <input aria-label="Headline" value={form.headline} onChange={(e) => setForm((f) => ({ ...f, headline: e.target.value }))} placeholder="Headline" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
               {form.contentKind === "user_article" ? (
                 <select value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} style={{ padding: "0.45rem", border: "1px solid #bbb" }}>
                   {CATEGORIES.map((category) => (
@@ -524,6 +557,65 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                   Section break
                 </button>
               </div>
+
+              <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap", marginTop: "0.45rem" }}>
+                <button
+                  type="button"
+                  disabled={assistBusy}
+                  onClick={() => void requestAssist("improve")}
+                  style={{ padding: "0.25rem 0.5rem", border: "1px solid #1a472a", background: "#fff", cursor: assistBusy ? "wait" : "pointer", fontSize: "0.78rem" }}
+                >
+                  Improve paragraph
+                </button>
+                <button
+                  type="button"
+                  disabled={assistBusy}
+                  onClick={() => void requestAssist("continue")}
+                  style={{ padding: "0.25rem 0.5rem", border: "1px solid #1a472a", background: "#fff", cursor: assistBusy ? "wait" : "pointer", fontSize: "0.78rem" }}
+                >
+                  Continue draft
+                </button>
+                <button
+                  type="button"
+                  disabled={assistBusy}
+                  onClick={() => void requestAssist("headline")}
+                  style={{ padding: "0.25rem 0.5rem", border: "1px solid #1a472a", background: "#fff", cursor: assistBusy ? "wait" : "pointer", fontSize: "0.78rem" }}
+                >
+                  Suggest headline
+                </button>
+              </div>
+              {assistError ? (
+                <p style={{ margin: "0.4rem 0 0", color: "#8b4513", fontSize: "0.8rem" }}>
+                  {assistError}
+                </p>
+              ) : null}
+              {assistSuggestion ? (
+                <div style={{ marginTop: "0.45rem", border: "1px solid #d8d2c7", background: "#faf8f3", padding: "0.5rem" }}>
+                  <p style={{ margin: 0, fontSize: "0.78rem", color: "#333" }}>{assistSuggestion}</p>
+                  <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.4rem" }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (form.contentKind === "user_article") {
+                          setForm((f) => ({ ...f, body: `${f.body.trim()}\n\n${assistSuggestion}`.trim() }));
+                        } else {
+                          setForm((f) => ({ ...f, headline: assistSuggestion.trim() }));
+                        }
+                      }}
+                      style={{ padding: "0.22rem 0.48rem", border: "1px solid #888", background: "#fff", cursor: "pointer", fontSize: "0.75rem" }}
+                    >
+                      Insert
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAssistSuggestion(null)}
+                      style={{ padding: "0.22rem 0.48rem", border: "1px solid #888", background: "#fff", cursor: "pointer", fontSize: "0.75rem" }}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              ) : null}
 
               <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.5rem", marginBottom: "0.5rem" }}>
                 <button
@@ -860,12 +952,12 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                 </div>
               </div>
             )}
-            <input value={form.pullQuote} onChange={(e) => setForm((f) => ({ ...f, pullQuote: e.target.value }))} placeholder="Pull quote (optional)" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
-            <input value={form.locale} onChange={(e) => setForm((f) => ({ ...f, locale: e.target.value }))} placeholder="Locale (default global)" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
-            <input value={form.explicitHashtags} onChange={(e) => setForm((f) => ({ ...f, explicitHashtags: e.target.value }))} placeholder="Explicit hashtags, comma separated" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
+            <input aria-label="Pull quote" value={form.pullQuote} onChange={(e) => setForm((f) => ({ ...f, pullQuote: e.target.value }))} placeholder="Pull quote (optional)" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
+            <input aria-label="Locale" value={form.locale} onChange={(e) => setForm((f) => ({ ...f, locale: e.target.value }))} placeholder="Locale (default global)" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
+            <input aria-label="Explicit hashtags" value={form.explicitHashtags} onChange={(e) => setForm((f) => ({ ...f, explicitHashtags: e.target.value }))} placeholder="Explicit hashtags, comma separated" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
           </div>
 
-          {message ? <p style={{ color: "#7b2d00", margin: "0.7rem 0 0" }}>{message}</p> : null}
+          {message ? <p aria-live="polite" style={{ color: "#7b2d00", margin: "0.7rem 0 0" }}>{message}</p> : null}
 
           <div style={{ display: "flex", gap: "0.55rem", marginTop: "0.75rem", flexWrap: "wrap" }}>
             <button onClick={submitForm} disabled={!canSubmit || busy} style={{ padding: "0.45rem 0.7rem", border: "1px solid #1a472a", background: "#fff", cursor: "pointer" }}>

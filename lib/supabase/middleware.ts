@@ -31,6 +31,12 @@ function isPublicPath(pathname: string): boolean {
 }
 
 export async function updateSession(request: NextRequest) {
+  if (
+    process.env.NODE_ENV === "production" &&
+    (process.env.AUTH_DISABLED === "1" || process.env.AUTH_DISABLED === "true")
+  ) {
+    throw new Error("AUTH_DISABLED must never be enabled in production.");
+  }
   if (process.env.AUTH_DISABLED === "1") {
     return NextResponse.next({ request });
   }

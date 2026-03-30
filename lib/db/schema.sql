@@ -90,6 +90,7 @@ CREATE TABLE IF NOT EXISTS user_profiles (
   username           TEXT,
   avatar_url         TEXT,
   weather_location   TEXT,
+  theme_preference   TEXT CHECK (theme_preference IN ('light', 'dark')),
   username_set_at    TIMESTAMPTZ,
 
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -221,6 +222,21 @@ CREATE TABLE IF NOT EXISTS recipe_ratings (
   rated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (user_id, article_id)
 );
+
+CREATE TABLE IF NOT EXISTS user_daily_todos (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id TEXT NOT NULL,
+  local_day DATE NOT NULL,
+  timezone TEXT NOT NULL DEFAULT 'UTC',
+  label TEXT NOT NULL,
+  done BOOLEAN NOT NULL DEFAULT FALSE,
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_daily_todos_user_day
+  ON user_daily_todos (user_id, local_day, sort_order);
 
 -- ─── Auto-update updated_at ───────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION update_updated_at_column()

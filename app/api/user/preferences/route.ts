@@ -6,12 +6,21 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import {
   getOrCreateUserProfile,
   updateUserPreferences,
 } from "@/lib/db/users";
 import type { GameType } from "@/lib/games/types";
+
+const preferencesBodySchema = z
+  .object({
+    gameRatio: z.number().min(0).max(1).optional(),
+    enabledGameTypes: z.array(z.string()).min(1).optional(),
+    themePreference: z.union([z.literal("light"), z.literal("dark"), z.null()]).optional(),
+  })
+  .strict();
 
 export async function GET() {
   try {
@@ -41,16 +50,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = (await request.json()) as {
-      gameRatio?: unknown;
-      enabledGameTypes?: unknown;
-    };
+    const parsedBody = preferencesBodySchema.safeParse(await request.json());
+    if (!parsedBody.success) {
+      return NextResponse.json({ error: "Invalid preferences payload." }, { status: 400 });
+    }
+    const body = parsedBody.data;
 
     const wantsGameRatio = body.gameRatio !== undefined;
     const wantsEnabledTypes = body.enabledGameTypes !== undefined;
-    if (!wantsGameRatio && !wantsEnabledTypes) {
+    const wantsThemePreference = body.themePreference !== undefined;
+    if (!wantsGameRatio && !wantsEnabledTypes && !wantsThemePreference) {
       return NextResponse.json(
-        { error: "Provide gameRatio and/or enabledGameTypes" },
+        { error: "Provide gameRatio, enabledGameTypes, and/or themePreference" },
         { status: 400 }
       );
     }
@@ -90,9 +101,24 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    let themePreference: "light" | "dark" | null | undefined;
+    if (wantsThemePreference) {
+      if (body.themePreference == null) {
+        themePreference = null;
+      } else if (body.themePreference === "light" || body.themePreference === "dark") {
+        themePreference = body.themePreference;
+      } else {
+        return NextResponse.json(
+          { error: "themePreference must be one of: light, dark, null" },
+          { status: 400 }
+        );
+      }
+    }
+
     const updated = await updateUserPreferences(user.id, {
       ...(gameRatio !== undefined ? { gameRatio } : {}),
       ...(enabledGameTypes !== undefined ? { enabledGameTypes } : {}),
+      ...(themePreference !== undefined ? { themePreference } : {}),
     });
     return NextResponse.json(updated);
   } catch (error: unknown) {

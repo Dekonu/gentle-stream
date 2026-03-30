@@ -9,6 +9,7 @@ import NewsSection from "./NewsSection";
 import GameSlot from "./games/GameSlot";
 import WeatherFillerCard from "./feed/WeatherFillerCard";
 import SpotifyMoodTile from "./feed/SpotifyMoodTile";
+import TodoFillerCard from "./feed/TodoFillerCard";
 import LoadingSection from "./LoadingSection";
 import ErrorBanner from "./ErrorBanner";
 import type { Category } from "@/lib/constants";
@@ -22,6 +23,7 @@ import type {
   FeedModuleData,
   WeatherModuleData,
   SpotifyMoodTileData,
+  TodoModuleData,
 } from "@/lib/types";
 import { DEFAULT_GAME_RATIO } from "@/lib/constants";
 import { feedGamePickForOrdinal } from "@/lib/games/feedPick";
@@ -74,12 +76,28 @@ const FEED_FETCH_TIMEOUT_MS = 90_000;
 const SENTINEL_PREFETCH_PX = 900;
 const MIN_LOAD_GAP_MS = 650;
 const REACHED_END_COOLDOWN_MS = 20_000;
+const FEED_CACHE_TTL_MS = 35_000;
+const FEED_STALE_TTL_MS = 120_000;
 const DEFAULT_GAP_MIN_PX = 180;
 const DEFAULT_INLINE_GAP_MIN_PX = 140;
 const DEFAULT_FILLER_INTERVAL = 4;
 const DEFAULT_WEATHER_WEIGHT = 3;
 const DEFAULT_SPOTIFY_WEIGHT = 1;
+const DEFAULT_TODO_WEIGHT = 2;
 type FeedKindFilter = "all" | ArticleContentKind;
+
+interface FeedApiResponse {
+  articles: Article[];
+  category: string;
+  fromCache: boolean;
+  coldStartQueued?: boolean;
+  coldStartCategory?: string;
+}
+
+interface FeedCacheEntry {
+  data: FeedApiResponse;
+  cachedAtMs: number;
+}
 
 function readTruthyFlag(input: string | undefined, defaultValue: boolean): boolean {
   if (input == null) return defaultValue;
@@ -110,7 +128,10 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   const [error, setError] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<Category | null>(null);
   const [activeKindFilter, setActiveKindFilter] = useState<FeedKindFilter>("all");
+  const [searchInput, setSearchInput] = useState("");
+  const [activeSearchQuery, setActiveSearchQuery] = useState("");
   const [liveGenerating, setLiveGenerating] = useState(false);
+  const [themePreference, setThemePreference] = useState<"light" | "dark">("light");
   /** True once game ratio is resolved for the current session/user bootstrap. */
   const [isFeedReady, setIsFeedReady] = useState(false);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
@@ -122,6 +143,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   const gameSlotOrdinalRef = useRef(0);
   const activeCategoryRef = useRef<Category | null>(null);
   const activeKindFilterRef = useRef<FeedKindFilter>("all");
+  const activeSearchQueryRef = useRef("");
   /** Bumps on each [userId] bootstrap so Strict Mode / fast remounts only run one initial loadMore. */
   const feedBootstrapGenRef = useRef(0);
   const gameRatioRef = useRef(DEFAULT_GAME_RATIO);
@@ -152,6 +174,8 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   const browserGeoRef = useRef<{ lat: number; lon: number } | null>(null);
   const browserGeoAttemptedRef = useRef(false);
   const preferredWeatherLocationRef = useRef<string | null>(null);
+  const feedCacheRef = useRef<Map<string, FeedCacheEntry>>(new Map());
+  const feedInFlightRef = useRef<Map<string, Promise<FeedApiResponse>>>(new Map());
 
   const fillerEnabled = readTruthyFlag(
     process.env.NEXT_PUBLIC_FEED_GAP_FILL_ENABLED,
@@ -186,6 +210,14 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   const spotifyWeight = readPositiveInt(
     process.env.NEXT_PUBLIC_SPOTIFY_MODULE_WEIGHT,
     DEFAULT_SPOTIFY_WEIGHT
+  );
+  const todoWeight = readPositiveInt(
+    process.env.NEXT_PUBLIC_TODO_MODULE_WEIGHT,
+    DEFAULT_TODO_WEIGHT
+  );
+  const todoModuleEnabled = readTruthyFlag(
+    process.env.NEXT_PUBLIC_TODO_MODULE_ENABLED,
+    true
   );
 
   // Sentinel ref — plain IntersectionObserver (no library dependency on stale state)
@@ -238,7 +270,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
 
   const fetchModuleData = useCallback(
     async (input: {
-      moduleType: "weather" | "spotify" | "generated_art" | "nasa";
+      moduleType: "weather" | "spotify" | "generated_art" | "nasa" | "todo";
       category?: string;
       location?: string;
     }): Promise<FeedModuleData | null> => {
@@ -247,6 +279,23 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           category: input.category,
           location: input.location,
         });
+      }
+      if (input.moduleType === "todo") {
+        try {
+          const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+          const res = await fetch(
+            `/api/feed/modules/todo?timezone=${encodeURIComponent(timezone)}`,
+            {
+              cache: "no-store",
+              credentials: "include",
+            }
+          );
+          if (!res.ok) return null;
+          const body = (await res.json()) as { data?: TodoModuleData };
+          return body.data ?? null;
+        } catch {
+          return null;
+        }
       }
       try {
         const params = new URLSearchParams();
@@ -292,7 +341,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       reason: "gap" | "interval";
       category?: string;
       location?: string;
-      moduleType: "weather" | "spotify" | "generated_art" | "nasa";
+      moduleType: "weather" | "spotify" | "generated_art" | "nasa" | "todo";
     }): Promise<ModuleFeedSection | null> => {
       const data = await fetchModuleData({
         moduleType: input.moduleType,
@@ -310,6 +359,75 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       };
     },
     [fetchModuleData]
+  );
+
+  const readCachedFeedResponse = useCallback((cacheKey: string): {
+    data: FeedApiResponse;
+    isFresh: boolean;
+  } | null => {
+    const entry = feedCacheRef.current.get(cacheKey);
+    if (!entry) return null;
+    const ageMs = Date.now() - entry.cachedAtMs;
+    if (ageMs > FEED_STALE_TTL_MS) {
+      feedCacheRef.current.delete(cacheKey);
+      return null;
+    }
+    return {
+      data: entry.data,
+      isFresh: ageMs <= FEED_CACHE_TTL_MS,
+    };
+  }, []);
+
+  const fetchFeedResponse = useCallback(
+    async (params: URLSearchParams, signal: AbortSignal): Promise<FeedApiResponse> => {
+      const query = params.toString();
+      const url = `/api/feed?${query}`;
+      const cacheKey = `feed:${query}`;
+      const cached = readCachedFeedResponse(cacheKey);
+      if (cached?.isFresh) return cached.data;
+      if (cached && !cached.isFresh && !feedInFlightRef.current.has(cacheKey)) {
+        // Stale-while-revalidate: serve stale immediately and refresh in the background.
+        const revalidatePromise = fetch(url, { cache: "no-store" })
+          .then(async (res) => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const next = (await res.json()) as FeedApiResponse;
+            feedCacheRef.current.set(cacheKey, {
+              data: next,
+              cachedAtMs: Date.now(),
+            });
+            return next;
+          })
+          .catch(() => cached.data)
+          .finally(() => {
+            feedInFlightRef.current.delete(cacheKey);
+          });
+        feedInFlightRef.current.set(cacheKey, revalidatePromise);
+        return cached.data;
+      }
+
+      const existing = feedInFlightRef.current.get(cacheKey);
+      if (existing) return existing;
+
+      const requestPromise = fetch(url, { signal, cache: "no-store" })
+        .then(async (res) => {
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body.error || `HTTP ${res.status}`);
+          }
+          const data = (await res.json()) as FeedApiResponse;
+          feedCacheRef.current.set(cacheKey, {
+            data,
+            cachedAtMs: Date.now(),
+          });
+          return data;
+        })
+        .finally(() => {
+          feedInFlightRef.current.delete(cacheKey);
+        });
+      feedInFlightRef.current.set(cacheKey, requestPromise);
+      return requestPromise;
+    },
+    [readCachedFeedResponse]
   );
 
   const loadMore = useCallback(async (overrideCategory?: Category | null) => {
@@ -343,7 +461,8 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       overrideCategory !== undefined
         ? overrideCategory
         : activeCategoryRef.current;
-      const kindFilter = activeKindFilterRef.current;
+    const kindFilter = activeKindFilterRef.current;
+    const searchQuery = activeSearchQueryRef.current.trim();
 
     const currentIndex = sectionCountRef.current;
 
@@ -369,38 +488,53 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       }
 
       // ── Article section ──────────────────────────────────────────────────────
-      const params = new URLSearchParams();
-      params.set("sectionIndex", String(currentIndex));
-      if (category) params.set("category", category);
-      if (kindFilter !== "all") params.set("contentKind", kindFilter);
-      const excludeIds = Array.from(renderedDbArticleIdsRef.current).slice(-400);
-      if (excludeIds.length > 0) params.set("excludeIds", excludeIds.join(","));
-
       const controller = new AbortController();
       const timeoutId = window.setTimeout(
         () => controller.abort(),
         FEED_FETCH_TIMEOUT_MS
       );
 
-      let res: Response;
+      let data: FeedApiResponse;
       try {
-        res = await fetch(`/api/feed?${params.toString()}`, {
-          signal: controller.signal,
-        });
+        if (searchQuery.length >= 2) {
+          const params = new URLSearchParams();
+          params.set("q", searchQuery);
+          params.set("offset", String(currentIndex * 3));
+          params.set("limit", "3");
+          if (category) params.set("category", category);
+          if (kindFilter !== "all") params.set("contentKinds", kindFilter);
+          const res = await fetch(`/api/articles/search?${params.toString()}`, {
+            signal: controller.signal,
+            cache: "no-store",
+          });
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body.error || `HTTP ${res.status}`);
+          }
+          const searchBody = (await res.json()) as {
+            articles?: Article[];
+            hasMore?: boolean;
+          };
+          data = {
+            articles: searchBody.articles ?? [],
+            category: category ?? "Search",
+            fromCache: true,
+          };
+          if (!searchBody.hasMore && (searchBody.articles?.length ?? 0) === 0) {
+            reachedEndRef.current = currentIndex > 0;
+          }
+        } else {
+          const params = new URLSearchParams();
+          params.set("sectionIndex", String(currentIndex));
+          if (category) params.set("category", category);
+          if (kindFilter !== "all") params.set("contentKind", kindFilter);
+          const excludeIds = Array.from(renderedDbArticleIdsRef.current).slice(-400);
+          if (excludeIds.length > 0) params.set("excludeIds", excludeIds.join(","));
+          data = await fetchFeedResponse(params, controller.signal);
+        }
       } finally {
         window.clearTimeout(timeoutId);
       }
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `HTTP ${res.status}`);
-      }
-
-      const data: {
-        articles: Article[];
-        category: string;
-        fromCache: boolean;
-      } = await res.json();
 
       setLiveGenerating(!data.fromCache);
 
@@ -412,6 +546,18 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       });
 
       if (uniqueForView.length === 0) {
+        if (data.coldStartQueued) {
+          reachedEndRef.current = false;
+          pendingLoadRef.current = true;
+          setError(
+            `Warming up ${data.coldStartCategory ?? data.category} stories — retrying shortly.`
+          );
+          window.setTimeout(() => {
+            if (loadingRef.current || reachedEndRef.current || !feedReadyRef.current) return;
+            void loadMore();
+          }, 2500);
+          return;
+        }
         reachedEndRef.current = currentIndex > 0;
         if (reachedEndRef.current) {
           if (reachedEndTimeoutIdRef.current) {
@@ -480,13 +626,18 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         const preferredType =
           preferredInlineType === "weather" || preferredInlineType === "spotify"
             ? preferredInlineType
-            : chooseModuleTypeByPolicy({
+            : (() => {
+                const picked = chooseModuleTypeByPolicy({
                 seed: currentIndex + 101,
                 weatherWeight,
                 spotifyWeight,
+                todoWeight,
                 spotifyEnabled: spotifyModuleEnabled,
+                todoEnabled: todoModuleEnabled,
                 policy: modulePolicy,
-              });
+                });
+                return picked === "todo" ? "weather" : picked;
+              })();
         let inlineData = await fetchModuleData({
           moduleType: preferredType,
           category: data.category,
@@ -516,7 +667,9 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           seed: currentIndex,
           weatherWeight,
           spotifyWeight,
+          todoWeight,
           spotifyEnabled: spotifyModuleEnabled,
+          todoEnabled: todoModuleEnabled,
           policy: modulePolicy,
         });
         let moduleSection = await fetchModuleSection({
@@ -584,6 +737,20 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       }
       articleSectionsRenderedRef.current += 1;
       sectionCountRef.current += nextSections.length;
+      // Warm the next section request in cache to reduce visible wait.
+      if (searchQuery.length < 2) {
+        const prefetchParams = new URLSearchParams();
+        prefetchParams.set("sectionIndex", String(sectionCountRef.current));
+        if (category) prefetchParams.set("category", category);
+        if (kindFilter !== "all") prefetchParams.set("contentKind", kindFilter);
+        const prefetchExcludeIds = Array.from(renderedDbArticleIdsRef.current).slice(-400);
+        if (prefetchExcludeIds.length > 0) {
+          prefetchParams.set("excludeIds", prefetchExcludeIds.join(","));
+        }
+        void fetchFeedResponse(prefetchParams, new AbortController().signal).catch(() => {
+          // Best-effort prefetch only.
+        });
+      }
     } catch (e: unknown) {
       const aborted = e instanceof Error && e.name === "AbortError";
       const msg = aborted
@@ -624,8 +791,11 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     modulePolicy,
     fetchModuleSection,
     fetchModuleData,
+    fetchFeedResponse,
     weatherWeight,
     spotifyWeight,
+    todoWeight,
+    todoModuleEnabled,
     spotifyModuleEnabled,
   ]); // stable refs + config
 
@@ -669,6 +839,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
 
     (async () => {
       let usedServerRatio = false;
+      let serverThemePreference: "light" | "dark" | null = null;
 
       try {
         const res = await fetch("/api/user/preferences", {
@@ -718,6 +889,17 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           } else {
             preferredWeatherLocationRef.current = null;
           }
+          if (profile.themePreference === "light" || profile.themePreference === "dark") {
+            serverThemePreference = profile.themePreference;
+            try {
+              localStorage.setItem(
+                "gentle_stream_theme_preference",
+                profile.themePreference
+              );
+            } catch {
+              /* ignore */
+            }
+          }
         }
       } catch {
         /* offline or unauthenticated preview */
@@ -763,6 +945,22 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       }
 
       if (cancelled || gen !== feedBootstrapGenRef.current) return;
+
+      let profileTheme = serverThemePreference;
+      if (!profileTheme) {
+        try {
+          const storedTheme = localStorage.getItem("gentle_stream_theme_preference");
+          if (storedTheme === "light" || storedTheme === "dark") {
+            profileTheme = storedTheme;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      if (profileTheme === "light" || profileTheme === "dark") {
+        setThemePreference(profileTheme);
+        document.documentElement.setAttribute("data-theme", profileTheme);
+      }
 
       feedReadyRef.current = true;
       setIsFeedReady(true);
@@ -838,6 +1036,10 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     activeKindFilterRef.current = activeKindFilter;
   }, [activeKindFilter]);
 
+  useEffect(() => {
+    activeSearchQueryRef.current = activeSearchQuery;
+  }, [activeSearchQuery]);
+
   // Re-attach when sections change so layout updates don't leave the sentinel unobserved
   useEffect(() => {
     if (!isFeedReady) return;
@@ -869,6 +1071,25 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   }, []);
 
   useEffect(() => {
+    function resolveStoredTheme(): "light" | "dark" {
+      try {
+        const stored = localStorage.getItem("gentle_stream_theme_preference");
+        if (stored === "light" || stored === "dark") return stored;
+      } catch {
+        /* ignore */
+      }
+      return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    }
+    const nextTheme = resolveStoredTheme();
+    setThemePreference(nextTheme);
+    document.documentElement.setAttribute("data-theme", nextTheme);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", themePreference);
+  }, [themePreference]);
+
+  useEffect(() => {
     function updateScrollTopVisibility() {
       setShowScrollTopButton(window.scrollY > 480);
     }
@@ -878,7 +1099,28 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   }, []);
 
   function scrollToTop() {
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.scrollTo({ top: 0, behavior: prefersReducedMotion ? "auto" : "smooth" });
+  }
+
+  async function toggleThemePreference() {
+    const next = themePreference === "dark" ? "light" : "dark";
+    setThemePreference(next);
+    try {
+      localStorage.setItem("gentle_stream_theme_preference", next);
+    } catch {
+      /* ignore */
+    }
+    try {
+      await fetch("/api/user/preferences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ themePreference: next }),
+      });
+    } catch {
+      /* ignore */
+    }
   }
 
   const handleCategorySelect = (cat: Category) => {
@@ -965,18 +1207,52 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     [loadMore]
   );
 
+  const resetFeedAndLoad = useCallback(() => {
+    reachedEndRef.current = false;
+    if (reachedEndTimeoutIdRef.current) {
+      window.clearTimeout(reachedEndTimeoutIdRef.current);
+      reachedEndTimeoutIdRef.current = null;
+    }
+    if (minGapRetryTimeoutIdRef.current) {
+      window.clearTimeout(minGapRetryTimeoutIdRef.current);
+      minGapRetryTimeoutIdRef.current = null;
+    }
+    pendingLoadRef.current = false;
+    setSections([]);
+    sectionCountRef.current = 0;
+    articleSectionsRenderedRef.current = 0;
+    gameSlotOrdinalRef.current = 0;
+    loadingRef.current = false;
+    setLoading(false);
+    setError(null);
+    lastArticleCategoryRef.current = undefined;
+    renderedArticleKeysRef.current = new Set();
+    renderedDbArticleIdsRef.current = new Set();
+    void loadMore();
+  }, [loadMore]);
+
+  const applySearch = useCallback(() => {
+    const next = searchInput.trim();
+    if (next === activeSearchQueryRef.current) return;
+    setActiveSearchQuery(next);
+    activeSearchQueryRef.current = next;
+    resetFeedAndLoad();
+  }, [searchInput, resetFeedAndLoad]);
+
   if (!mfaPassed) {
     return <MfaChallengeGate onPassed={() => setMfaPassed(true)} />;
   }
 
   return (
-    <div style={{ background: "#ede9e1", minHeight: "100vh" }}>
+    <div style={{ background: "var(--gs-bg)", minHeight: "100vh", color: "var(--gs-text)" }}>
       <Masthead
         accountSlot={
           userEmail ? (
             <ProfileMenu
               userEmail={userEmail}
               onGameRatioSaved={handleGameRatioSaved}
+              themePreference={themePreference}
+              onThemePreferenceToggle={toggleThemePreference}
               isAdmin={isAdmin}
             />
           ) : undefined
@@ -997,7 +1273,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           gap: "0.4rem",
           flexWrap: "wrap",
           alignItems: "center",
-          background: "#faf8f3",
+          background: "var(--gs-surface)",
         }}
       >
         {(
@@ -1013,6 +1289,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
             <button
               key={option.value}
               type="button"
+              aria-pressed={active}
               onClick={() => handleKindFilterSelect(option.value)}
               style={{
                 border: active ? "2px solid #1a1a1a" : "1px solid #d8d2c7",
@@ -1030,6 +1307,63 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
             </button>
           );
         })}
+        <div style={{ marginLeft: "auto", display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+          <input
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                applySearch();
+              }
+            }}
+            placeholder="Search stories or tags..."
+            aria-label="Search stories"
+            style={{
+              border: "1px solid #d8d2c7",
+              padding: "0.34rem 0.45rem",
+              minWidth: "14rem",
+              fontSize: "0.75rem",
+            }}
+          />
+          <button
+            type="button"
+            onClick={applySearch}
+            style={{
+              border: "1px solid #1a1a1a",
+              background: "#fff",
+              color: "#1a1a1a",
+              padding: "0.32rem 0.55rem",
+              fontFamily: "'Playfair Display', Georgia, serif",
+              fontSize: "0.7rem",
+              cursor: "pointer",
+            }}
+          >
+            Search
+          </button>
+          {activeSearchQuery ? (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchInput("");
+                setActiveSearchQuery("");
+                activeSearchQueryRef.current = "";
+                resetFeedAndLoad();
+              }}
+              style={{
+                border: "1px solid #888",
+                background: "#faf8f3",
+                color: "#333",
+                padding: "0.32rem 0.55rem",
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "0.7rem",
+                cursor: "pointer",
+              }}
+            >
+              Clear
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {liveGenerating && (
@@ -1056,7 +1390,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         style={{
           maxWidth: "1200px",
           margin: "0 auto",
-          background: "#faf8f3",
+            background: "var(--gs-surface)",
           boxShadow: "0 0 60px rgba(0,0,0,0.13)",
         }}
       >
@@ -1095,6 +1429,15 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
                 />
               );
             }
+            if (section.moduleType === "todo") {
+              return (
+                <TodoFillerCard
+                  key={`module-${section.index}-todo`}
+                  data={section.data as TodoModuleData}
+                  reason={section.reason}
+                />
+              );
+            }
             return (
               <WeatherFillerCard
                 key={`module-${section.index}-weather`}
@@ -1116,6 +1459,10 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           return null;
         })}
 
+        <div aria-live="polite" style={{ position: "absolute", left: "-9999px" }}>
+          {loading ? "Loading more stories." : ""}
+          {error ? `Error: ${error}` : ""}
+        </div>
         {error && (
           <ErrorBanner
             message={error}

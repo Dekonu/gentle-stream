@@ -3,10 +3,6 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SignOutButton } from "@/components/auth/SignOutButton";
-import {
-  GAME_RATIO_PRESETS,
-  nearestPresetValue,
-} from "@/lib/user/feed-settings";
 import { FEED_GAME_TYPES } from "@/lib/games/feedPick";
 import type { GameType } from "@/lib/games/types";
 import { isCreator } from "@/lib/user/creator";
@@ -28,6 +24,8 @@ import { AvatarInput } from "./AvatarInput";
 interface ProfileMenuProps {
   userEmail: string;
   onGameRatioSaved: (ratio: number) => void;
+  themePreference: "light" | "dark";
+  onThemePreferenceToggle: () => Promise<void>;
   isAdmin?: boolean;
 }
 
@@ -55,6 +53,8 @@ function formatDuration(totalSec: number): string {
 export function ProfileMenu({
   userEmail,
   onGameRatioSaved,
+  themePreference,
+  onThemePreferenceToggle,
   isAdmin = false,
 }: ProfileMenuProps) {
   const [open, setOpen] = useState(false);
@@ -65,6 +65,9 @@ export function ProfileMenu({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [themeSaving, setThemeSaving] = useState(false);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [ratioDraft, setRatioDraft] = useState(0.2);
   const [profileForm, setProfileForm] = useState({
     displayName: "",
     username: "",
@@ -152,7 +155,12 @@ export function ProfileMenu({
     if (open) return;
     setGameSettingsOpen(false);
     setAdditionalGoodiesOpen(false);
+    setEditingProfile(false);
   }, [open]);
+
+  useEffect(() => {
+    setRatioDraft(profile?.gameRatio ?? 0.2);
+  }, [profile?.gameRatio]);
 
   useEffect(() => {
     if (!profile) return;
@@ -203,6 +211,24 @@ export function ProfileMenu({
     } finally {
       setSaving(false);
     }
+  }
+
+  async function saveThemePreference() {
+    setSaveError(null);
+    setThemeSaving(true);
+    try {
+      await onThemePreferenceToggle();
+    } catch {
+      setSaveError("Could not update theme preference.");
+    } finally {
+      setThemeSaving(false);
+    }
+  }
+
+  function commitRatioDraft() {
+    const rounded = Math.round(ratioDraft * 100) / 100;
+    if (Math.abs((profile?.gameRatio ?? 0.2) - rounded) < 0.005) return;
+    void saveGameRatio(rounded);
   }
 
   async function saveEnabledGameTypes(next: GameType[]) {
@@ -444,7 +470,7 @@ export function ProfileMenu({
     );
   }
 
-  async function saveProfileFields() {
+  async function saveProfileFields(): Promise<boolean> {
     setSaveError(null);
     setSaving(true);
     try {
@@ -484,7 +510,7 @@ export function ProfileMenu({
             typeof data.error === "string" ? data.error : "Could not save profile."
           );
         }
-        return;
+        return false;
       }
       setProfile(data as UserProfile);
       try {
@@ -499,13 +525,13 @@ export function ProfileMenu({
       }
     } catch {
       setSaveError("Could not save profile.");
+      return false;
     } finally {
       setSaving(false);
     }
+    return true;
   }
 
-  const currentRatio = profile?.gameRatio ?? 0.2;
-  const highlightedPreset = nearestPresetValue(currentRatio);
   const creator = profile ? isCreator(profile) : false;
 
   const label =
@@ -881,151 +907,312 @@ export function ProfileMenu({
             >
               Profile
             </h3>
-            <label
-              style={{
-                fontSize: "0.65rem",
-                color: "#888",
-                display: "block",
-                marginBottom: "0.2rem",
-              }}
-            >
-              Display name
-            </label>
-            <input
-              value={profileForm.displayName}
-              onChange={(e) =>
-                setProfileForm((f) => ({ ...f, displayName: e.target.value }))
-              }
-              placeholder="Your name"
-              style={{
-                width: "100%",
-                boxSizing: "border-box",
-                marginBottom: "0.45rem",
-                padding: "0.35rem 0.45rem",
-                border: "1px solid #ccc",
-                fontSize: "0.85rem",
-              }}
-            />
-            <label
-              style={{
-                fontSize: "0.65rem",
-                color: "#888",
-                display: "block",
-                marginBottom: "0.2rem",
-              }}
-            >
-              Username
-            </label>
-            {usernameLocked && profile?.usernameSetAt ? (
-              <p
-                style={{
-                  fontSize: "0.65rem",
-                  color: "#777",
-                  margin: "0 0 0.35rem",
-                  lineHeight: 1.35,
-                  fontFamily: "'IM Fell English', Georgia, serif",
-                }}
-              >
-                You can change this again after{" "}
-                {new Date(
-                  usernameChangeUnlocksAtIso(profile.usernameSetAt)
-                ).toLocaleString(undefined, {
-                  dateStyle: "medium",
-                  timeStyle: "short",
-                })}{" "}
-                ({USERNAME_CHANGE_COOLDOWN_HOURS}-hour lock after each change).
-              </p>
+            {!editingProfile ? (
+              <>
+                <div
+                  style={{
+                    display: "grid",
+                    gap: "0.28rem",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    fontSize: "0.78rem",
+                    color: "#4d4d4d",
+                    marginBottom: "0.55rem",
+                  }}
+                >
+                  <div>
+                    <strong style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
+                      Name:
+                    </strong>{" "}
+                    {profile?.displayName?.trim() || "Not set"}
+                  </div>
+                  <div>
+                    <strong style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
+                      Username:
+                    </strong>{" "}
+                    {profile?.username ? `@${profile.username}` : "Not set"}
+                  </div>
+                  <div>
+                    <strong style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
+                      Weather:
+                    </strong>{" "}
+                    {profile?.weatherLocation?.trim() || "Automatic"}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Edit profile"
+                  title="Edit profile"
+                  onClick={() => setEditingProfile(true)}
+                  style={{
+                    border: "1px solid #1a1a1a",
+                    background: "#fff",
+                    width: "2rem",
+                    height: "2rem",
+                    borderRadius: "999px",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                  }}
+                >
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                    aria-hidden
+                  >
+                    <path
+                      d="M4 20H8L19 9L15 5L4 16V20Z"
+                      stroke="#1a1a1a"
+                      strokeWidth="1.8"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M13.5 6.5L17.5 10.5"
+                      stroke="#1a1a1a"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+              </>
             ) : (
-              <p
-                style={{
-                  fontSize: "0.62rem",
-                  color: "#aaa",
-                  margin: "0 0 0.35rem",
-                  lineHeight: 1.35,
-                }}
-              >
-                Unique on the site; lowercase letters, numbers, underscore (3–30).
-              </p>
+              <>
+                <label
+                  style={{
+                    fontSize: "0.65rem",
+                    color: "#888",
+                    display: "block",
+                    marginBottom: "0.2rem",
+                  }}
+                >
+                  Display name
+                </label>
+                <input
+                  value={profileForm.displayName}
+                  onChange={(e) =>
+                    setProfileForm((f) => ({ ...f, displayName: e.target.value }))
+                  }
+                  placeholder="Your name"
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    marginBottom: "0.45rem",
+                    padding: "0.35rem 0.45rem",
+                    border: "1px solid #ccc",
+                    fontSize: "0.85rem",
+                  }}
+                />
+                <label
+                  style={{
+                    fontSize: "0.65rem",
+                    color: "#888",
+                    display: "block",
+                    marginBottom: "0.2rem",
+                  }}
+                >
+                  Username
+                </label>
+                {usernameLocked && profile?.usernameSetAt ? (
+                  <p
+                    style={{
+                      fontSize: "0.65rem",
+                      color: "#777",
+                      margin: "0 0 0.35rem",
+                      lineHeight: 1.35,
+                      fontFamily: "'IM Fell English', Georgia, serif",
+                    }}
+                  >
+                    You can change this again after{" "}
+                    {new Date(
+                      usernameChangeUnlocksAtIso(profile.usernameSetAt)
+                    ).toLocaleString(undefined, {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    })}{" "}
+                    ({USERNAME_CHANGE_COOLDOWN_HOURS}-hour lock after each change).
+                  </p>
+                ) : (
+                  <p
+                    style={{
+                      fontSize: "0.62rem",
+                      color: "#aaa",
+                      margin: "0 0 0.35rem",
+                      lineHeight: 1.35,
+                    }}
+                  >
+                    Unique on the site; lowercase letters, numbers, underscore (3–30).
+                  </p>
+                )}
+                <input
+                  value={profileForm.username}
+                  onChange={(e) =>
+                    setProfileForm((f) => ({
+                      ...f,
+                      username: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""),
+                    }))
+                  }
+                  placeholder="letters_numbers_underscore"
+                  disabled={usernameLocked}
+                  aria-readonly={usernameLocked}
+                  title={
+                    usernameLocked
+                      ? "Username is locked for 24 hours after the last change"
+                      : undefined
+                  }
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    marginBottom: "0.45rem",
+                    padding: "0.35rem 0.45rem",
+                    border: "1px solid #ccc",
+                    fontSize: "0.85rem",
+                    background: usernameLocked ? "#f0ede6" : undefined,
+                    cursor: usernameLocked ? "not-allowed" : undefined,
+                  }}
+                />
+                <label
+                  style={{
+                    fontSize: "0.65rem",
+                    color: "#888",
+                    display: "block",
+                    marginBottom: "0.2rem",
+                  }}
+                >
+                  Weather location
+                </label>
+                <input
+                  value={profileForm.weatherLocation}
+                  onChange={(e) =>
+                    setProfileForm((f) => ({ ...f, weatherLocation: e.target.value }))
+                  }
+                  placeholder="City or region (e.g. New York)"
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    marginBottom: "0.45rem",
+                    padding: "0.35rem 0.45rem",
+                    border: "1px solid #ccc",
+                    fontSize: "0.85rem",
+                  }}
+                />
+                {profile && (
+                  <AvatarInput
+                    userEmail={userEmail}
+                    displayName={profile.displayName}
+                    currentAvatarUrl={profile.avatarUrl}
+                    onProfileUpdate={(p) => setProfile(p)}
+                    onError={(msg) => setSaveError(msg)}
+                  />
+                )}
+                <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.45rem" }}>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={async () => {
+                      const ok = await saveProfileFields();
+                      if (ok) setEditingProfile(false);
+                    }}
+                    style={{
+                      background: "#1a1a1a",
+                      color: "#faf8f3",
+                      border: "none",
+                      padding: "0.35rem 0.75rem",
+                      fontFamily: "'Playfair Display', Georgia, serif",
+                      fontSize: "0.68rem",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      cursor: saving ? "wait" : "pointer",
+                    }}
+                  >
+                    Save profile
+                  </button>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => {
+                      setEditingProfile(false);
+                      setProfileForm({
+                        displayName: profile?.displayName ?? "",
+                        username: profile?.username ?? "",
+                        weatherLocation: profile?.weatherLocation ?? "",
+                      });
+                    }}
+                    style={{
+                      border: "1px solid #777",
+                      background: "#fff",
+                      padding: "0.35rem 0.65rem",
+                      fontFamily: "'Playfair Display', Georgia, serif",
+                      fontSize: "0.68rem",
+                      cursor: saving ? "wait" : "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
             )}
-            <input
-              value={profileForm.username}
-              onChange={(e) =>
-                setProfileForm((f) => ({
-                  ...f,
-                  username: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""),
-                }))
-              }
-              placeholder="letters_numbers_underscore"
-              disabled={usernameLocked}
-              aria-readonly={usernameLocked}
-              title={
-                usernameLocked
-                  ? "Username is locked for 24 hours after the last change"
-                  : undefined
-              }
+          </section>
+
+          <section style={{ marginBottom: "1rem" }}>
+            <h3
               style={{
-                width: "100%",
-                boxSizing: "border-box",
-                marginBottom: "0.45rem",
-                padding: "0.35rem 0.45rem",
-                border: "1px solid #ccc",
-                fontSize: "0.85rem",
-                background: usernameLocked ? "#f0ede6" : undefined,
-                cursor: usernameLocked ? "not-allowed" : undefined,
-              }}
-            />
-            <label
-              style={{
-                fontSize: "0.65rem",
-                color: "#888",
-                display: "block",
-                marginBottom: "0.2rem",
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "0.78rem",
+                margin: "0 0 0.45rem",
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+                color: "#555",
               }}
             >
-              Weather location
-            </label>
-            <input
-              value={profileForm.weatherLocation}
-              onChange={(e) =>
-                setProfileForm((f) => ({ ...f, weatherLocation: e.target.value }))
-              }
-              placeholder="City or region (e.g. New York)"
-              style={{
-                width: "100%",
-                boxSizing: "border-box",
-                marginBottom: "0.45rem",
-                padding: "0.35rem 0.45rem",
-                border: "1px solid #ccc",
-                fontSize: "0.85rem",
-              }}
-            />
-            {profile && (
-              <AvatarInput
-                userEmail={userEmail}
-                displayName={profile.displayName}
-                currentAvatarUrl={profile.avatarUrl}
-                onProfileUpdate={(p) => setProfile(p)}
-                onError={(msg) => setSaveError(msg)}
-              />
-            )}
+              Appearance
+            </h3>
             <button
               type="button"
-              disabled={saving}
-              onClick={() => void saveProfileFields()}
+              role="switch"
+              aria-checked={themePreference === "dark"}
+              aria-label="Toggle dark mode"
+              disabled={themeSaving}
+              onClick={() => void saveThemePreference()}
               style={{
-                background: "#1a1a1a",
-                color: "#faf8f3",
-                border: "none",
-                padding: "0.35rem 0.75rem",
-                fontFamily: "'Playfair Display', Georgia, serif",
-                fontSize: "0.68rem",
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-                cursor: saving ? "wait" : "pointer",
+                border: "1px solid #1a1a1a",
+                background: themePreference === "dark" ? "#161a21" : "#f6f4ee",
+                width: "3.2rem",
+                height: "1.85rem",
+                borderRadius: "999px",
+                position: "relative",
+                padding: 0,
+                cursor: themeSaving ? "wait" : "pointer",
               }}
             >
-              Save profile
+              <span
+                aria-hidden
+                style={{
+                  position: "absolute",
+                  top: "0.12rem",
+                  left: themePreference === "dark" ? "1.45rem" : "0.12rem",
+                  width: "1.48rem",
+                  height: "1.48rem",
+                  borderRadius: "999px",
+                  background: themePreference === "dark" ? "#0d1117" : "#ffffff",
+                  border: "1px solid #bdb8ad",
+                  boxShadow: "0 2px 7px rgba(0,0,0,0.22)",
+                  transition: "left 180ms ease",
+                }}
+              />
             </button>
+            <span
+              style={{
+                marginLeft: "0.55rem",
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontSize: "0.72rem",
+                color: "#666",
+              }}
+            >
+              {themePreference === "dark" ? "Dark mode" : "Light mode"}
+            </span>
           </section>
 
           <section style={{ marginBottom: "1rem" }}>
@@ -1179,40 +1366,67 @@ export function ProfileMenu({
             >
               Changing this refreshes your stream from the top.
             </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
-              {GAME_RATIO_PRESETS.map((preset) => {
-                const selected = preset.value === highlightedPreset;
-                return (
-                  <button
-                    key={preset.value}
-                    type="button"
-                    disabled={saving}
-                    onClick={() => void saveGameRatio(preset.value)}
-                    style={{
-                      textAlign: "left",
-                      padding: "0.4rem 0.5rem",
-                      border: selected ? "2px solid #1a1a1a" : "1px solid #ddd",
-                      background: selected ? "#ede9e1" : "#fff",
-                      cursor: saving ? "wait" : "pointer",
-                      fontFamily: "'Playfair Display', Georgia, serif",
-                      fontSize: "0.7rem",
-                    }}
-                  >
-                    <span style={{ fontWeight: 700 }}>{preset.label}</span>
-                    <span
-                      style={{
-                        display: "block",
-                        fontFamily: "'IM Fell English', Georgia, serif",
-                        fontStyle: "italic",
-                        fontSize: "0.65rem",
-                        color: "#888",
-                      }}
-                    >
-                      {preset.description}
-                    </span>
-                  </button>
-                );
-              })}
+            <div style={{ padding: "0.25rem 0.05rem 0.1rem" }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontFamily: "'IM Fell English', Georgia, serif",
+                  fontSize: "0.68rem",
+                  color: "#6f6758",
+                  marginBottom: "0.35rem",
+                }}
+              >
+                <span>All articles</span>
+                <span>All games</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={ratioDraft}
+                disabled={saving}
+                onChange={(event) => {
+                  setRatioDraft(Number(event.target.value));
+                }}
+                onMouseUp={commitRatioDraft}
+                onTouchEnd={commitRatioDraft}
+                onBlur={commitRatioDraft}
+                style={{
+                  width: "100%",
+                  accentColor: "#6419db",
+                  cursor: saving ? "wait" : "pointer",
+                }}
+              />
+              <div
+                aria-hidden
+                style={{
+                  marginTop: "0.2rem",
+                  display: "grid",
+                  gridTemplateColumns: "auto 1fr auto 1fr auto",
+                  alignItems: "center",
+                  gap: "0.25rem",
+                  color: "#6419db",
+                }}
+              >
+                <span style={{ width: 9, height: 9, borderRadius: "50%", background: "currentColor" }} />
+                <span style={{ height: 2, background: "currentColor", opacity: 0.3 }} />
+                <span style={{ width: 9, height: 9, borderRadius: "50%", background: "currentColor" }} />
+                <span style={{ height: 2, background: "currentColor", opacity: 0.3 }} />
+                <span style={{ width: 9, height: 9, borderRadius: "50%", background: "currentColor" }} />
+              </div>
+              <div
+                style={{
+                  marginTop: "0.35rem",
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: "0.72rem",
+                  color: "#1a1a1a",
+                }}
+              >
+                Games: {(ratioDraft * 100).toFixed(0)}% · Articles:{" "}
+                {(100 - ratioDraft * 100).toFixed(0)}%
+              </div>
             </div>
           </section>
 

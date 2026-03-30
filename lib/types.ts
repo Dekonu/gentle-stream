@@ -77,6 +77,7 @@ export interface UserProfile {
   usernameSetAt: string | null;
   avatarUrl: string | null;
   weatherLocation?: string | null;
+  themePreference?: "light" | "dark" | null;
   seenArticleIds: string[];
   preferredEmotions: string[];               // subset of ArticleSentiment emotions
   preferredLocales: string[];                // ["global", "US"] etc.
@@ -192,6 +193,8 @@ export interface FeedResponse {
   articles: StoredArticle[];
   category: string;
   fromCache: boolean;          // true = served from DB, false = freshly generated
+  coldStartQueued?: boolean;
+  coldStartCategory?: string;
   /** How articles were chosen; omit = treat as profile_ranked (legacy clients) */
   selectionMode?: FeedSelectionMode;
 }
@@ -273,6 +276,21 @@ export interface NasaModuleData {
   sourceUrl?: string;
 }
 
+export interface TodoModuleItem {
+  id: string;
+  label: string;
+  done: boolean;
+}
+
+export interface TodoModuleData {
+  mode: "todo";
+  title: string;
+  subtitle: string;
+  localDay: string;
+  timezone: string;
+  items: TodoModuleItem[];
+}
+
 export interface SpotifyMoodTrack {
   id: string;
   name: string;
@@ -298,13 +316,14 @@ export type FeedModuleData =
   | WeatherModuleData
   | SpotifyMoodTileData
   | GeneratedImageModuleData
-  | NasaModuleData;
+  | NasaModuleData
+  | TodoModuleData;
 
 export interface ModuleFeedSection {
   sectionType: "module" | "filler";
-  moduleType: "weather" | "spotify" | "generated_art" | "nasa";
+  moduleType: "weather" | "spotify" | "generated_art" | "nasa" | "todo";
   /** Legacy compatibility: prefer moduleType going forward. */
-  fillerType?: "weather" | "spotify" | "generated_art" | "nasa";
+  fillerType?: "weather" | "spotify" | "generated_art" | "nasa" | "todo";
   reason: "gap" | "interval";
   index: number;
   data: FeedModuleData;
