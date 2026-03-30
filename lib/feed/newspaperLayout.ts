@@ -8,6 +8,11 @@ export interface NewspaperLayoutPlan {
     | "middle-wide"
     | "hero-sidebar";
   layouts: LayoutVariant[];
+  orderedIndices: number[];
+  columnHeightsPx: number[];
+  inlineGapPx: number;
+  inlineTargetColumn: number | null;
+  inlineSuggestedModuleType: "weather" | "spotify" | "generated_art";
   residualGapPx: number;
 }
 
@@ -36,6 +41,15 @@ const CANDIDATES: CandidateTemplate[] = [
   },
 ];
 
+const PERMUTATIONS_3: number[][] = [
+  [0, 1, 2],
+  [0, 2, 1],
+  [1, 0, 2],
+  [1, 2, 0],
+  [2, 0, 1],
+  [2, 1, 0],
+];
+
 function scoreTextLength(article: Article): number {
   const headline = article.headline?.length ?? 0;
   const subheadline = article.subheadline?.length ?? 0;
@@ -62,15 +76,19 @@ function layoutWeight(layout: LayoutVariant): number {
 
 function estimateColumnImbalance(
   articles: Article[],
-  candidate: CandidateTemplate
-): number {
-  const perIndex = articles.map((a, i) => scoreTextLength(a) * layoutWeight(candidate.layouts[i] ?? "standard"));
+  candidate: CandidateTemplate,
+  orderedIndices: number[]
+): { imbalance: number; columnScores: number[] } {
+  const ordered = orderedIndices.map((idx) => articles[idx]!);
+  const perIndex = ordered.map((a, i) =>
+    scoreTextLength(a) * layoutWeight(candidate.layouts[i] ?? "standard")
+  );
   const columnScores = candidate.columns.map((indices) =>
     indices.reduce((sum, idx) => sum + (perIndex[idx] ?? 0), 0)
   );
   const max = Math.max(...columnScores);
   const min = Math.min(...columnScores);
-  return Math.max(0, max - min);
+  return { imbalance: Math.max(0, max - min), columnScores };
 }
 
 function imbalanceToResidualPx(imbalanceUnits: number): number {
@@ -86,32 +104,74 @@ export function chooseNewspaperLayout(
     return {
       templateId: "single-hero",
       layouts: ["hero"],
+      orderedIndices: [0],
+      columnHeightsPx: [0],
+      inlineGapPx: 0,
+      inlineTargetColumn: null,
+      inlineSuggestedModuleType: "generated_art",
       residualGapPx: 0,
     };
   }
   if (articles.length === 2) {
+    const left = scoreTextLength(articles[0]!);
+    const right = scoreTextLength(articles[1]!);
+    const imbalance = Math.abs(left - right);
+    const target = left <= right ? 0 : 1;
     return {
       templateId: "two-columns",
       layouts: ["standard", "standard"],
+      orderedIndices: [0, 1],
+      columnHeightsPx: [left, right],
+      inlineGapPx: imbalanceToResidualPx(imbalance),
+      inlineTargetColumn: target,
+      inlineSuggestedModuleType: "weather",
       residualGapPx: 0,
     };
   }
 
-  // For 3+ article sections we choose the template that minimizes unused visual space.
+  // For 3-article sections we pick the best template + deterministic article order.
   let best = CANDIDATES[sectionIndex % CANDIDATES.length]!;
-  let bestImbalance = estimateColumnImbalance(articles, best);
+  let bestOrder = PERMUTATIONS_3[0]!;
+  let bestImbalance = Number.POSITIVE_INFINITY;
+  let bestColumns: number[] = [];
 
   for (const candidate of CANDIDATES) {
-    const score = estimateColumnImbalance(articles, candidate);
-    if (score < bestImbalance) {
-      best = candidate;
-      bestImbalance = score;
+    for (const permutation of PERMUTATIONS_3) {
+      const { imbalance, columnScores } = estimateColumnImbalance(
+        articles,
+        candidate,
+        permutation
+      );
+      if (imbalance < bestImbalance) {
+        best = candidate;
+        bestOrder = permutation;
+        bestImbalance = imbalance;
+        bestColumns = columnScores;
+      }
     }
   }
+  const minHeight = Math.min(...bestColumns);
+  const maxHeight = Math.max(...bestColumns);
+  const inlineGapPx = imbalanceToResidualPx(Math.max(0, maxHeight - minHeight));
+  const inlineTargetColumn = bestColumns.findIndex((height) => height === minHeight);
+  const hasRecipe = bestOrder.some((idx) => {
+    const article = articles[idx];
+    return (
+      article &&
+      "contentKind" in article &&
+      article.contentKind === "recipe"
+    );
+  });
+  const inlineSuggestedModuleType = hasRecipe ? "weather" : "spotify";
 
   return {
     templateId: best.templateId,
     layouts: best.layouts,
+    orderedIndices: bestOrder,
+    columnHeightsPx: bestColumns,
+    inlineGapPx,
+    inlineTargetColumn: inlineTargetColumn >= 0 ? inlineTargetColumn : null,
+    inlineSuggestedModuleType,
     residualGapPx: imbalanceToResidualPx(bestImbalance),
   };
 }

@@ -68,6 +68,7 @@ export function ProfileMenu({
   const [profileForm, setProfileForm] = useState({
     displayName: "",
     username: "",
+    weatherLocation: "",
   });
   /** Masthead avatar/name: false until initial GET /api/user/profile finishes */
   const [headerLoading, setHeaderLoading] = useState(true);
@@ -98,6 +99,7 @@ export function ProfileMenu({
           setProfileForm({
             displayName: data.displayName ?? "",
             username: data.username ?? "",
+            weatherLocation: data.weatherLocation ?? "",
           });
         }
       } finally {
@@ -123,6 +125,7 @@ export function ProfileMenu({
         setProfileForm({
           displayName: data.displayName ?? "",
           username: data.username ?? "",
+          weatherLocation: data.weatherLocation ?? "",
         });
       } else {
         setLoadError("Could not load profile.");
@@ -278,10 +281,15 @@ export function ProfileMenu({
     setModuleLoading(true);
     try {
       const params = new URLSearchParams();
-      const coords = await getBrowserCoordinates();
-      if (coords) {
-        params.set("lat", String(coords.lat));
-        params.set("lon", String(coords.lon));
+      const preferredLocation = profileForm.weatherLocation.trim();
+      if (preferredLocation) {
+        params.set("location", preferredLocation);
+      } else {
+        const coords = await getBrowserCoordinates();
+        if (coords) {
+          params.set("lat", String(coords.lat));
+          params.set("lon", String(coords.lon));
+        }
       }
       const res = await fetch(`/api/feed/modules/weather?${params.toString()}`, {
         cache: "no-store",
@@ -445,6 +453,7 @@ export function ProfileMenu({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           displayName: profileForm.displayName.trim() || null,
+          weatherLocation: profileForm.weatherLocation.trim() || null,
           ...(usernameLocked
             ? {}
             : { username: profileForm.username.trim().toLowerCase() || null }),
@@ -473,6 +482,16 @@ export function ProfileMenu({
         return;
       }
       setProfile(data as UserProfile);
+      try {
+        const nextLocation = (data as UserProfile).weatherLocation;
+        if (typeof nextLocation === "string" && nextLocation.trim()) {
+          localStorage.setItem("gentle_stream_weather_location", nextLocation.trim());
+        } else {
+          localStorage.removeItem("gentle_stream_weather_location");
+        }
+      } catch {
+        /* ignore */
+      }
     } catch {
       setSaveError("Could not save profile.");
     } finally {
@@ -946,6 +965,31 @@ export function ProfileMenu({
                 cursor: usernameLocked ? "not-allowed" : undefined,
               }}
             />
+            <label
+              style={{
+                fontSize: "0.65rem",
+                color: "#888",
+                display: "block",
+                marginBottom: "0.2rem",
+              }}
+            >
+              Weather location
+            </label>
+            <input
+              value={profileForm.weatherLocation}
+              onChange={(e) =>
+                setProfileForm((f) => ({ ...f, weatherLocation: e.target.value }))
+              }
+              placeholder="City or region (e.g. New York)"
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                marginBottom: "0.45rem",
+                padding: "0.35rem 0.45rem",
+                border: "1px solid #ccc",
+                fontSize: "0.85rem",
+              }}
+            />
             {profile && (
               <AvatarInput
                 userEmail={userEmail}
@@ -1402,40 +1446,6 @@ export function ProfileMenu({
                 Upcoming: Marvel comic summon, NASA highlights, Spotify mood tile.
               </div>
             </div>
-
-            <a
-              href="/api/feed/modules/weather"
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                display: "inline-block",
-                marginBottom: "0.7rem",
-                fontFamily: "'IM Fell English', Georgia, serif",
-                fontSize: "0.72rem",
-                color: "#1a472a",
-                textDecoration: "underline",
-                textUnderlineOffset: "2px",
-              }}
-            >
-              Open weather API endpoint directly
-            </a>
-            <a
-              href="/api/feed/modules/spotify"
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                display: "inline-block",
-                marginBottom: "0.7rem",
-                marginLeft: "0.8rem",
-                fontFamily: "'IM Fell English', Georgia, serif",
-                fontSize: "0.72rem",
-                color: "#1a472a",
-                textDecoration: "underline",
-                textUnderlineOffset: "2px",
-              }}
-            >
-              Open Spotify API endpoint directly
-            </a>
 
             {moduleError && (
               <p

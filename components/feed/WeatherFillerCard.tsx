@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { WeatherFillerData } from "@/lib/types";
 import { picsumFallbackUrl } from "@/lib/article-image";
 
@@ -10,13 +10,46 @@ interface WeatherFillerCardProps {
 }
 
 export default function WeatherFillerCard({ data, reason }: WeatherFillerCardProps) {
-  const isWeather = data.mode === "weather";
+  const [weatherData, setWeatherData] = useState<WeatherFillerData>(data);
+  const isWeather = weatherData.mode === "weather";
   const reasonLabel = reason === "gap" ? "gap-fill" : "interval";
   const fallbackSrc = useMemo(() => {
-    const seed = data.locationLabel?.trim() || "weather";
+    const seed = weatherData.locationLabel?.trim() || "weather";
     return picsumFallbackUrl(`${seed}|forecast-desk`, 1200, 700);
-  }, [data.locationLabel]);
-  const [imgSrc, setImgSrc] = useState<string | null>(data.imageUrl ?? null);
+  }, [weatherData.locationLabel]);
+  const [imgSrc, setImgSrc] = useState<string | null>(weatherData.imageUrl ?? null);
+  const [locationInput, setLocationInput] = useState(weatherData.locationLabel ?? "");
+  const [updatingLocation, setUpdatingLocation] = useState(false);
+
+  useEffect(() => {
+    setWeatherData(data);
+    setImgSrc(data.imageUrl ?? null);
+    setLocationInput(data.locationLabel ?? "");
+  }, [data]);
+
+  async function updateLocation() {
+    const location = locationInput.trim();
+    if (!location) return;
+    setUpdatingLocation(true);
+    try {
+      const params = new URLSearchParams({ location });
+      const res = await fetch(`/api/feed/modules/weather?${params.toString()}`, {
+        cache: "no-store",
+      });
+      const body = (await res.json().catch(() => ({}))) as { data?: WeatherFillerData };
+      if (!res.ok || !body.data) return;
+      setWeatherData(body.data);
+      setImgSrc(body.data.imageUrl ?? null);
+      setLocationInput(body.data.locationLabel ?? location);
+      try {
+        localStorage.setItem("gentle_stream_weather_location", location);
+      } catch {
+        /* ignore */
+      }
+    } finally {
+      setUpdatingLocation(false);
+    }
+  }
 
   return (
     <section
@@ -49,7 +82,7 @@ export default function WeatherFillerCard({ data, reason }: WeatherFillerCardPro
             color: "#1f1f1f",
           }}
         >
-          {data.title}
+          {weatherData.title}
         </h3>
         <span
           style={{
@@ -83,7 +116,7 @@ export default function WeatherFillerCard({ data, reason }: WeatherFillerCardPro
                 color: "#1e1e1e",
               }}
             >
-              {typeof data.temperatureC === "number" ? `${data.temperatureC}\u00b0C` : "--"}
+              {typeof weatherData.temperatureC === "number" ? `${weatherData.temperatureC}\u00b0C` : "--"}
             </p>
             <p
               style={{
@@ -94,7 +127,7 @@ export default function WeatherFillerCard({ data, reason }: WeatherFillerCardPro
                 fontSize: "0.95rem",
               }}
             >
-              {(data.condition ?? "Calm skies").replace(/^\w/, (char) => char.toUpperCase())}
+              {(weatherData.condition ?? "Calm skies").replace(/^\w/, (char) => char.toUpperCase())}
             </p>
             <p
               style={{
@@ -104,8 +137,38 @@ export default function WeatherFillerCard({ data, reason }: WeatherFillerCardPro
                 color: "#6d6353",
               }}
             >
-              {data.locationLabel ?? "Global desk"}
+              {weatherData.locationLabel ?? "Global desk"}
             </p>
+            <div style={{ marginTop: "0.35rem", display: "flex", gap: "0.35rem" }}>
+              <input
+                value={locationInput}
+                onChange={(event) => setLocationInput(event.target.value)}
+                placeholder="Set location"
+                style={{
+                  border: "1px solid #d7d0c1",
+                  padding: "0.18rem 0.32rem",
+                  fontSize: "0.68rem",
+                  fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+                  minWidth: "9rem",
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => void updateLocation()}
+                disabled={updatingLocation}
+                style={{
+                  border: "1px solid #1a1a1a",
+                  background: "#faf8f3",
+                  cursor: updatingLocation ? "wait" : "pointer",
+                  fontSize: "0.64rem",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  padding: "0.16rem 0.38rem",
+                }}
+              >
+                {updatingLocation ? "Updating..." : "Change"}
+              </button>
+            </div>
           </div>
 
           <div
@@ -118,9 +181,9 @@ export default function WeatherFillerCard({ data, reason }: WeatherFillerCardPro
               lineHeight: 1.6,
             }}
           >
-            <div>Humidity: {typeof data.humidity === "number" ? `${data.humidity}%` : "--"}</div>
-            <div>Wind: {typeof data.windKph === "number" ? `${data.windKph} km/h` : "--"}</div>
-            <div style={{ marginTop: "0.25rem", color: "#7d735f" }}>{data.subtitle}</div>
+            <div>Humidity: {typeof weatherData.humidity === "number" ? `${weatherData.humidity}%` : "--"}</div>
+            <div>Wind: {typeof weatherData.windKph === "number" ? `${weatherData.windKph} km/h` : "--"}</div>
+            <div style={{ marginTop: "0.25rem", color: "#7d735f" }}>{weatherData.subtitle}</div>
           </div>
         </div>
       ) : (
@@ -128,7 +191,7 @@ export default function WeatherFillerCard({ data, reason }: WeatherFillerCardPro
           {(imgSrc || fallbackSrc) && (
             <img
               src={imgSrc ?? fallbackSrc}
-              alt={data.locationLabel ? `Generated weather illustration for ${data.locationLabel}` : "Generated weather illustration"}
+              alt={weatherData.locationLabel ? `Generated weather illustration for ${weatherData.locationLabel}` : "Generated weather illustration"}
               loading="lazy"
               onError={() => setImgSrc(fallbackSrc)}
               style={{
@@ -149,7 +212,7 @@ export default function WeatherFillerCard({ data, reason }: WeatherFillerCardPro
               fontSize: "0.92rem",
             }}
           >
-            {data.subtitle}
+            {weatherData.subtitle}
           </p>
         </div>
       )}

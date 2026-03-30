@@ -19,6 +19,7 @@ interface UserProfileRow {
   username?: string | null;
   username_set_at?: string | null;
   avatar_url?: string | null;
+  weather_location?: string | null;
   preferred_emotions: string[];
   preferred_locales: string[];
   seen_article_ids: string[];
@@ -97,6 +98,7 @@ function rowToProfile(row: UserProfileRow): UserProfile {
     username: row.username ?? null,
     usernameSetAt: row.username_set_at ?? null,
     avatarUrl: row.avatar_url ?? null,
+    weatherLocation: row.weather_location ?? null,
     preferredEmotions: row.preferred_emotions ?? [],
     preferredLocales: row.preferred_locales ?? ["global"],
     seenArticleIds: row.seen_article_ids ?? [],
@@ -248,11 +250,13 @@ export async function updateUserDisplay(
     displayName?: string | null;
     username?: string | null;
     avatarUrl?: string | null;
+    weatherLocation?: string | null;
   }
 ): Promise<UserProfile> {
   const updates: Partial<UserProfileRow> = {};
   if (fields.displayName !== undefined) updates.display_name = fields.displayName;
   if (fields.avatarUrl !== undefined) updates.avatar_url = fields.avatarUrl;
+  if (fields.weatherLocation !== undefined) updates.weather_location = fields.weatherLocation;
 
   if (fields.username !== undefined) {
     const { data: row, error: selErr } = await db

@@ -9,13 +9,19 @@ interface SpotifyMoodTileProps {
 
 export default function SpotifyMoodTile({ data, reason }: SpotifyMoodTileProps) {
   const reasonLabel = reason === "gap" ? "gap-fill" : "interval";
+  const hasBackgroundImage = Boolean(data.imageUrl);
 
   return (
     <section
       style={{
         borderTop: "3px double #1a1a1a",
         borderBottom: "2px solid #1a1a1a",
-        background: "#f7f3ea",
+        backgroundImage: hasBackgroundImage
+          ? `linear-gradient(rgba(247,243,234,0.9), rgba(247,243,234,0.95)), url("${data.imageUrl}")`
+          : undefined,
+        backgroundSize: hasBackgroundImage ? "cover" : undefined,
+        backgroundPosition: hasBackgroundImage ? "center" : undefined,
+        backgroundColor: "#f7f3ea",
         padding: "0.95rem 1rem",
       }}
       aria-label="Spotify mood module"
@@ -101,36 +107,66 @@ export default function SpotifyMoodTile({ data, reason }: SpotifyMoodTileProps) 
               textUnderlineOffset: "2px",
             }}
           >
-            Open in Spotify
+            Open top track
           </a>
         ) : null}
       </div>
 
       {data.tracks.length > 0 ? (
-        <ol
+        <table
           style={{
+            width: "100%",
+            borderCollapse: "collapse",
             margin: 0,
-            paddingLeft: "1.1rem",
-            display: "grid",
-            gap: "0.35rem",
             fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
             fontSize: "0.78rem",
             color: "#3f3a30",
           }}
         >
-          {data.tracks.slice(0, 5).map((track) => (
-            <li key={track.id}>
-              <a
-                href={track.spotifyUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ color: "#1a472a", textDecoration: "none" }}
+          <thead>
+            <tr>
+              <th
+                style={{
+                  textAlign: "left",
+                  borderBottom: "1px solid #d7d0c1",
+                  padding: "0.25rem 0.35rem",
+                  fontWeight: 700,
+                }}
               >
-                {track.name} — {track.artist}
-              </a>
-            </li>
-          ))}
-        </ol>
+                Song - Artist
+              </th>
+              <th
+                style={{
+                  textAlign: "left",
+                  borderBottom: "1px solid #d7d0c1",
+                  padding: "0.25rem 0.35rem",
+                  fontWeight: 700,
+                }}
+              >
+                Album
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.tracks.slice(0, 6).map((track) => (
+              <tr key={track.id}>
+                <td style={{ padding: "0.3rem 0.35rem", borderBottom: "1px solid #ece7dc" }}>
+                  <a
+                    href={track.spotifyUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: "#1a472a", textDecoration: "none" }}
+                  >
+                    {track.name} - {track.artist}
+                  </a>
+                </td>
+                <td style={{ padding: "0.3rem 0.35rem", borderBottom: "1px solid #ece7dc" }}>
+                  {track.albumName ?? "Unknown album"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       ) : (
         <p
           style={{

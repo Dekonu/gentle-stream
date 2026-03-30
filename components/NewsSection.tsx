@@ -3,6 +3,7 @@
 import ArticleCard from "./ArticleCard";
 import type { Article } from "@/lib/types";
 import { chooseNewspaperLayout } from "@/lib/feed/newspaperLayout";
+import InlineModuleCard from "./feed/InlineModuleCard";
 
 interface NewsSectionProps {
   articles: Article[];
@@ -15,6 +16,12 @@ interface NewsSectionProps {
       | "middle-wide"
       | "hero-sidebar";
     layouts: ("hero" | "wide" | "standard")[];
+    inlineModule?: {
+      moduleType: "weather" | "spotify" | "generated_art" | "nasa";
+      reason: "inline";
+      targetColumn: number;
+      data: import("@/lib/types").FeedModuleData;
+    } | null;
     residualGapPx: number;
   };
 }
@@ -31,6 +38,7 @@ export default function NewsSection({
 }: NewsSectionProps) {
   if (!articles || articles.length === 0) return null;
   const plan = layoutPlan ?? chooseNewspaperLayout(articles, sectionIndex);
+  const inlineModule = plan.inlineModule ?? null;
 
   // Fewer than 3: still render so infinite scroll can show partial pages
   if (plan.templateId === "single-hero") {
@@ -58,8 +66,18 @@ export default function NewsSection({
           ...borderStyles,
         }}
       >
-        <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "standard"} index={0} sectionIndex={sectionIndex} />
-        <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "standard"} index={1} sectionIndex={sectionIndex} />
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "standard"} index={0} sectionIndex={sectionIndex} />
+          {inlineModule && inlineModule.targetColumn === 0 ? (
+            <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
+          ) : null}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "standard"} index={1} sectionIndex={sectionIndex} />
+          {inlineModule && inlineModule.targetColumn === 1 ? (
+            <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
+          ) : null}
+        </div>
       </div>
     );
   }
@@ -74,9 +92,24 @@ export default function NewsSection({
           ...borderStyles,
         }}
       >
-        <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "hero"} index={0} sectionIndex={sectionIndex} />
-        <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "standard"} index={1} sectionIndex={sectionIndex} />
-        <ArticleCard article={articles[2]} layout={plan.layouts[2] ?? "standard"} index={2} sectionIndex={sectionIndex} />
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "hero"} index={0} sectionIndex={sectionIndex} />
+          {inlineModule && inlineModule.targetColumn === 0 ? (
+            <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
+          ) : null}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "standard"} index={1} sectionIndex={sectionIndex} />
+          {inlineModule && inlineModule.targetColumn === 1 ? (
+            <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
+          ) : null}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <ArticleCard article={articles[2]} layout={plan.layouts[2] ?? "standard"} index={2} sectionIndex={sectionIndex} />
+          {inlineModule && inlineModule.targetColumn === 2 ? (
+            <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
+          ) : null}
+        </div>
       </div>
     );
   }
@@ -91,9 +124,24 @@ export default function NewsSection({
           ...borderStyles,
         }}
       >
-        <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "standard"} index={0} sectionIndex={sectionIndex} />
-        <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "wide"} index={1} sectionIndex={sectionIndex} />
-        <ArticleCard article={articles[2]} layout={plan.layouts[2] ?? "standard"} index={2} sectionIndex={sectionIndex} />
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "standard"} index={0} sectionIndex={sectionIndex} />
+          {inlineModule && inlineModule.targetColumn === 0 ? (
+            <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
+          ) : null}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "wide"} index={1} sectionIndex={sectionIndex} />
+          {inlineModule && inlineModule.targetColumn === 1 ? (
+            <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
+          ) : null}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <ArticleCard article={articles[2]} layout={plan.layouts[2] ?? "standard"} index={2} sectionIndex={sectionIndex} />
+          {inlineModule && inlineModule.targetColumn === 2 ? (
+            <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
+          ) : null}
+        </div>
       </div>
     );
   }
@@ -108,11 +156,19 @@ export default function NewsSection({
         ...borderStyles,
       }}
     >
-      <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "hero"} index={0} sectionIndex={sectionIndex} />
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "hero"} index={0} sectionIndex={sectionIndex} />
+        {inlineModule && inlineModule.targetColumn === 0 ? (
+          <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
+        ) : null}
+      </div>
       <div style={{ display: "flex", flexDirection: "column" }}>
         <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "standard"} index={1} sectionIndex={sectionIndex} />
         <div style={{ borderTop: "1px solid #d4cfc4" }} />
         <ArticleCard article={articles[2]} layout={plan.layouts[2] ?? "standard"} index={2} sectionIndex={sectionIndex} />
+        {inlineModule && inlineModule.targetColumn === 1 ? (
+          <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
+        ) : null}
       </div>
     </div>
   );

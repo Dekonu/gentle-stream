@@ -27,6 +27,10 @@ import { DEFAULT_GAME_RATIO } from "@/lib/constants";
 import { feedGamePickForOrdinal } from "@/lib/games/feedPick";
 import type { GameType } from "@/lib/games/types";
 import { chooseNewspaperLayout } from "@/lib/feed/newspaperLayout";
+import {
+  buildGeneratedImageModuleData,
+  chooseModuleTypeByPolicy,
+} from "@/lib/feed/modules/policy";
 
 // Strip any <cite ...>...</cite> or bare </cite> tags that leak from Claude
 function stripCiteTags(text: string): string {
@@ -71,6 +75,7 @@ const SENTINEL_PREFETCH_PX = 900;
 const MIN_LOAD_GAP_MS = 650;
 const REACHED_END_COOLDOWN_MS = 20_000;
 const DEFAULT_GAP_MIN_PX = 180;
+const DEFAULT_INLINE_GAP_MIN_PX = 140;
 const DEFAULT_FILLER_INTERVAL = 4;
 const DEFAULT_WEATHER_WEIGHT = 3;
 const DEFAULT_SPOTIFY_WEIGHT = 1;
@@ -145,19 +150,30 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   });
   const browserGeoRef = useRef<{ lat: number; lon: number } | null>(null);
   const browserGeoAttemptedRef = useRef(false);
+  const preferredWeatherLocationRef = useRef<string | null>(null);
 
   const fillerEnabled = readTruthyFlag(
     process.env.NEXT_PUBLIC_FEED_GAP_FILL_ENABLED,
     true
   );
-  const fillerGapMinPx = readPositiveInt(
-    process.env.NEXT_PUBLIC_FEED_GAP_MIN_PX,
+  const betweenGapMinPx = readPositiveInt(
+    process.env.NEXT_PUBLIC_FEED_BETWEEN_GAP_MIN_PX ??
+      process.env.NEXT_PUBLIC_FEED_GAP_MIN_PX,
     DEFAULT_GAP_MIN_PX
+  );
+  const inlineGapMinPx = readPositiveInt(
+    process.env.NEXT_PUBLIC_FEED_INLINE_GAP_MIN_PX,
+    DEFAULT_INLINE_GAP_MIN_PX
+  );
+  const inlineModulesEnabled = readTruthyFlag(
+    process.env.NEXT_PUBLIC_FEED_INLINE_MODULES_ENABLED,
+    true
   );
   const fillerInterval = readPositiveInt(
     process.env.NEXT_PUBLIC_FEED_FILLER_INTERVAL,
     DEFAULT_FILLER_INTERVAL
   );
+  const modulePolicy = process.env.NEXT_PUBLIC_FEED_MODULE_POLICY ?? "hybrid";
   const spotifyModuleEnabled = readTruthyFlag(
     process.env.NEXT_PUBLIC_SPOTIFY_MODULE_ENABLED,
     true
@@ -219,22 +235,30 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     });
   }, []);
 
-  const fetchModuleSection = useCallback(
+  const fetchModuleData = useCallback(
     async (input: {
-      index: number;
-      reason: "gap" | "interval";
+      moduleType: "weather" | "spotify" | "generated_art" | "nasa";
       category?: string;
       location?: string;
-      moduleType: "weather" | "spotify";
-    }): Promise<ModuleFeedSection | null> => {
+    }): Promise<FeedModuleData | null> => {
+      if (input.moduleType === "generated_art" || input.moduleType === "nasa") {
+        return buildGeneratedImageModuleData({
+          category: input.category,
+          location: input.location,
+        });
+      }
       try {
         const params = new URLSearchParams();
         if (input.category) params.set("category", input.category);
-        if (input.location) params.set("location", input.location);
-        const browserCoords = await resolveBrowserGeo();
-        if (browserCoords) {
-          params.set("lat", String(browserCoords.lat));
-          params.set("lon", String(browserCoords.lon));
+        const preferredLocation = preferredWeatherLocationRef.current?.trim();
+        const effectiveLocation = preferredLocation || input.location;
+        if (effectiveLocation) params.set("location", effectiveLocation);
+        if (input.moduleType === "weather" && !effectiveLocation) {
+          const browserCoords = await resolveBrowserGeo();
+          if (browserCoords) {
+            params.set("lat", String(browserCoords.lat));
+            params.set("lon", String(browserCoords.lon));
+          }
         }
         const path =
           input.moduleType === "spotify"
@@ -246,14 +270,14 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         if (!res.ok) return null;
         const body = (await res.json()) as { data?: FeedModuleData };
         if (!body.data) return null;
-        return {
-          sectionType: "module",
-          moduleType: input.moduleType,
-          fillerType: input.moduleType,
-          reason: input.reason,
-          index: input.index,
-          data: body.data,
-        };
+        // Avoid placing fallback-only spotify tiles in feed automatically.
+        if (
+          input.moduleType === "spotify" &&
+          (body.data as SpotifyMoodTileData).mode === "fallback"
+        ) {
+          return null;
+        }
+        return body.data;
       } catch {
         return null;
       }
@@ -261,14 +285,30 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     [resolveBrowserGeo]
   );
 
-  const chooseModuleTypeForInsertion = useCallback(
-    (seed: number): "weather" | "spotify" => {
-      if (!spotifyModuleEnabled) return "weather";
-      const weightedSum = weatherWeight + spotifyWeight;
-      const bucket = Math.abs(seed % weightedSum);
-      return bucket < weatherWeight ? "weather" : "spotify";
+  const fetchModuleSection = useCallback(
+    async (input: {
+      index: number;
+      reason: "gap" | "interval";
+      category?: string;
+      location?: string;
+      moduleType: "weather" | "spotify" | "generated_art" | "nasa";
+    }): Promise<ModuleFeedSection | null> => {
+      const data = await fetchModuleData({
+        moduleType: input.moduleType,
+        category: input.category,
+        location: input.location,
+      });
+      if (!data) return null;
+      return {
+        sectionType: "module",
+        moduleType: input.moduleType,
+        fillerType: input.moduleType,
+        reason: input.reason,
+        index: input.index,
+        data,
+      };
     },
-    [spotifyModuleEnabled, spotifyWeight, weatherWeight]
+    [fetchModuleData]
   );
 
   const loadMore = useCallback(async (overrideCategory?: Category | null) => {
@@ -404,32 +444,85 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       if (data.category) lastArticleCategoryRef.current = data.category;
 
       const layoutPlan = chooseNewspaperLayout(uniqueForView, currentIndex);
+      const orderedArticles =
+        layoutPlan.orderedIndices.length === uniqueForView.length
+          ? layoutPlan.orderedIndices.map((idx) => uniqueForView[idx]!).filter(Boolean)
+          : uniqueForView;
       const section: ArticleFeedSection = {
         sectionType: "articles",
-        articles: uniqueForView,
+        articles: orderedArticles,
         index: currentIndex,
         newspaperLayout: layoutPlan,
       };
 
       const shouldInsertGapFiller =
-        fillerEnabled && layoutPlan.residualGapPx >= fillerGapMinPx;
+        fillerEnabled && layoutPlan.residualGapPx >= betweenGapMinPx;
       const shouldInsertIntervalFiller =
         fillerEnabled &&
         !shouldInsertGapFiller &&
         articleSectionsRenderedRef.current > 0 &&
         articleSectionsRenderedRef.current % fillerInterval === 0;
 
+      const inlineLocation =
+        orderedArticles.find((entry) => entry.location?.trim())?.location ?? undefined;
+      const shouldInsertInlineModule =
+        inlineModulesEnabled &&
+        layoutPlan.inlineTargetColumn !== null &&
+        layoutPlan.inlineGapPx >= inlineGapMinPx;
+
+      if (
+        shouldInsertInlineModule &&
+        layoutPlan.inlineTargetColumn !== null &&
+        section.newspaperLayout
+      ) {
+        const preferredInlineType = layoutPlan.inlineSuggestedModuleType;
+        const preferredType =
+          preferredInlineType === "weather" || preferredInlineType === "spotify"
+            ? preferredInlineType
+            : chooseModuleTypeByPolicy({
+                seed: currentIndex + 101,
+                weatherWeight,
+                spotifyWeight,
+                spotifyEnabled: spotifyModuleEnabled,
+                policy: modulePolicy,
+              });
+        let inlineData = await fetchModuleData({
+          moduleType: preferredType,
+          category: data.category,
+          location: inlineLocation,
+        });
+        if (!inlineData) {
+          inlineData = buildGeneratedImageModuleData({
+            category: data.category,
+            location: inlineLocation,
+          });
+        }
+        section.newspaperLayout.inlineModule = {
+          moduleType:
+            "mode" in inlineData && inlineData.mode === "generated_art"
+              ? "generated_art"
+              : preferredType,
+          reason: "inline",
+          targetColumn: layoutPlan.inlineTargetColumn,
+          data: inlineData,
+        };
+      }
+
       const nextSections: FeedSection[] = [section];
       if (shouldInsertGapFiller || shouldInsertIntervalFiller) {
         if (shouldInsertGapFiller) fillerMetricsRef.current.gapDetected += 1;
-        const preferredModule = chooseModuleTypeForInsertion(currentIndex);
+        const preferredModule = chooseModuleTypeByPolicy({
+          seed: currentIndex,
+          weatherWeight,
+          spotifyWeight,
+          spotifyEnabled: spotifyModuleEnabled,
+          policy: modulePolicy,
+        });
         let moduleSection = await fetchModuleSection({
           index: currentIndex + 1,
           reason: shouldInsertGapFiller ? "gap" : "interval",
           category: data.category,
-          location:
-            uniqueForView.find((entry) => entry.location?.trim())?.location ??
-            undefined,
+          location: inlineLocation,
           moduleType: preferredModule,
         });
 
@@ -438,10 +531,17 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
             index: currentIndex + 1,
             reason: shouldInsertGapFiller ? "gap" : "interval",
             category: data.category,
-            location:
-              uniqueForView.find((entry) => entry.location?.trim())?.location ??
-              undefined,
+            location: inlineLocation,
             moduleType: "weather",
+          });
+        }
+        if (!moduleSection) {
+          moduleSection = await fetchModuleSection({
+            index: currentIndex + 1,
+            reason: shouldInsertGapFiller ? "gap" : "interval",
+            category: data.category,
+            location: inlineLocation,
+            moduleType: "generated_art",
           });
         }
 
@@ -462,7 +562,8 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
             reason: moduleSection.reason,
             moduleType: moduleSection.moduleType,
             residualGapPx: layoutPlan.residualGapPx,
-            gapThresholdPx: fillerGapMinPx,
+            gapThresholdPx: betweenGapMinPx,
+            inlineGapPx: layoutPlan.inlineGapPx,
             metricSnapshot: fillerMetricsRef.current,
           });
         }
@@ -515,10 +616,16 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     }
   }, [
     fillerEnabled,
-    fillerGapMinPx,
+    betweenGapMinPx,
+    inlineGapMinPx,
+    inlineModulesEnabled,
     fillerInterval,
+    modulePolicy,
     fetchModuleSection,
-    chooseModuleTypeForInsertion,
+    fetchModuleData,
+    weatherWeight,
+    spotifyWeight,
+    spotifyModuleEnabled,
   ]); // stable refs + config
 
   // Resolve game ratio from server (or localStorage), then load — avoids first sections using DEFAULT_GAME_RATIO.
@@ -595,6 +702,21 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
               /* ignore */
             }
           }
+
+          if (typeof profile.weatherLocation === "string" && profile.weatherLocation.trim()) {
+            const weatherLocation = profile.weatherLocation.trim();
+            preferredWeatherLocationRef.current = weatherLocation;
+            try {
+              localStorage.setItem(
+                "gentle_stream_weather_location",
+                weatherLocation
+              );
+            } catch {
+              /* ignore */
+            }
+          } else {
+            preferredWeatherLocationRef.current = null;
+          }
         }
       } catch {
         /* offline or unauthenticated preview */
@@ -622,6 +744,17 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
                 (v): v is GameType => typeof v === "string"
               );
             }
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+
+      if (preferredWeatherLocationRef.current == null) {
+        try {
+          const storedLocation = localStorage.getItem("gentle_stream_weather_location");
+          if (storedLocation && storedLocation.trim()) {
+            preferredWeatherLocationRef.current = storedLocation.trim();
           }
         } catch {
           /* ignore */

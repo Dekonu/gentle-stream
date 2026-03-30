@@ -76,6 +76,7 @@ export interface UserProfile {
   /** When `username` was last set or changed; used for 24h rename cooldown. */
   usernameSetAt: string | null;
   avatarUrl: string | null;
+  weatherLocation?: string | null;
   seenArticleIds: string[];
   preferredEmotions: string[];               // subset of ArticleSentiment emotions
   preferredLocales: string[];                // ["global", "US"] etc.
@@ -221,6 +222,17 @@ export interface ArticleFeedSection {
       | "middle-wide"
       | "hero-sidebar";
     layouts: LayoutVariant[];
+    orderedIndices?: number[];
+    columnHeightsPx?: number[];
+    inlineGapPx?: number;
+    inlineTargetColumn?: number | null;
+    inlineSuggestedModuleType?: "weather" | "spotify" | "generated_art" | "nasa";
+    inlineModule?: {
+      moduleType: "weather" | "spotify" | "generated_art" | "nasa";
+      reason: "inline";
+      targetColumn: number;
+      data: FeedModuleData;
+    } | null;
     residualGapPx: number;
   };
 }
@@ -246,10 +258,26 @@ export interface WeatherModuleData {
   imageUrl?: string;
 }
 
+export interface GeneratedImageModuleData {
+  mode: "generated_art";
+  title: string;
+  subtitle: string;
+  imageUrl: string;
+}
+
+export interface NasaModuleData {
+  mode: "nasa" | "fallback";
+  title: string;
+  subtitle: string;
+  imageUrl?: string;
+  sourceUrl?: string;
+}
+
 export interface SpotifyMoodTrack {
   id: string;
   name: string;
   artist: string;
+  albumName?: string;
   albumImageUrl?: string;
   spotifyUrl: string;
   previewUrl?: string | null;
@@ -266,13 +294,17 @@ export interface SpotifyMoodTileData {
   imageUrl?: string;
 }
 
-export type FeedModuleData = WeatherModuleData | SpotifyMoodTileData;
+export type FeedModuleData =
+  | WeatherModuleData
+  | SpotifyMoodTileData
+  | GeneratedImageModuleData
+  | NasaModuleData;
 
 export interface ModuleFeedSection {
   sectionType: "module" | "filler";
-  moduleType: "weather" | "spotify";
+  moduleType: "weather" | "spotify" | "generated_art" | "nasa";
   /** Legacy compatibility: prefer moduleType going forward. */
-  fillerType?: "weather" | "spotify";
+  fillerType?: "weather" | "spotify" | "generated_art" | "nasa";
   reason: "gap" | "interval";
   index: number;
   data: FeedModuleData;
