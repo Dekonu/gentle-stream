@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import SudokuCard, { type SudokuCloudSlice } from "./SudokuCard";
 import KillerSudokuCard from "./KillerSudokuCard";
 import WordSearchCard, { type WordSearchCloudSlice } from "./WordSearchCard";
@@ -136,7 +136,8 @@ export default function GameSlot({
     useState<Difficulty>(difficulty);
   const [sudokuCloud, setSudokuCloud] = useState<SudokuCloudSlice | null>(null);
   const [wordCloud, setWordCloud] = useState<WordSearchCloudSlice | null>(null);
-  const [completedSignatures, setCompletedSignatures] = useState<string[]>([]);
+  /** Server completion signatures — ref only so bootstrap does not re-run when this updates (avoids fetch loops). */
+  const completedSignaturesRef = useRef<string[]>([]);
   const [hasNoUniqueAvailable, setHasNoUniqueAvailable] = useState(false);
 
   const buildExcludeSignatures = useCallback(
@@ -144,9 +145,11 @@ export default function GameSlot({
       if (allowReplay) return [];
       if (gameType === "connections" && connectionsDaily) return [];
       const recent = readRecentSignatures(gameType);
-      return Array.from(new Set([...completedSignatures, ...recent])).slice(-200);
+      return Array.from(
+        new Set([...completedSignaturesRef.current, ...recent])
+      ).slice(-200);
     },
-    [gameType, completedSignatures, connectionsDaily]
+    [gameType, connectionsDaily]
   );
 
   const fetchPuzzleFromApi = useCallback(
@@ -202,7 +205,7 @@ export default function GameSlot({
             const signatures = Array.isArray(body?.signatures)
               ? body.signatures.filter((s): s is string => typeof s === "string")
               : [];
-            setCompletedSignatures(signatures);
+            completedSignaturesRef.current = signatures;
           }
         } catch {
           // anonymous / timeout / network: continue with local recent signatures only
