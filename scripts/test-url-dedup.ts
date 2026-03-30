@@ -16,8 +16,19 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import { insertArticles, normaliseUrl } from "../lib/db/articles";
-import { db } from "../lib/db/client";
+let insertArticles: typeof import("../lib/db/articles").insertArticles;
+let normaliseUrl: typeof import("../lib/db/articles").normaliseUrl;
+let db: typeof import("../lib/db/client").db;
+
+async function initDeps() {
+  const [articlesMod, clientMod] = await Promise.all([
+    import("../lib/db/articles"),
+    import("../lib/db/client"),
+  ]);
+  insertArticles = articlesMod.insertArticles;
+  normaliseUrl = articlesMod.normaliseUrl;
+  db = clientMod.db;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -231,6 +242,23 @@ async function cleanup() {
   }
 }
 
+async function preCleanup() {
+  // These integration tests run against a shared Supabase DB, so older runs
+  // can leave behind rows that would make "first insert" assertions fail.
+  console.log("\n🧽 Pre-cleaning leftover test rows (dedup collisions)...");
+
+  const { data: byHeadline, error: e1 } = await db
+    .from("articles")
+    .delete()
+    .or("headline.ilike.%TEST_DEDUP%,headline.ilike.%TEST_URL_DEDUP%")
+    .select("id");
+
+  if (e1) throw new Error(e1.message);
+
+  const n1 = byHeadline?.length ?? 0;
+  console.log(`🧹 Removed ${n1} leftover row(s) before assertions`);
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -238,11 +266,14 @@ async function main() {
   console.log("  URL Deduplication Tests");
   console.log("══════════════════════════════════════════════");
 
+  await initDeps();
+
   // Unit tests (no DB)
   testNormaliseUrl();
 
   // Integration tests (real DB, cleaned up after)
   try {
+    await preCleanup();
     await testUrlBlocksSameArticleDifferentTitle();
     await testUrlVariantsNormalisedCorrectly();
     await testDifferentUrlsNotBlocked();

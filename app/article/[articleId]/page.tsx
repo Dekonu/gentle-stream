@@ -11,9 +11,9 @@ const UUID_RE =
 export default async function PublicCreatorArticlePage({
   params,
 }: {
-  params: { articleId: string };
+  params: Promise<{ articleId: string }>;
 }) {
-  const { articleId } = params;
+  const { articleId } = await params;
   if (!UUID_RE.test(articleId)) notFound();
 
   const article = await getArticleById(articleId);

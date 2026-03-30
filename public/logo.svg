@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%">
+  <circle cx="250" cy="250" r="230" fill="#224C31"/>
+
+  <circle cx="250" cy="250" r="215" fill="#F5F2EB"/>
+
+  <circle cx="250" cy="250" r="200" fill="none" stroke="#224C31" stroke-width="3"/>
+
+  <path d="M 250 110
+           A 140 140 0 0 0 250 390
+           L 390 390
+           L 390 250
+           L 320 250
+           L 320 320
+           L 250 320
+           A 70 70 0 0 1 250 180
+           L 390 180
+           L 390 110
+           Z"
+        fill="#224C31"/>
+
+  <path d="M 90 370 Q 250 400 410 370" fill="none" stroke="#224C31" stroke-width="4"/>
+  <path d="M 102.5 385 Q 250 410 397.5 385" fill="none" stroke="#98A69A" stroke-width="1.5"/>
+</svg>

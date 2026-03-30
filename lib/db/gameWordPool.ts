@@ -261,13 +261,35 @@ export async function recordWordSearchExposure(
   feedCategory: string | undefined
 ): Promise<void> {
   const cat = normalizeCategory(feedCategory);
-  const { error } = await db.rpc("bump_word_search_exposure", {
-    p_user_id: userId,
-    p_words: words,
-    p_category: cat,
-  });
+  const attempts = 3;
 
-  if (error) throw new Error(`recordWordSearchExposure: ${error.message}`);
+  function isDeadlockError(err: unknown): boolean {
+    if (!err || typeof err !== "object") return false;
+    const e = err as { code?: string; message?: string };
+    return (
+      e.code === "40P01" ||
+      (typeof e.message === "string" &&
+        e.message.toLowerCase().includes("deadlock detected"))
+    );
+  }
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const { error } = await db.rpc("bump_word_search_exposure", {
+      p_user_id: userId,
+      p_words: words,
+      p_category: cat,
+    });
+
+    if (!error) return;
+
+    if (attempt < attempts - 1 && isDeadlockError(error)) {
+      const backoffMs = 100 * (attempt + 1) * (attempt + 1);
+      await new Promise((r) => setTimeout(r, backoffMs));
+      continue;
+    }
+
+    throw new Error(`recordWordSearchExposure: ${error.message}`);
+  }
 }
 
 export function buildWordSearchOptions(

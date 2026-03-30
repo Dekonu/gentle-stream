@@ -11,9 +11,20 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import { insertArticles } from "../lib/db/articles";
-import { db } from "../lib/db/client";
-import { getRankedFeed } from "../lib/agents/rankerAgent";
+let insertArticles: typeof import("../lib/db/articles").insertArticles;
+let db: typeof import("../lib/db/client").db;
+let getRankedFeed: typeof import("../lib/agents/rankerAgent").getRankedFeed;
+
+async function initDeps() {
+  const [articlesMod, clientMod, rankerMod] = await Promise.all([
+    import("../lib/db/articles"),
+    import("../lib/db/client"),
+    import("../lib/agents/rankerAgent"),
+  ]);
+  insertArticles = articlesMod.insertArticles;
+  db = clientMod.db;
+  getRankedFeed = rankerMod.getRankedFeed;
+}
 
 let passed = 0;
 let failed = 0;
@@ -164,6 +175,7 @@ async function main() {
   console.log("══════════════════════════════════════════════");
 
   try {
+    await initDeps();
     await seedArticles();
     await testBeforeAfterAffinityOrdering();
   } finally {

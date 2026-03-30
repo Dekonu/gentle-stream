@@ -106,6 +106,7 @@ export function CreatorOnboardingForm({
   const [phone, setPhone] = useState(() => formatPhoneInput(initialPhone));
   const [otpToken, setOtpToken] = useState("");
   const [phoneBusy, setPhoneBusy] = useState(false);
+  const [smsConsentAccepted, setSmsConsentAccepted] = useState(false);
   /** True after OTP is sent; shows step 2 (enter code). */
   const [otpSent, setOtpSent] = useState(false);
   const [isPhoneVerified, setIsPhoneVerified] = useState(initialPhoneConfirmed);
@@ -116,15 +117,37 @@ export function CreatorOnboardingForm({
   const [timezone, setTimezone] = useState("");
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [guidelinesAccepted, setGuidelinesAccepted] = useState(false);
+  const [consentOptIn, setConsentOptIn] = useState(false);
+  const [consentProof, setConsentProof] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const canSubmit = useMemo(() => {
-    return isPhoneVerified && penName.trim().length > 0 && guidelinesAccepted;
-  }, [guidelinesAccepted, isPhoneVerified, penName]);
+    return (
+      isPhoneVerified &&
+      smsConsentAccepted &&
+      penName.trim().length > 0 &&
+      guidelinesAccepted &&
+      consentOptIn &&
+      consentProof.trim().length > 0
+    );
+  }, [
+    consentOptIn,
+    consentProof,
+    guidelinesAccepted,
+    isPhoneVerified,
+    penName,
+    smsConsentAccepted,
+  ]);
 
-  async function sendPhoneOtp() {
+  async function sendPhoneOtp(isResend = false) {
     setMessage(null);
+    if (!smsConsentAccepted) {
+      setMessage(
+        "Please accept the SMS verification notice before requesting a one-time code."
+      );
+      return;
+    }
     const normalized = normalizePhoneE164(phone);
     if (!normalized.ok) {
       setMessage(normalized.message);
@@ -145,6 +168,7 @@ export function CreatorOnboardingForm({
       setPhone(formatPhoneInput(normalized.e164));
       setOtpSent(true);
       setOtpToken("");
+      if (isResend) setMessage("A new OTP has been sent.");
     } finally {
       setPhoneBusy(false);
     }
@@ -208,6 +232,8 @@ export function CreatorOnboardingForm({
           locale,
           timezone,
           guidelinesAccepted,
+          consentOptIn,
+          consentProof,
         }),
       });
       const payload = (await response.json().catch(() => ({}))) as {
@@ -271,15 +297,42 @@ export function CreatorOnboardingForm({
                   countries: start with + and country code. 422 errors are usually a bad format
                   or Phone/SMS not configured in the Supabase dashboard.
                 </p>
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "0.4rem",
+                    fontSize: "0.78rem",
+                    color: "#555",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    lineHeight: 1.45,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={smsConsentAccepted}
+                    onChange={(e) => setSmsConsentAccepted(e.target.checked)}
+                    disabled={phoneBusy}
+                    style={{ marginTop: "0.15rem" }}
+                  />
+                  <span>
+                    I agree to receive one-time SMS verification codes for creator onboarding.
+                    Message and data rates may apply. Reply STOP to opt out of non-required
+                    messages and HELP for support. See <a href="/terms">Terms</a>,{" "}
+                    <a href="/privacy">Privacy policy</a>, and{" "}
+                    <a href="/sms-consent">SMS consent</a>.
+                  </span>
+                </label>
                 <button
                   type="button"
-                  onClick={sendPhoneOtp}
-                  disabled={phoneBusy}
+                  onClick={() => void sendPhoneOtp()}
+                  disabled={phoneBusy || !smsConsentAccepted}
                   style={{
                     padding: "0.45rem",
                     border: "1px solid #777",
                     background: "#fff",
-                    cursor: phoneBusy ? "wait" : "pointer",
+                    cursor: phoneBusy || !smsConsentAccepted ? "not-allowed" : "pointer",
+                    opacity: smsConsentAccepted ? 1 : 0.65,
                   }}
                 >
                   {phoneBusy ? "Sending…" : "Send OTP"}
@@ -287,6 +340,19 @@ export function CreatorOnboardingForm({
               </div>
             ) : (
               <div style={{ display: "grid", gap: "0.65rem", maxWidth: "420px" }}>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: "0.75rem",
+                    color: "#666",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    lineHeight: 1.4,
+                  }}
+                >
+                  SMS consent remains active for this verification flow. Terms:{" "}
+                  <a href="/terms">Terms</a>, <a href="/privacy">Privacy</a>,{" "}
+                  <a href="/sms-consent">SMS consent</a>.
+                </p>
                 <p
                   style={{
                     margin: 0,
@@ -318,6 +384,25 @@ export function CreatorOnboardingForm({
                   }}
                 >
                   Use a different number
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void sendPhoneOtp(true)}
+                  disabled={phoneBusy}
+                  style={{
+                    justifySelf: "start",
+                    padding: "0.2rem 0",
+                    border: "none",
+                    background: "none",
+                    color: "#1a472a",
+                    cursor: phoneBusy ? "not-allowed" : "pointer",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    fontSize: "0.8rem",
+                    textDecoration: "underline",
+                    textUnderlineOffset: "2px",
+                  }}
+                >
+                  {phoneBusy ? "Resending..." : "Resend code"}
                 </button>
                 <input
                   value={otpToken}
@@ -370,6 +455,19 @@ export function CreatorOnboardingForm({
           <h2 style={{ margin: "0 0 0.5rem", fontSize: "1rem", fontFamily: "'Playfair Display', Georgia, serif" }}>
             Creator profile
           </h2>
+          <label style={{ display: "flex", alignItems: "flex-start", gap: "0.4rem", fontSize: "0.85rem", color: "#555", fontFamily: "'IM Fell English', Georgia, serif", lineHeight: 1.45 }}>
+            <input
+              type="checkbox"
+              checked={smsConsentAccepted}
+              onChange={(e) => setSmsConsentAccepted(e.target.checked)}
+            />
+            <span>
+              I agree to receive one-time SMS verification codes for creator onboarding.
+              Message and data rates may apply. Reply STOP to opt out of non-required messages and HELP for support.
+              See <a href="/terms">Terms</a>, <a href="/privacy">Privacy policy</a>, and{" "}
+              <a href="/sms-consent">SMS consent</a>.
+            </span>
+          </label>
           <div style={{ display: "grid", gap: "0.5rem", maxWidth: "520px" }}>
             <input value={penName} onChange={(e) => setPenName(e.target.value)} placeholder="Pen name" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
             <textarea value={bio} onChange={(e) => setBio(e.target.value)} placeholder="Short bio (optional)" style={{ minHeight: "80px", padding: "0.45rem", border: "1px solid #bbb" }} />
@@ -411,6 +509,20 @@ export function CreatorOnboardingForm({
               />
               I agree to submit original, respectful, and factual writing.
             </label>
+            <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.85rem" }}>
+              <input
+                type="checkbox"
+                checked={consentOptIn}
+                onChange={(e) => setConsentOptIn(e.target.checked)}
+              />
+              Proof of consent (opt-in) collected.
+            </label>
+            <textarea
+              value={consentProof}
+              onChange={(e) => setConsentProof(e.target.value)}
+              placeholder="Proof of consent (required): paste the SMS consent screenshot URL, e.g. https://<<hostname>>/sms-consent-screen.png"
+              style={{ minHeight: "70px", padding: "0.45rem", border: "1px solid #bbb" }}
+            />
           </div>
         </section>
         ) : null}
