@@ -1,4 +1,6 @@
 import { db } from "./client";
+import { getCreatorPenNamesByUserIds } from "./creator";
+import { getAuthorDisplayByUserIds } from "./users";
 import type { StoredArticle } from "../types";
 import type { Category } from "../constants";
 import { v4 as uuidv4 } from "uuid";
@@ -32,6 +34,64 @@ interface ArticleRow {
   author_user_id?: string | null;
   submission_id?: string | null;
   creator_explicit_tags?: string[];
+}
+
+function isGenericCreatorByline(byline: string): boolean {
+  const b = byline.trim().toLowerCase();
+  return b === "" || b === "by creator" || b === "creator";
+}
+
+function needsCreatorBylineHydration(article: StoredArticle): boolean {
+  if (article.source !== "creator" || !article.authorUserId) return false;
+  return isGenericCreatorByline(article.byline ?? "");
+}
+
+function penNameFromByline(byline: string): string {
+  const t = byline.trim();
+  const m = /^by\s+(.+)$/i.exec(t);
+  return (m ? m[1] : t).trim();
+}
+
+async function hydrateCreatorAuthorDisplay(
+  articles: StoredArticle[]
+): Promise<StoredArticle[]> {
+  const creatorIds = [
+    ...new Set(
+      articles
+        .filter((a) => a.source === "creator" && a.authorUserId)
+        .map((a) => a.authorUserId as string)
+    ),
+  ];
+  if (creatorIds.length === 0) return articles;
+
+  const [penNames, displayByUser] = await Promise.all([
+    getCreatorPenNamesByUserIds(creatorIds),
+    getAuthorDisplayByUserIds(creatorIds),
+  ]);
+
+  return articles.map((article) => {
+    if (article.source !== "creator" || !article.authorUserId) return article;
+
+    const uid = article.authorUserId;
+    const penFromProfile = penNames.get(uid)?.trim() ?? "";
+    const penFromLine = penNameFromByline(article.byline ?? "");
+    const pen = penFromProfile || penFromLine;
+    const display = displayByUser.get(uid);
+
+    let next: StoredArticle = {
+      ...article,
+      authorPenName: pen || null,
+      authorAvatarUrl: display?.avatarUrl ?? null,
+      authorUsername: display?.username ?? null,
+    };
+
+    if (needsCreatorBylineHydration(article)) {
+      if (penFromProfile) next = { ...next, byline: `By ${penFromProfile}` };
+      else if (pen) next = { ...next, byline: `By ${pen}` };
+    }
+
+    return next;
+  });
 }
 
 function rowToArticle(row: ArticleRow): StoredArticle {
@@ -351,7 +411,7 @@ export async function getArticlesForFeed(
 
   const { data, error } = await query;
   if (error) throw new Error(`getArticlesForFeed: ${error.message}`);
-  return (data as ArticleRow[]).map(rowToArticle);
+  return hydrateCreatorAuthorDisplay((data as ArticleRow[]).map(rowToArticle));
 }
 
 /**
@@ -377,7 +437,7 @@ export async function getUntaggedArticlesForFeed(
 
   const { data, error } = await query;
   if (error) throw new Error(`getUntaggedArticlesForFeed: ${error.message}`);
-  return (data as ArticleRow[]).map(rowToArticle);
+  return hydrateCreatorAuthorDisplay((data as ArticleRow[]).map(rowToArticle));
 }
 
 function shuffleInPlace<T>(items: T[]): void {
@@ -409,7 +469,7 @@ export async function getRandomAvailableArticles(
 
   const { data, error } = await query;
   if (error) throw new Error(`getRandomAvailableArticles: ${error.message}`);
-  const rows = (data as ArticleRow[]).map(rowToArticle);
+  const rows = await hydrateCreatorAuthorDisplay((data as ArticleRow[]).map(rowToArticle));
   shuffleInPlace(rows);
   return rows.slice(0, limit);
 }
@@ -425,7 +485,7 @@ export async function getRandomArticlesResurfacing(limit: number): Promise<Store
     .limit(cap);
 
   if (error) throw new Error(`getRandomArticlesResurfacing: ${error.message}`);
-  const rows = (data as ArticleRow[]).map(rowToArticle);
+  const rows = await hydrateCreatorAuthorDisplay((data as ArticleRow[]).map(rowToArticle));
   shuffleInPlace(rows);
   return rows.slice(0, limit);
 }
@@ -562,7 +622,9 @@ export async function getArticleById(
     .single();
 
   if (error || !data) return null;
-  return rowToArticle(data as ArticleRow);
+  const article = rowToArticle(data as ArticleRow);
+  const [hydrated] = await hydrateCreatorAuthorDisplay([article]);
+  return hydrated ?? article;
 }
 
 export interface CreatorPublishedArticleListItem {

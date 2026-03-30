@@ -132,6 +132,25 @@ export async function getCreatorProfile(userId: string): Promise<CreatorProfile 
   return rowToCreatorProfile(data as CreatorProfileRow);
 }
 
+/** Map of user_id → trimmed pen_name (empty string if unset). */
+export async function getCreatorPenNamesByUserIds(
+  userIds: string[]
+): Promise<Map<string, string>> {
+  const unique = [...new Set(userIds.filter(Boolean))];
+  if (unique.length === 0) return new Map();
+  const { data, error } = await db
+    .from("creator_profiles")
+    .select("user_id, pen_name")
+    .in("user_id", unique);
+  if (error) throw new Error(`getCreatorPenNamesByUserIds: ${error.message}`);
+  const map = new Map<string, string>();
+  for (const row of data ?? []) {
+    const r = row as { user_id: string; pen_name: string | null };
+    map.set(r.user_id, (r.pen_name ?? "").trim());
+  }
+  return map;
+}
+
 export async function upsertCreatorProfile(input: {
   userId: string;
   penName: string;

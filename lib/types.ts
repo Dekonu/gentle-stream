@@ -20,6 +20,10 @@ export interface StoredArticle extends RawArticle {
   expiresAt: string;           // ISO timestamp (fetchedAt + 7 days)
   source?: ArticleSource;
   authorUserId?: string | null;
+  /** Filled when loading creator articles: display name (may differ from @username). */
+  authorPenName?: string | null;
+  authorAvatarUrl?: string | null;
+  authorUsername?: string | null;
   submissionId?: string | null;
   creatorExplicitTags?: string[];
 

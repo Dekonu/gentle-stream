@@ -712,12 +712,22 @@ export default function ArticleCard({
         <CreatorBylineLink
           byline={article.byline}
           authorUserId={"authorUserId" in article ? article.authorUserId : null}
+          authorPenName={
+            "authorPenName" in article ? article.authorPenName : null
+          }
+          authorAvatarUrl={
+            "authorAvatarUrl" in article ? article.authorAvatarUrl : null
+          }
+          authorUsername={
+            "authorUsername" in article ? article.authorUsername : null
+          }
           linkToProfile={
             "source" in article &&
             article.source === "creator" &&
             Boolean("authorUserId" in article && article.authorUserId)
           }
           accentColor={accentColor}
+          variant="feed"
         />
         {article.location && <span>&middot; {article.location}</span>}
       </div>

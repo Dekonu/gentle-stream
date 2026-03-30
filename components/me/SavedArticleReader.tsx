@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import type { StoredArticle } from "@/lib/types";
+import { CATEGORY_COLORS } from "@/lib/constants";
 import {
   sourceLinkLabel,
   toClickableSourceUrl,
@@ -20,6 +21,8 @@ export function SavedArticleReader({
   savedOriginalUrl,
 }: SavedArticleReaderProps) {
   const sourceUrls = uniqueSourceUrls(article.sourceUrls);
+  const bylineAccent =
+    CATEGORY_COLORS[article.category as keyof typeof CATEGORY_COLORS] ?? "#1a472a";
 
   const wrap: CSSProperties = {
     maxWidth: "42rem",
@@ -67,9 +70,14 @@ export function SavedArticleReader({
           <CreatorBylineLink
             byline={article.byline}
             authorUserId={article.authorUserId}
+            authorPenName={article.authorPenName}
+            authorAvatarUrl={article.authorAvatarUrl}
+            authorUsername={article.authorUsername}
             linkToProfile={
               article.source === "creator" && Boolean(article.authorUserId)
             }
+            accentColor={bylineAccent}
+            variant="reader"
           />
           {article.location ? <span> · {article.location}</span> : null}
         </div>
