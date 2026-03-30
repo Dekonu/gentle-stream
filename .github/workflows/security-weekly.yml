@@ -18,7 +18,11 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-      - run: npm ci
+      - name: Install dependencies
+        run: |
+          npm --version
+          node --version
+          npm ci || npm ci --legacy-peer-deps
       - run: npm run security:inventory
       - run: npm run security:rls-audit
       - run: npm run security:audit
