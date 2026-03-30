@@ -15,6 +15,12 @@ interface TileCacheEntry {
   expiresAt: number;
 }
 
+interface SpotifyPlaylistCandidate {
+  id: string;
+  name: string;
+  spotifyUrl: string;
+}
+
 let tokenCache: SpotifyTokenCache | null = null;
 const tileCache = new Map<string, TileCacheEntry>();
 
@@ -69,6 +75,13 @@ function pickMood(input: { category?: string | null; mood?: string | null }): st
 function normalizeMarket(input: string | null | undefined): string {
   const market = (input ?? process.env.SPOTIFY_MODULE_MARKET ?? "US").trim().toUpperCase();
   return market.length === 2 ? market : "US";
+}
+
+function pickGenreForMood(mood: string): string {
+  const baseMood = mood.trim().toLowerCase();
+  const genres = MOOD_GENRE_MAP[baseMood];
+  if (genres && genres.length > 0) return randomFrom(genres);
+  return randomFrom(["indie", "pop", "electronic", "rock", "jazz"]);
 }
 
 function getFallbackTile(input: {
@@ -153,81 +166,77 @@ async function fetchSpotifyToken(): Promise<string> {
 async function fetchMoodTracks(input: {
   accessToken: string;
   mood: string;
+  genre: string;
   market: string;
-}): Promise<SpotifyMoodTrack[]> {
-  const baseMood = input.mood.trim().toLowerCase();
-  const genres =
-    MOOD_GENRE_MAP[baseMood] ??
-    randomFrom([
-      ["indie", "pop", "electronic"],
-      ["acoustic", "jazz", "ambient"],
-      ["rock", "dance", "hip-hop"],
-    ]);
-  const searchTerms = [baseMood, ...genres.slice(0, 2)];
-  const offsets = [0, 7, 14].map((seed) => (Math.floor(Math.random() * 5) + seed));
+}): Promise<{ tracks: SpotifyMoodTrack[]; playlistUrl?: string }> {
+  const primaryQuery = `genre:${input.genre}`;
+  const fallbackQuery = `${input.genre} ${input.mood}`.trim();
+  const buildParams = (query: string) =>
+    new URLSearchParams({
+      q: query,
+      type: "track,playlist",
+      market: input.market,
+      // Spotify Search API currently caps per-type page size to 10.
+      limit: "10",
+      offset: "0",
+    });
 
-  const responses = await Promise.all(
-    searchTerms.map(async (term, idx) => {
-      const primaryQuery = `${baseMood} ${term} ${genres[idx % genres.length]} mood`;
-      const params = new URLSearchParams({
-        // Keep query free-text; strict field operators can return 400/empty
-        // depending on market/content and cause frequent fallback mode.
-        q: primaryQuery.trim(),
-        type: "track",
-        market: input.market,
-        limit: "12",
-        offset: String(offsets[idx] ?? 0),
-      });
-      let res = await fetch(`${SPOTIFY_API_BASE}/search?${params.toString()}`, {
-        headers: {
-          Authorization: `Bearer ${input.accessToken}`,
-        },
-        cache: "no-store",
-      });
-      if (!res.ok) {
-        // Retry with a simpler mood-only query before failing.
-        const fallbackParams = new URLSearchParams({
-          q: `${baseMood} mood`,
-          type: "track",
-          market: input.market,
-          limit: "12",
-          offset: "0",
-        });
-        res = await fetch(`${SPOTIFY_API_BASE}/search?${fallbackParams.toString()}`, {
-          headers: {
-            Authorization: `Bearer ${input.accessToken}`,
-          },
-          cache: "no-store",
-        });
-      }
-      if (!res.ok) throw new Error(`Spotify search failed (${res.status}).`);
-      const json = (await res.json()) as {
-        tracks?: {
-          items?: Array<{
-            id: string;
-            name: string;
-            preview_url?: string | null;
-            external_urls?: { spotify?: string };
-            artists?: Array<{ name?: string }>;
-            album?: { name?: string; images?: Array<{ url?: string }> };
-          }>;
-        };
-      };
-      return json.tracks?.items ?? [];
-    })
-  );
+  let res = await fetch(`${SPOTIFY_API_BASE}/search?${buildParams(primaryQuery).toString()}`, {
+    headers: {
+      Authorization: `Bearer ${input.accessToken}`,
+    },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    res = await fetch(`${SPOTIFY_API_BASE}/search?${buildParams(fallbackQuery).toString()}`, {
+      headers: {
+        Authorization: `Bearer ${input.accessToken}`,
+      },
+      cache: "no-store",
+    });
+  }
+  if (!res.ok) throw new Error(`Spotify search failed (${res.status}).`);
+
+  const json = (await res.json()) as {
+    tracks?: {
+      items?: Array<{
+        id: string;
+        name: string;
+        preview_url?: string | null;
+        external_urls?: { spotify?: string };
+        artists?: Array<{ name?: string }>;
+        album?: { name?: string; images?: Array<{ url?: string }> };
+      }>;
+    };
+    playlists?: {
+      items?: Array<{
+        id: string;
+        name: string;
+        external_urls?: { spotify?: string };
+      }>;
+    };
+  };
 
   const deduped = new Map<string, SpotifyMoodTrack>();
-  for (const rawItems of responses) {
-    for (const item of rawItems) {
-      const mapped = toTrack(item);
-      if (!mapped) continue;
-      const key = `${mapped.name.toLowerCase()}|${mapped.artist.toLowerCase()}`;
-      if (!deduped.has(key)) deduped.set(key, mapped);
-    }
+  for (const item of json.tracks?.items ?? []) {
+    const mapped = toTrack(item);
+    if (!mapped) continue;
+    const key = `${mapped.name.toLowerCase()}|${mapped.artist.toLowerCase()}`;
+    if (!deduped.has(key)) deduped.set(key, mapped);
   }
 
-  return Array.from(deduped.values()).slice(0, 12);
+  const playlistCandidates: SpotifyPlaylistCandidate[] = (json.playlists?.items ?? [])
+    .map((item) => {
+      const spotifyUrl = item.external_urls?.spotify;
+      if (!item.id || !item.name || !spotifyUrl) return null;
+      return { id: item.id, name: item.name, spotifyUrl };
+    })
+    .filter((item): item is SpotifyPlaylistCandidate => item !== null);
+
+  return {
+    tracks: Array.from(deduped.values()),
+    playlistUrl: playlistCandidates[0]?.spotifyUrl,
+  };
 }
 
 function shuffleTracks<T>(items: T[]): T[] {
@@ -273,8 +282,9 @@ export async function getSpotifyMoodTileData(input: {
     enabledRaw === "true" ||
     enabledRaw === "yes";
   const mood = pickMood({ category: input.category, mood: input.mood });
+  const genre = pickGenreForMood(mood);
   const market = normalizeMarket(input.market);
-  const cacheKey = `${mood}|${market}`;
+  const cacheKey = `${mood}|${genre}|${market}`;
   const now = Date.now();
   const cached = tileCache.get(cacheKey);
   if (cached && cached.expiresAt > now) return cached.data;
@@ -289,7 +299,8 @@ export async function getSpotifyMoodTileData(input: {
 
   try {
     const accessToken = await fetchSpotifyToken();
-    const rawTracks = await fetchMoodTracks({ accessToken, mood, market });
+    const moodSearch = await fetchMoodTracks({ accessToken, mood, genre, market });
+    const rawTracks = moodSearch.tracks;
     const diversifiedTracks = trimNearDuplicateTitles(shuffleTracks(rawTracks));
     if (diversifiedTracks.length === 0) {
       return getFallbackTile({
@@ -312,7 +323,7 @@ export async function getSpotifyMoodTileData(input: {
       mood,
       market,
       tracks,
-      playlistUrl: top?.spotifyUrl,
+      playlistUrl: moodSearch.playlistUrl ?? top?.spotifyUrl,
       imageUrl: randomImageTrack?.albumImageUrl,
     };
     tileCache.set(cacheKey, {

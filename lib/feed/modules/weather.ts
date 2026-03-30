@@ -131,6 +131,7 @@ async function fetchOneCallWeather(lat: number, lon: number, apiKey: string): Pr
     lon: String(lon),
     appid: apiKey,
     units: "metric",
+    exclude: "minutely,hourly,daily,alerts",
   });
   // One Call API 3.0 provides current + hourly/daily forecasts in one response.
   const url = `https://api.openweathermap.org/data/3.0/onecall?${params.toString()}`;
@@ -213,8 +214,8 @@ export async function getWeatherFillerData(input: {
 
   const apiKey = process.env.OPENWEATHER_API_KEY?.trim();
   if (!apiKey) {
+    console.warn("[weather-module] OPENWEATHER_API_KEY is missing; serving generated_art fallback.");
     const fallback = fallbackArtData(input);
-    cache.set(cacheKey, { data: fallback, expiresAt: now + CACHE_TTL_MS });
     return fallback;
   }
 
@@ -236,8 +237,8 @@ export async function getWeatherFillerData(input: {
     const city = (input.location ?? "").trim() || defaultCityForCategory(input.category);
     const geocoded = await resolveCoordinates(city, apiKey);
     if (!geocoded) {
+      console.warn(`[weather-module] Geocoding returned no results for location="${city}". Serving fallback.`);
       const fallback = fallbackArtData(input);
-      cache.set(cacheKey, { data: fallback, expiresAt: now + CACHE_TTL_MS });
       return fallback;
     }
     const onecall = await fetchOneCallWeather(geocoded.lat, geocoded.lon, apiKey);
@@ -253,9 +254,10 @@ export async function getWeatherFillerData(input: {
     });
     cache.set(cacheKey, { data, expiresAt: now + CACHE_TTL_MS });
     return data;
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[weather-module] One Call fetch failed: ${message}. Serving fallback.`);
     const fallback = fallbackArtData(input);
-    cache.set(cacheKey, { data: fallback, expiresAt: now + CACHE_TTL_MS });
     return fallback;
   }
 }

@@ -74,6 +74,7 @@ export function ProfileMenu({
   const [headerLoading, setHeaderLoading] = useState(true);
   /** After profile loads, hide shimmer once the image has painted (or failed). */
   const [avatarPainted, setAvatarPainted] = useState(false);
+  const [avatarBust, setAvatarBust] = useState(0);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [enabledGameTypes, setEnabledGameTypes] = useState<GameType[] | null>(null);
   const [moduleLoading, setModuleLoading] = useState(false);
@@ -83,8 +84,12 @@ export function ProfileMenu({
   const [spotifyModuleData, setSpotifyModuleData] = useState<SpotifyMoodTileData | null>(null);
 
   useEffect(() => {
-    if (!profile?.avatarUrl) setAvatarPainted(true);
-    else setAvatarPainted(false);
+    if (!profile?.avatarUrl) {
+      setAvatarPainted(true);
+      return;
+    }
+    setAvatarPainted(false);
+    setAvatarBust(Date.now());
   }, [profile?.avatarUrl]);
 
   useEffect(() => {
@@ -517,6 +522,10 @@ export function ProfileMenu({
     profile != null &&
     isUsernameChangeLocked(profile.username, profile.usernameSetAt);
 
+  const headerAvatarSrc = profile?.avatarUrl
+    ? `${profile.avatarUrl.split("?")[0]}?t=${avatarBust}`
+    : null;
+
   return (
     <div
       ref={wrapRef}
@@ -552,7 +561,7 @@ export function ProfileMenu({
             className="profile-header-shimmer profile-header-skeleton-avatar"
             aria-hidden
           />
-        ) : profile?.avatarUrl ? (
+        ) : headerAvatarSrc ? (
           <div
             style={{
               position: "relative",
@@ -569,7 +578,7 @@ export function ProfileMenu({
               />
             )}
             <img
-              src={profile.avatarUrl}
+              src={headerAvatarSrc}
               alt=""
               width={36}
               height={36}

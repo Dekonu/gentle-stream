@@ -92,11 +92,15 @@ export function feedGamePickForOrdinal(
 }
 
 /** Deterministic pick so the same article always shows the same embedded game. */
-export function embeddedGamePickFromSeed(seed: string): FeedGamePick {
+export function embeddedGamePickFromSeed(
+  seed: string,
+  enabledGameTypes?: GameType[]
+): FeedGamePick {
   const h1 = hashStringToUint32(seed);
   const h2 = hashStringToUint32(`${seed}|diff`);
+  const enabled = normalizeEnabledFeedGameTypes(enabledGameTypes);
   return {
-    gameType: FEED_GAME_TYPES[h1 % FEED_GAME_TYPES.length],
+    gameType: enabled[h1 % enabled.length],
     difficulty: DIFFICULTIES[h2 % DIFFICULTIES.length],
   };
 }
