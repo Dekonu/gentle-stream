@@ -34,6 +34,8 @@ import {
  */
 const MAX_WORD_POOL_TOTAL = 1500;
 const MAX_CONNECTIONS_IN_POOL = 300;
+/** Below this, run a second ingest pass in the same cron if still under cap (recovers from partial failures). */
+const CONNECTIONS_POOL_CRITICAL_LOW = 24;
 
 async function growConnectionsPool(): Promise<{
   before: number;
@@ -45,8 +47,17 @@ async function growConnectionsPool(): Promise<{
   if (before >= MAX_CONNECTIONS_IN_POOL) {
     return { before, inserted: 0, after: before, skipped: true };
   }
-  const inserted = await runConnectionsIngest();
-  const after = await getConnectionsPoolSize();
+  let inserted = await runConnectionsIngest();
+  let after = await getConnectionsPoolSize();
+  // Second pass when the pool is still small (e.g. some categories failed silently).
+  if (
+    after < CONNECTIONS_POOL_CRITICAL_LOW &&
+    after < MAX_CONNECTIONS_IN_POOL
+  ) {
+    const second = await runConnectionsIngest();
+    inserted += second;
+    after = await getConnectionsPoolSize();
+  }
   return { before, inserted, after, skipped: false };
 }
 

@@ -10,17 +10,26 @@ import {
   cellInFlashUnits,
   completedSudokuUnits,
 } from "@/lib/games/sudokuLineComplete";
+import { useGridSelectionColor } from "@/lib/games/useGridSelectionColor";
+import { clearDigitNotesFromRowColBox } from "@/lib/games/sudokuPeerNotes";
 
 const MAX_MISTAKES = 3;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+/** Bitmask: bit (n-1) set ⇔ pencil mark for digit n (1–9). */
+type NoteMask = number;
+
 interface KillerMistakeUndoSnapshot {
   values: number[][];
+  notes: NoteMask[][];
+  /** Mistake count before the wrong move that pushed this snapshot (undo keeps the live tally). */
+  mistakes: number;
 }
 
 interface BoardState {
   values: number[][];
+  notes: NoteMask[][];
   selected: [number, number] | null;
   errors: boolean[][];
   completed: boolean;
@@ -33,7 +42,7 @@ interface BoardState {
 
 type Action =
   | { type: "SELECT"; row: number; col: number }
-  | { type: "INPUT"; num: number }
+  | { type: "INPUT"; num: number; asNote?: boolean }
   | { type: "UNDO_MISTAKE" }
   | { type: "ERASE" }
   | { type: "TICK" }
@@ -43,6 +52,7 @@ interface KillerSudokuCardProps {
   puzzle: KillerSudokuPuzzle;
   onNewPuzzle?: (difficulty: Difficulty) => void;
   metricsEnabled?: boolean;
+  puzzleSignature?: string;
 }
 
 // ─── Cell → cage lookup ───────────────────────────────────────────────────────
@@ -134,9 +144,222 @@ function cloneValues(values: number[][]): number[][] {
   return values.map((row) => [...row]);
 }
 
+function emptyNotesGrid(): NoteMask[][] {
+  return Array.from({ length: 9 }, () => Array(9).fill(0));
+}
+
+function cloneNotes(notes: NoteMask[][]): NoteMask[][] {
+  return notes.map((row) => [...row]);
+}
+
+/** True if `digit` is already placed in the same row, column, or 3×3 box (excluding r,c). */
+function digitAppearsInSudokuPeers(
+  values: number[][],
+  r: number,
+  c: number,
+  digit: number
+): boolean {
+  for (let i = 0; i < 9; i++) {
+    if (i !== c && values[r][i] === digit) return true;
+    if (i !== r && values[i][c] === digit) return true;
+  }
+  const br = Math.floor(r / 3) * 3;
+  const bc = Math.floor(c / 3) * 3;
+  for (let rr = br; rr < br + 3; rr++) {
+    for (let cc = bc; cc < bc + 3; cc++) {
+      if ((rr !== r || cc !== c) && values[rr][cc] === digit) return true;
+    }
+  }
+  return false;
+}
+
+function digitAppearsAsValueInCage(
+  values: number[][],
+  cageMap: Map<string, Cage>,
+  r: number,
+  c: number,
+  digit: number
+): boolean {
+  const cage = cageMap.get(`${r},${c}`);
+  if (!cage) return false;
+  for (const [rr, cc] of cage.cells) {
+    if (rr === r && cc === c) continue;
+    if (values[rr][cc] === digit) return true;
+  }
+  return false;
+}
+
+/** Block adding a new note for `num`; removing an existing note is always allowed. */
+function isKillerNoteAddBlocked(
+  values: number[][],
+  notes: NoteMask[][],
+  cageMap: Map<string, Cage>,
+  r: number,
+  c: number,
+  num: number
+): boolean {
+  if (values[r][c] !== 0) return false;
+  const bit = 1 << (num - 1);
+  if ((notes[r][c] & bit) !== 0) return false;
+  if (digitAppearsInSudokuPeers(values, r, c, num)) return true;
+  if (digitAppearsAsValueInCage(values, cageMap, r, c, num)) return true;
+  return false;
+}
+
+function clearDigitNotesFromCagePeers(
+  notes: NoteMask[][],
+  cage: Cage,
+  digit: number,
+  placementR: number,
+  placementC: number
+): void {
+  if (digit < 1 || digit > 9) return;
+  const bit = 1 << (digit - 1);
+  for (const [rr, cc] of cage.cells) {
+    if (rr === placementR && cc === placementC) continue;
+    notes[rr][cc] &= ~bit;
+  }
+}
+
+/** Inset from cell edge (px) so dashed cage lines read clearly inside the solid grid. */
+const CAGE_LINE_INSET = 3;
+/** Visible cage outline — always drawn on cage boundaries, including along 3×3 lines and puzzle edge. */
+/** Muted dashed cage lines — alpha so they sit behind sums and digits. */
+const CAGE_DASH_BORDER = "2.5px dashed rgba(74, 85, 104, 0.38)";
+/** Corner reserved for cage sum text so dashes don’t run through the label (matches NYT-style gap). */
+const CAGE_SUM_GAP_W = 26;
+const CAGE_SUM_GAP_H = 13;
+
+function KillerCageInsetOverlay({
+  showTop,
+  showBottom,
+  showLeft,
+  showRight,
+  sumLabelCorner,
+}: {
+  showTop: boolean;
+  showBottom: boolean;
+  showLeft: boolean;
+  showRight: boolean;
+  /** Sum is in this cell’s top-left — skip that corner on top/left dashes. */
+  sumLabelCorner: boolean;
+}) {
+  const inset = CAGE_LINE_INSET;
+  const skipW = sumLabelCorner ? CAGE_SUM_GAP_W : 0;
+  const skipH = sumLabelCorner ? CAGE_SUM_GAP_H : 0;
+
+  const lineBase: React.CSSProperties = {
+    position: "absolute",
+    zIndex: 0,
+    pointerEvents: "none",
+  };
+
+  return (
+    <>
+      {showTop ? (
+        <div
+          aria-hidden
+          style={{
+            ...lineBase,
+            top: inset,
+            left: inset + skipW,
+            right: inset,
+            height: 0,
+            borderTop: CAGE_DASH_BORDER,
+          }}
+        />
+      ) : null}
+      {showLeft ? (
+        <div
+          aria-hidden
+          style={{
+            ...lineBase,
+            left: inset,
+            top: inset + skipH,
+            bottom: inset,
+            width: 0,
+            borderLeft: CAGE_DASH_BORDER,
+          }}
+        />
+      ) : null}
+      {showRight ? (
+        <div
+          aria-hidden
+          style={{
+            ...lineBase,
+            right: inset,
+            top: inset,
+            bottom: inset,
+            width: 0,
+            borderRight: CAGE_DASH_BORDER,
+          }}
+        />
+      ) : null}
+      {showBottom ? (
+        <div
+          aria-hidden
+          style={{
+            ...lineBase,
+            bottom: inset,
+            left: inset,
+            right: inset,
+            height: 0,
+            borderBottom: CAGE_DASH_BORDER,
+          }}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function KillerCellNotes({
+  mask,
+  hasCageSumLabel,
+}: {
+  mask: NoteMask;
+  /** Top-left of cage shows sum — keep pencil marks out of that corner. */
+  hasCageSumLabel: boolean;
+}) {
+  if (mask === 0) return null;
+  const noteStyle: React.CSSProperties = {
+    fontSize: "clamp(4px, 1.5vw, 7px)",
+    fontWeight: 500,
+    color: "#6b6560",
+    lineHeight: 1,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontFamily: "'Playfair Display', Georgia, serif",
+  };
+  // Shift notes down/right so digit 1 (top-left of the 3×3) does not sit under cage sums.
+  const inset = hasCageSumLabel
+    ? { top: 12, right: 3, bottom: 3, left: 16 }
+    : { top: 5, right: 3, bottom: 3, left: 8 };
+  return (
+    <div
+      style={{
+        position: "absolute",
+        ...inset,
+        zIndex: 1,
+        display: "grid",
+        gridTemplateColumns: "repeat(3, 1fr)",
+        gridTemplateRows: "repeat(3, 1fr)",
+        pointerEvents: "none",
+      }}
+    >
+      {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
+        <span key={n} style={noteStyle}>
+          {mask & (1 << (n - 1)) ? n : ""}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function makeInitialState(): BoardState {
   return {
     values: Array.from({ length: 9 }, () => Array(9).fill(0)),
+    notes: emptyNotesGrid(),
     selected: null,
     errors: Array.from({ length: 9 }, () => Array(9).fill(false)),
     completed: false,
@@ -170,6 +393,30 @@ function reducer(
     case "INPUT": {
       if (!state.selected || state.completed || state.failed) return state;
       const [r, c] = state.selected;
+      const cageMap = buildCageMap(puzzle.cages);
+
+      if (action.asNote) {
+        if (state.values[r][c] !== 0) return state;
+        const bit = 1 << (action.num - 1);
+        if (
+          isKillerNoteAddBlocked(
+            state.values,
+            state.notes,
+            cageMap,
+            r,
+            c,
+            action.num
+          )
+        ) {
+          return state;
+        }
+        const notes = cloneNotes(state.notes);
+        notes[r][c] ^= bit;
+        return { ...state, notes };
+      }
+
+      // No-op if the cell already shows this digit — avoids double-counting mistakes
+      // and stacking duplicate undo snapshots.
       if (state.values[r][c] === action.num) return state;
 
       const correct = action.num === puzzle.solution[r][c];
@@ -180,17 +427,30 @@ function reducer(
       const mistakeUndoStack = !correct
         ? [
             ...state.mistakeUndoStack,
-            { values: cloneValues(state.values) },
+            {
+              values: cloneValues(state.values),
+              notes: cloneNotes(state.notes),
+              mistakes: state.mistakes,
+            },
           ]
         : state.mistakeUndoStack;
 
       const values = state.values.map((row) => [...row]);
       values[r][c] = action.num;
+      const notes = cloneNotes(state.notes);
+      notes[r][c] = 0;
+      if (correct) {
+        clearDigitNotesFromRowColBox(notes, r, c, action.num);
+        const cage = cageMap.get(`${r},${c}`);
+        if (cage)
+          clearDigitNotesFromCagePeers(notes, cage, action.num, r, c);
+      }
       const errors = computeErrors(values, puzzle.cages);
       const completed = isComplete(values, puzzle.solution);
       return {
         ...state,
         values,
+        notes,
         errors,
         completed,
         mistakes,
@@ -205,13 +465,16 @@ function reducer(
         state.mistakeUndoStack[state.mistakeUndoStack.length - 1];
       const mistakeUndoStack = state.mistakeUndoStack.slice(0, -1);
       const values = cloneValues(snap.values);
-      const mistakes = Math.max(0, state.mistakes - 1);
+      const notes = cloneNotes(snap.notes);
+      // Keep mistake tally — undo clears the wrong digit but does not erase a counted mistake.
+      const mistakes = state.mistakes;
       const failed = mistakes >= MAX_MISTAKES;
       const errors = computeErrors(values, puzzle.cages);
       const completed = isComplete(values, puzzle.solution);
       return {
         ...state,
         values,
+        notes,
         mistakes,
         failed,
         mistakeUndoStack,
@@ -224,8 +487,18 @@ function reducer(
       if (!state.selected || state.completed || state.failed) return state;
       const [r, c] = state.selected;
       const values = state.values.map((row) => [...row]);
-      values[r][c] = 0;
-      return { ...state, values, errors: computeErrors(values, puzzle.cages) };
+      const notes = cloneNotes(state.notes);
+      if (values[r][c] !== 0) {
+        values[r][c] = 0;
+      } else {
+        notes[r][c] = 0;
+      }
+      return {
+        ...state,
+        values,
+        notes,
+        errors: computeErrors(values, puzzle.cages),
+      };
     }
 
     case "TICK":
@@ -270,6 +543,7 @@ export default function KillerSudokuCard({
   puzzle,
   onNewPuzzle,
   metricsEnabled = true,
+  puzzleSignature,
 }: KillerSudokuCardProps) {
   const puzzleRef = useRef(puzzle);
   puzzleRef.current = puzzle;
@@ -282,6 +556,8 @@ export default function KillerSudokuCard({
   );
   const dispatch = dispatchRaw;
   const [lineFlashUnits, setLineFlashUnits] = useState<string[]>([]);
+  const [notesMode, setNotesMode] = useState(false);
+  const [selectionColor, setSelectionColor] = useGridSelectionColor();
   const lineCompleteRef = useRef<Set<string>>(new Set());
   const lastKillerPuzzleKeyRef = useRef<string>("");
 
@@ -343,7 +619,7 @@ export default function KillerSudokuCard({
         gameType: "killer_sudoku",
         difficulty: p.difficulty,
         durationSeconds: state.elapsedSecs,
-        metadata: { difficulty: p.difficulty },
+        metadata: { difficulty: p.difficulty, puzzleSignature },
       }),
     });
   }, [metricsEnabled, state.completed, state.failed, state.elapsedSecs]);
@@ -370,17 +646,35 @@ export default function KillerSudokuCard({
 
       if (state.failed) return;
       if (!state.selected) return;
+      if (
+        e.key === "ArrowUp" ||
+        e.key === "ArrowDown" ||
+        e.key === "ArrowLeft" ||
+        e.key === "ArrowRight"
+      ) {
+        e.preventDefault();
+      }
       const num = parseInt(e.key, 10);
-      if (num >= 1 && num <= 9) dispatch({ type: "INPUT", num });
-      else if (e.key === "Backspace" || e.key === "Delete" || e.key === "0") dispatch({ type: "ERASE" });
-      else if (e.key === "ArrowUp" && state.selected[0] > 0) dispatch({ type: "SELECT", row: state.selected[0] - 1, col: state.selected[1] });
+      if (num >= 1 && num <= 9) {
+        e.preventDefault();
+        dispatch({ type: "INPUT", num, asNote: e.shiftKey || notesMode });
+      } else if (e.key === "Backspace" || e.key === "Delete" || e.key === "0") {
+        e.preventDefault();
+        dispatch({ type: "ERASE" });
+      } else if (e.key === "ArrowUp" && state.selected[0] > 0) dispatch({ type: "SELECT", row: state.selected[0] - 1, col: state.selected[1] });
       else if (e.key === "ArrowDown" && state.selected[0] < 8) dispatch({ type: "SELECT", row: state.selected[0] + 1, col: state.selected[1] });
       else if (e.key === "ArrowLeft" && state.selected[1] > 0) dispatch({ type: "SELECT", row: state.selected[0], col: state.selected[1] - 1 });
       else if (e.key === "ArrowRight" && state.selected[1] < 8) dispatch({ type: "SELECT", row: state.selected[0], col: state.selected[1] + 1 });
+      else if (e.key === "n" || e.key === "N") {
+        if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+          e.preventDefault();
+          setNotesMode((v) => !v);
+        }
+      }
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [state.selected, state.failed, state.mistakeUndoStack.length, dispatch]);
+  }, [state.selected, state.failed, state.mistakeUndoStack.length, dispatch, notesMode]);
 
   // Reset only when the puzzle solution identity changes (stable vs object reference).
   useEffect(() => {
@@ -515,6 +809,39 @@ export default function KillerSudokuCard({
         <GameHowToPlayLink href={GAME_HOW_TO_URL.killer_sudoku} />
       </div>
 
+      <div
+        style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          gap: "0.45rem",
+          marginBottom: "0.25rem",
+          fontFamily: "'IM Fell English', Georgia, serif",
+          fontStyle: "italic",
+          fontSize: "0.72rem",
+          color: "#666",
+        }}
+      >
+        <span>Selected cell</span>
+        <input
+          type="color"
+          value={selectionColor}
+          onChange={(e) => setSelectionColor(e.target.value)}
+          title="Background color for the selected cell"
+          aria-label="Selected cell color"
+          style={{
+            width: "2rem",
+            height: "1.35rem",
+            padding: 0,
+            border: "1px solid #ccc",
+            borderRadius: "3px",
+            cursor: "pointer",
+            background: "#faf8f3",
+          }}
+        />
+      </div>
+
       {/* Grid */}
       <div style={{
         display: "grid",
@@ -538,21 +865,33 @@ export default function KillerSudokuCard({
 
             let bg = "#faf8f3";
             if (celebrating) bg = "#f0e6c8";
-            else if (isSelected) bg = "#d4c27a";
+            else if (isSelected) bg = selectionColor;
             else if (isPeer) bg = "#ede9e1";
             if (wrongSolution && !celebrating) bg = "#fce8e6";
 
-            // Box borders
+            // Box borders (outer grid — solid)
             const boxTop = r % 3 === 0 && r > 0;
             const boxLeft = c % 3 === 0 && c > 0;
             const boxRight = (c + 1) % 3 === 0 && c < 8;
             const boxBottom = (r + 1) % 3 === 0 && r < 8;
+            // Full cage outline: every cage edge, including where it meets a thick box line or board edge.
+            const innerCageTop = borders.top;
+            const innerCageBottom = borders.bottom;
+            const innerCageLeft = borders.left;
+            const innerCageRight = borders.right;
 
             return (
               <div
                 key={key}
                 className={celebrating ? "sudoku-unit-celebrate" : undefined}
                 onClick={() => dispatch({ type: "SELECT", row: r, col: c })}
+                aria-label={
+                  val !== 0
+                    ? `Cell ${r + 1},${c + 1}, value ${val}`
+                    : state.notes[r][c]
+                      ? `Cell ${r + 1},${c + 1}, notes`
+                      : `Cell ${r + 1},${c + 1}, empty`
+                }
                 style={{
                   width: CELL,
                   height: CELL,
@@ -568,46 +907,46 @@ export default function KillerSudokuCard({
                   color: badDigit ? "#c0392b" : "#2c5282",
                   transition: "background 0.08s ease",
                   transformOrigin: "center center",
-                  // Explicitly render all edges so cage outlines stay visible.
-                  borderTop: boxTop
-                    ? "2px solid #1a1a1a"
-                    : borders.top
-                    ? "1.5px dashed #888"
-                    : "0.5px solid #ddd",
-                  borderLeft: boxLeft
-                    ? "2px solid #1a1a1a"
-                    : borders.left
-                    ? "1.5px dashed #888"
-                    : "0.5px solid #ddd",
-                  borderRight: boxRight
-                    ? "2px solid #1a1a1a"
-                    : borders.right
-                    ? "1.5px dashed #888"
-                    : "0.5px solid #ddd",
-                  borderBottom: boxBottom
-                    ? "2px solid #1a1a1a"
-                    : borders.bottom
-                    ? "1.5px dashed #888"
-                    : "0.5px solid #ddd",
+                  borderTop: boxTop ? "2px solid #1a1a1a" : "0.5px solid #ddd",
+                  borderLeft: boxLeft ? "2px solid #1a1a1a" : "0.5px solid #ddd",
+                  borderRight: boxRight ? "2px solid #1a1a1a" : "0.5px solid #ddd",
+                  borderBottom: boxBottom ? "2px solid #1a1a1a" : "0.5px solid #ddd",
                 }}
               >
+                <KillerCageInsetOverlay
+                  showTop={innerCageTop}
+                  showBottom={innerCageBottom}
+                  showLeft={innerCageLeft}
+                  showRight={innerCageRight}
+                  sumLabelCorner={cageSum !== undefined}
+                />
                 {/* Cage sum label — top-left corner of each cage */}
                 {cageSum !== undefined && (
-                  <span style={{
-                    position: "absolute",
-                    top: 2,
-                    left: 3,
-                    fontSize: "0.55rem",
-                    fontWeight: 700,
-                    color: "#1a472a",
-                    fontFamily: "Georgia, serif",
-                    lineHeight: 1,
-                    pointerEvents: "none",
-                  }}>
+                  <span
+                    style={{
+                      position: "absolute",
+                      top: 3,
+                      left: 4,
+                      zIndex: 2,
+                      fontSize: "0.55rem",
+                      fontWeight: 700,
+                      color: "#1a472a",
+                      fontFamily: "Georgia, serif",
+                      lineHeight: 1,
+                      pointerEvents: "none",
+                    }}
+                  >
                     {cageSum}
                   </span>
                 )}
-                {val !== 0 ? val : ""}
+                {val !== 0 ? (
+                  val
+                ) : (
+                  <KillerCellNotes
+                    mask={state.notes[r][c]}
+                    hasCageSumLabel={cageSum !== undefined}
+                  />
+                )}
               </div>
             );
           })
@@ -615,22 +954,72 @@ export default function KillerSudokuCard({
       </div>
 
       {/* Number pad */}
-      <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", justifyContent: "center", width: "min(380px, 100%)" }}>
-        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
-          <button
-            key={num}
-            onClick={() => dispatch({ type: "INPUT", num })}
-            style={{
-              width: "2.6rem", height: "2.6rem",
-              border: "1px solid #1a1a1a",
-              background: "#faf8f3", color: "#1a1a1a",
-              fontFamily: "'Playfair Display', Georgia, serif",
-              fontSize: "1rem", fontWeight: 700, cursor: "pointer",
-            }}
-          >
-            {num}
-          </button>
-        ))}
+      <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", justifyContent: "center", alignItems: "center", width: "min(380px, 100%)" }}>
+        <button
+          type="button"
+          onClick={() => setNotesMode((v) => !v)}
+          aria-pressed={notesMode}
+          style={{
+            width: "auto",
+            minWidth: "4.2rem",
+            height: "2.6rem",
+            padding: "0 0.55rem",
+            border: notesMode ? "2px solid #1a5f3c" : "1px solid #1a1a1a",
+            background: notesMode ? "#e8f2ec" : "#faf8f3",
+            color: notesMode ? "#1a5f3c" : "#1a1a1a",
+            fontFamily: "'Playfair Display', Georgia, serif",
+            fontSize: "0.68rem",
+            fontWeight: 700,
+            letterSpacing: "0.04em",
+            textTransform: "uppercase",
+            cursor: "pointer",
+            borderRadius: "2px",
+          }}
+        >
+          Notes
+        </button>
+        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => {
+          const noteAddBlocked =
+            notesMode &&
+            state.selected !== null &&
+            isKillerNoteAddBlocked(
+              state.values,
+              state.notes,
+              cageMap,
+              state.selected[0],
+              state.selected[1],
+              num
+            );
+          return (
+            <button
+              key={num}
+              type="button"
+              disabled={Boolean(noteAddBlocked)}
+              onClick={() => dispatch({ type: "INPUT", num, asNote: notesMode })}
+              aria-label={
+                notesMode
+                  ? noteAddBlocked
+                    ? `${num} already in row, column, box, or cage`
+                    : `Toggle note ${num}`
+                  : `Enter ${num}`
+              }
+              style={{
+                width: "2.6rem",
+                height: "2.6rem",
+                border: "1px solid #1a1a1a",
+                background: "#faf8f3",
+                color: "#1a1a1a",
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "1rem",
+                fontWeight: 700,
+                cursor: noteAddBlocked ? "not-allowed" : "pointer",
+                opacity: noteAddBlocked ? 0.45 : 1,
+              }}
+            >
+              {num}
+            </button>
+          );
+        })}
         <button
           type="button"
           onClick={() => dispatch({ type: "ERASE" })}
@@ -673,9 +1062,14 @@ export default function KillerSudokuCard({
       <p style={{ fontFamily: "'IM Fell English', Georgia, serif", fontStyle: "italic", fontSize: "0.72rem", color: "#bbb", margin: 0, textAlign: "center", maxWidth: 380, lineHeight: 1.45 }}>
         No digits are given — use the cage sums as your only clues.
         <span style={{ display: "block", marginTop: "0.35rem" }}>
+          <strong style={{ fontWeight: 600, color: "#888" }}>Notes</strong> or{" "}
+          <strong style={{ fontWeight: 600, color: "#888" }}>Shift+digit</strong> for pencil marks;{" "}
+          <strong style={{ fontWeight: 600, color: "#888" }}>N</strong> toggles notes mode.
+        </span>
+        <span style={{ display: "block", marginTop: "0.35rem" }}>
           Wrong digits in <strong style={{ fontWeight: 600, color: "#c0392b" }}>red</strong>;{" "}
           <strong style={{ fontWeight: 600, color: "#888" }}>Undo</strong> or{" "}
-          <strong style={{ fontWeight: 600, color: "#888" }}>Ctrl+Z</strong> after a mistake.
+          <strong style={{ fontWeight: 600, color: "#888" }}>Ctrl+Z</strong> clears the last wrong digit — mistakes stay counted.
         </span>
       </p>
     </div>

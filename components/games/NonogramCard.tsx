@@ -32,6 +32,7 @@ interface NonogramCardProps {
   puzzle: NonogramPuzzle;
   onNewPuzzle?: (difficulty: Difficulty) => void;
   metricsEnabled?: boolean;
+  puzzleSignature?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -179,6 +180,7 @@ export default function NonogramCard({
   puzzle,
   onNewPuzzle,
   metricsEnabled = true,
+  puzzleSignature,
 }: NonogramCardProps) {
   const puzzleRef = useRef(puzzle);
   puzzleRef.current = puzzle;
@@ -208,7 +210,7 @@ export default function NonogramCard({
         gameType: "nonogram",
         difficulty: p.difficulty,
         durationSeconds: state.elapsedSecs,
-        metadata: { rows: p.rows, cols: p.cols },
+        metadata: { rows: p.rows, cols: p.cols, puzzleSignature },
       }),
     });
   }, [metricsEnabled, state.completed, state.elapsedSecs]);

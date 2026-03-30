@@ -1,15 +1,20 @@
 /**
- * GET /api/game/crossword?category=...
+ * GET /api/game/crossword
  *
  * Serves a crossword puzzle. Tries the DB pool first, then builds a grid locally
- * and attaches clues from Claude when the API is available. If the pool is empty
- * and Claude errors (rate limit, bad key, model, network), we still return 200
- * with mechanical placeholder clues so the game always loads.
+ * and attaches clues via Wiktionary/Datamuse heuristics by default, or Claude when
+ * CROSSWORD_CLUES_SOURCE=anthropic.
+ *
+ * Never returns a puzzle while any clue is still the mechanical "Definition needed"
+ * placeholder — pool rows missing real clues are skipped; live generation retries
+ * Claude once (anthropic mode), then errors if clues are still incomplete.
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { getCrosswordFromPool } from "@/lib/db/games";
+import { getGameFromPool, markGameUsed } from "@/lib/db/games";
+import { getPromptThemeForGameType } from "@/lib/db/gameFlavorDefaults";
 import {
+  allCrosswordSlotsHaveRealClues,
   buildCluePromptBlock,
   canonicalizeClueKeys,
   clueForSlot,
@@ -18,6 +23,15 @@ import {
   fillCrosswordGrid,
   type CrosswordSlot,
 } from "@/lib/games/crosswordGridFiller";
+import type {
+  CrosswordPuzzle,
+  CrosswordSlot as TypedCrosswordSlot,
+} from "@/lib/games/types";
+import { makeCrosswordSignature } from "@/lib/games/puzzleSignature";
+import {
+  crosswordCluesPreferAnthropic,
+  fetchCrosswordCluesHeuristic,
+} from "@/lib/games/crosswordHeuristicClues";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 
@@ -25,11 +39,6 @@ type SlotWithClue = CrosswordSlot & { clue: string };
 
 function mechanicalClue(slot: CrosswordSlot): string {
   return `Definition needed (${slot.length} letters)`;
-}
-
-function clueLeaksAnswer(slot: CrosswordSlot, clue: string): boolean {
-  const answer = slot.answer.toLowerCase();
-  return clue.toLowerCase().includes(answer);
 }
 
 function slotsWithClues(
@@ -42,26 +51,40 @@ function slotsWithClues(
   }));
 }
 
-/** Ensure every slot has a clue string (older pool rows may omit it). */
-function normalizePoolPayload(puzzle: {
+const MAX_POOL_ATTEMPTS = 10;
+
+/** Validated pool payload — real clues only; signature matches grid+answers. */
+function buildPoolResponse(puzzle: {
   grid: string[][];
-  slots: (CrosswordSlot & { clue?: string })[];
+  slots: TypedCrosswordSlot[];
   category: string;
   difficulty: "medium";
 }): Record<string, unknown> {
-  return {
+  const trimmedSlots = puzzle.slots.map((s) => ({
+    ...s,
+    clue: s.clue.trim(),
+  }));
+  const normalizedPuzzle: CrosswordPuzzle = {
     ...puzzle,
-    slots: puzzle.slots.map((s) => ({
-      ...s,
-      clue:
-        typeof s.clue === "string" &&
-        s.clue.trim() &&
-        !clueLeaksAnswer(s, s.clue)
-          ? s.clue
-          : mechanicalClue(s),
-    })),
+    slots: trimmedSlots,
+    uniquenessSignature: makeCrosswordSignature({
+      ...puzzle,
+      slots: trimmedSlots,
+    }),
+  };
+  return {
+    ...normalizedPuzzle,
     fromPool: true,
   };
+}
+
+function parseExcludeSignatures(raw: string | null): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 200);
 }
 
 async function fetchClueMapFromClaude(
@@ -138,28 +161,78 @@ async function fetchClueMapFromClaude(
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
-  const category = searchParams.get("category") ?? undefined;
-  const categoryLabel = category ?? "General";
+  const themeForGeneration = await getPromptThemeForGameType("crossword");
+  const categoryLabel = themeForGeneration;
+  const excludeSignatures = parseExcludeSignatures(
+    searchParams.get("excludeSignatures")
+  );
+
+  const skipSignatures = new Set(excludeSignatures);
 
   try {
-    const poolPuzzle = await getCrosswordFromPool(category);
-    if (
-      poolPuzzle &&
-      Array.isArray(poolPuzzle.grid) &&
-      Array.isArray(poolPuzzle.slots) &&
-      poolPuzzle.slots.length > 0
-    ) {
-      return NextResponse.json(normalizePoolPayload(poolPuzzle));
+    for (let attempt = 0; attempt < MAX_POOL_ATTEMPTS; attempt++) {
+      const row = await getGameFromPool("crossword", undefined, {
+        randomTieBreak: true,
+        excludeSignatures: Array.from(skipSignatures),
+        allowExcludedFallback: false,
+      });
+      if (!row) break;
+
+      const poolPuzzle = row.payload as {
+        grid: string[][];
+        slots: (CrosswordSlot & { clue?: string })[];
+        category: string;
+        difficulty: "medium";
+      };
+
+      if (
+        !Array.isArray(poolPuzzle.grid) ||
+        !Array.isArray(poolPuzzle.slots) ||
+        poolPuzzle.slots.length === 0
+      ) {
+        void markGameUsed(row.id);
+        continue;
+      }
+
+      const slotsWithStrings = poolPuzzle.slots.map((s) => ({
+        ...s,
+        clue: typeof s.clue === "string" ? s.clue : "",
+      })) as TypedCrosswordSlot[];
+
+      if (!allCrosswordSlotsHaveRealClues(slotsWithStrings)) {
+        const sig = makeCrosswordSignature({
+          grid: poolPuzzle.grid,
+          slots: slotsWithStrings,
+          category: poolPuzzle.category,
+          difficulty: "medium",
+        });
+        console.warn(
+          "[/api/game/crossword] Skipping pool row with incomplete/placeholder clues:",
+          sig
+        );
+        skipSignatures.add(sig);
+        continue;
+      }
+
+      void markGameUsed(row.id);
+      return NextResponse.json(
+        buildPoolResponse({
+          grid: poolPuzzle.grid,
+          slots: slotsWithStrings,
+          category: poolPuzzle.category,
+          difficulty: "medium",
+        })
+      );
     }
   } catch (e) {
     console.warn("[/api/game/crossword] Pool fetch failed:", e);
   }
 
   console.log(
-    `[/api/game/crossword] Pool empty — live grid for "${category ?? "general"}"`
+    `[/api/game/crossword] Pool empty or no valid clues — live grid for "${themeForGeneration}"`
   );
 
-  const filled = fillCrosswordGrid(category);
+  const filled = fillCrosswordGrid(themeForGeneration);
   if (!filled) {
     return NextResponse.json(
       { error: "Grid generation failed" },
@@ -171,25 +244,79 @@ export async function GET(request: NextRequest) {
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
 
   let clueMap: Record<string, string> = {};
-  if (apiKey) {
+  let merged: SlotWithClue[];
+
+  if (crosswordCluesPreferAnthropic()) {
+    if (!apiKey) {
+      return NextResponse.json(
+        {
+          error:
+            "CROSSWORD_CLUES_SOURCE=anthropic requires ANTHROPIC_API_KEY to be set.",
+        },
+        { status: 503 }
+      );
+    }
     try {
-      clueMap = await fetchClueMapFromClaude(apiKey, category, slots);
+      clueMap = await fetchClueMapFromClaude(apiKey, themeForGeneration, slots);
     } catch (e) {
       console.warn("[/api/game/crossword] Claude request error:", e);
     }
+    merged = slotsWithClues(slots, clueMap);
+    if (!allCrosswordSlotsHaveRealClues(merged)) {
+      console.warn("[/api/game/crossword] Retrying clue generation once…");
+      try {
+        clueMap = await fetchClueMapFromClaude(apiKey, themeForGeneration, slots);
+        merged = slotsWithClues(slots, clueMap);
+      } catch (e) {
+        console.warn("[/api/game/crossword] Claude retry error:", e);
+      }
+    }
   } else {
-    console.warn(
-      "[/api/game/crossword] ANTHROPIC_API_KEY not set — using mechanical clues"
+    try {
+      clueMap = await fetchCrosswordCluesHeuristic(slots, categoryLabel);
+    } catch (e) {
+      console.warn("[/api/game/crossword] Heuristic clues failed:", e);
+      return NextResponse.json(
+        {
+          error:
+            "Crossword clues could not be loaded — please try again in a moment.",
+        },
+        { status: 503 }
+      );
+    }
+    merged = slotsWithClues(slots, clueMap);
+  }
+
+  if (!allCrosswordSlotsHaveRealClues(merged)) {
+    return NextResponse.json(
+      {
+        error:
+          "Crossword clues are not ready yet — please try again in a moment.",
+      },
+      { status: 503 }
     );
   }
 
-  const hadAiClues = Object.keys(clueMap).length > 0;
+  const hadAiClues =
+    crosswordCluesPreferAnthropic() && Object.keys(clueMap).length > 0;
 
-  return NextResponse.json({
+  const puzzle: CrosswordPuzzle = {
     grid,
-    slots: slotsWithClues(slots, clueMap),
+    slots: merged,
     category: categoryLabel,
     difficulty: "medium" as const,
+    uniquenessSignature: "",
+  };
+  puzzle.uniquenessSignature = makeCrosswordSignature(puzzle);
+  if (excludeSignatures.includes(puzzle.uniquenessSignature)) {
+    return NextResponse.json(
+      { error: "No unseen Crossword puzzle available right now." },
+      { status: 409 }
+    );
+  }
+
+  return NextResponse.json({
+    ...puzzle,
     fromPool: false,
     cluesFromAi: hadAiClues,
   });

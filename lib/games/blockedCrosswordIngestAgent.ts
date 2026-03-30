@@ -3,12 +3,17 @@
  * Hard cap on total crossword rows for the demo pool (Supabase).
  */
 
-import { clueForSlot } from "./crosswordClueMerge";
+import { allCrosswordSlotsHaveRealClues, clueForSlot } from "./crosswordClueMerge";
 import { fetchCrosswordCluesFromAnthropic } from "./crosswordAnthropicClues";
+import {
+  crosswordCluesPreferAnthropic,
+  fetchCrosswordCluesHeuristic,
+} from "./crosswordHeuristicClues";
 import type { CrosswordPuzzle } from "./crosswordIngestAgent";
 import { getCrosswordPoolSize } from "./crosswordIngestAgent";
 import { tryGenerateBlockedCrossword } from "./blockedCrosswordGenerator";
 import { db } from "../db/client";
+import { getDefaultFlavorForGameType } from "../db/gameFlavorDefaults";
 import type { Category } from "../constants";
 import { CATEGORIES } from "../constants";
 
@@ -25,25 +30,27 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function storeBlockedPuzzle(puzzle: CrosswordPuzzle): Promise<void> {
+  const flavor = await getDefaultFlavorForGameType("crossword");
   const { error } = await db.from("games").insert({
     type: "crossword",
     difficulty: puzzle.difficulty,
-    category: puzzle.category,
+    flavor,
+    category: null,
     payload: puzzle as unknown as Record<string, unknown>,
     used_count: 0,
   });
   if (error) throw new Error(`storeBlockedPuzzle: ${error.message}`);
 }
 
-async function generateOneBlockedCrossword(
-  apiKey: string,
-  category: string
-): Promise<CrosswordPuzzle | null> {
+async function generateOneBlockedCrossword(category: string): Promise<CrosswordPuzzle | null> {
   const filled = tryGenerateBlockedCrossword();
   if (!filled) return null;
 
   const { grid, slots } = filled;
-  const clues = await fetchCrosswordCluesFromAnthropic(apiKey, slots, category);
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+  const clues = crosswordCluesPreferAnthropic() && apiKey
+    ? await fetchCrosswordCluesFromAnthropic(apiKey, slots, category)
+    : await fetchCrosswordCluesHeuristic(slots, category);
   const slotsWithClues = slots.map((slot) => ({
     ...slot,
     clue: clueForSlot(
@@ -52,6 +59,13 @@ async function generateOneBlockedCrossword(
       (s) => `Definition needed (${s.length} letters)`
     ),
   }));
+
+  if (!allCrosswordSlotsHaveRealClues(slotsWithClues)) {
+    console.warn(
+      `[BlockedCrosswordIngest] Incomplete or placeholder clues for "${category}" — not storing`
+    );
+    return null;
+  }
 
   return {
     grid,
@@ -68,8 +82,11 @@ async function generateOneBlockedCrossword(
 export async function runBlockedCrosswordIngest(
   targetCategory?: Category
 ): Promise<number> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
+  if (crosswordCluesPreferAnthropic() && !process.env.ANTHROPIC_API_KEY?.trim()) {
+    throw new Error(
+      "CROSSWORD_CLUES_SOURCE=anthropic requires ANTHROPIC_API_KEY"
+    );
+  }
 
   let count = await getCrosswordPoolSize();
   if (count >= MAX_CROSSWORDS_IN_POOL) {
@@ -89,7 +106,7 @@ export async function runBlockedCrosswordIngest(
 
     const category = categories[b % categories.length]!;
     try {
-      const puzzle = await generateOneBlockedCrossword(apiKey, category);
+      const puzzle = await generateOneBlockedCrossword(category);
       if (!puzzle) {
         console.warn(
           `[BlockedCrosswordIngest] Fill failed for "${category}" (attempt ${b + 1})`

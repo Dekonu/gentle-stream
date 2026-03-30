@@ -22,7 +22,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         {/* Preconnect for Google Fonts performance */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -32,7 +32,8 @@ export default function RootLayout({
           crossOrigin="anonymous"
         />
       </head>
-      <body>{children}</body>
+      {/* suppressHydrationWarning: browser extensions often inject attrs on <body> (e.g. cz-shortcut-listen) */}
+      <body suppressHydrationWarning>{children}</body>
     </html>
   );
 }

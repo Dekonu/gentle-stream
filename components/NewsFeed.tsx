@@ -32,6 +32,14 @@ function cleanArticle(article: Article): Article {
   };
 }
 
+function articleUniqKey(article: Article): string {
+  if ("id" in article && typeof article.id === "string" && article.id.length > 0) {
+    return `id:${article.id}`;
+  }
+  // Fallback for raw shapes: deterministic enough to avoid visible duplicates.
+  return `raw:${article.category}|${article.headline}|${article.byline}|${article.location}`;
+}
+
 /**
  * Decide whether a given section index should be a game slot.
  * Deterministic: same sectionIndex always produces the same result for a given ratio.
@@ -49,9 +57,10 @@ export interface NewsFeedProps {
   /** Stable id from Supabase `auth.users` — used for ranking, seen state, future metrics. */
   userId: string;
   userEmail?: string | null;
+  isAdmin?: boolean;
 }
 
-export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
+export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFeedProps) {
   const [sections, setSections] = useState<FeedSection[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,14 +74,20 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
   const sectionCountRef = useRef(0);
   /** Counts game sections only — drives fair rotation in feedGamePickForOrdinal. */
   const gameSlotOrdinalRef = useRef(0);
+  /** NYT-style: at most one Connections slot per session; hide after completion today. */
+  const connectionsCompletedTodayRef = useRef(false);
+  const connectionsShownInSessionRef = useRef(false);
   const activeCategoryRef = useRef<Category | null>(null);
   const userIdRef = useRef<string>("anonymous");
   /** Bumps on each [userId] bootstrap so Strict Mode / fast remounts only run one initial loadMore. */
   const feedBootstrapGenRef = useRef(0);
   const gameRatioRef = useRef(DEFAULT_GAME_RATIO);
   const feedReadyRef = useRef(false);
-  // Track the last article category so game slots can use a matching word bank
   const lastArticleCategoryRef = useRef<string | undefined>(undefined);
+  // Hard de-dup across all rendered sections in this session/category view.
+  const renderedArticleKeysRef = useRef<Set<string>>(new Set());
+  // Plain UUID IDs only — sent to /api/feed excludeIds for DB-level exclusion.
+  const renderedDbArticleIdsRef = useRef<Set<string>>(new Set());
 
   // Sentinel ref — plain IntersectionObserver (no library dependency on stale state)
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -95,16 +110,31 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
 
     // ── Decide: game slot or article section? ────────────────────────────────
     if (shouldBeGame(currentIndex, gameRatioRef.current)) {
-      const { gameType, difficulty } = feedGamePickForOrdinal(
-        gameSlotOrdinalRef.current++
-      );
+      const offerDailyConnections =
+        !connectionsCompletedTodayRef.current &&
+        !connectionsShownInSessionRef.current;
+
+      let gameType: GameFeedSection["gameType"];
+      let difficulty: GameFeedSection["difficulty"];
+      let connectionsDaily = false;
+
+      if (offerDailyConnections) {
+        connectionsShownInSessionRef.current = true;
+        gameType = "connections";
+        difficulty = "medium";
+        connectionsDaily = true;
+      } else {
+        const pick = feedGamePickForOrdinal(gameSlotOrdinalRef.current++);
+        gameType = pick.gameType;
+        difficulty = pick.difficulty;
+      }
+
       const gameSection: GameFeedSection = {
         sectionType: "game",
         gameType,
         difficulty,
         index: currentIndex,
-        // Pass the last seen article category for word bank theming
-        category: lastArticleCategoryRef.current,
+        ...(connectionsDaily ? { connectionsDaily: true } : {}),
       };
       setSections((prev) => [...prev, gameSection]);
       sectionCountRef.current += 1;
@@ -119,6 +149,8 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
       params.set("userId", userIdRef.current);
       params.set("sectionIndex", String(currentIndex));
       if (category) params.set("category", category);
+      const excludeIds = Array.from(renderedDbArticleIdsRef.current).slice(-400);
+      if (excludeIds.length > 0) params.set("excludeIds", excludeIds.join(","));
 
       const controller = new AbortController();
       const timeoutId = window.setTimeout(
@@ -147,8 +179,13 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
       setLiveGenerating(!data.fromCache);
 
       const cleaned = data.articles.map(cleanArticle);
+      const uniqueForView = cleaned.filter((article) => {
+        const key = articleUniqKey(article);
+        if (renderedArticleKeysRef.current.has(key)) return false;
+        return true;
+      });
 
-      if (cleaned.length === 0) {
+      if (uniqueForView.length === 0) {
         setError(
           currentIndex > 0
             ? "No more stories right now."
@@ -162,17 +199,24 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
 
       const section: ArticleFeedSection = {
         sectionType: "articles",
-        articles: cleaned,
+        articles: uniqueForView,
         index: currentIndex,
       };
 
       setSections((prev) => [...prev, section]);
+      for (const article of uniqueForView) {
+        const key = articleUniqKey(article);
+        renderedArticleKeysRef.current.add(key);
+        if ("id" in article && typeof article.id === "string" && article.id.length > 0) {
+          renderedDbArticleIdsRef.current.add(article.id);
+        }
+      }
       sectionCountRef.current += 1;
 
       // IntersectionObserver only fires on visibility *changes*. If the sentinel
       // stayed in the viewport while we loaded, it won't fire again — queue another
       // fetch when there's still room below (infinite scroll).
-      if (cleaned.length > 0) {
+      if (uniqueForView.length > 0) {
         requestAnimationFrame(() => {
           const el = sentinelRef.current;
           if (!el || loadingRef.current) return;
@@ -212,7 +256,10 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
     loadingRef.current = false;
     sectionCountRef.current = 0;
     gameSlotOrdinalRef.current = 0;
+    connectionsShownInSessionRef.current = false;
     lastArticleCategoryRef.current = undefined;
+    renderedArticleKeysRef.current = new Set();
+    renderedDbArticleIdsRef.current = new Set();
     gameRatioRef.current = DEFAULT_GAME_RATIO;
 
     const gen = ++feedBootstrapGenRef.current;
@@ -257,6 +304,33 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
         }
       }
 
+      let completedConnectionsToday = false;
+      try {
+        const cdRes = await fetch("/api/user/connections-daily", {
+          credentials: "include",
+        });
+        if (cdRes.ok) {
+          const cd = (await cdRes.json()) as { completedToday?: boolean };
+          if (cd.completedToday === true) completedConnectionsToday = true;
+        }
+      } catch {
+        /* offline */
+      }
+      if (!completedConnectionsToday) {
+        try {
+          const dayKey = new Date().toISOString().slice(0, 10);
+          if (
+            localStorage.getItem(`gentle_stream_connections_done_${dayKey}`) ===
+            "1"
+          ) {
+            completedConnectionsToday = true;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      connectionsCompletedTodayRef.current = completedConnectionsToday;
+
       if (cancelled || gen !== feedBootstrapGenRef.current) return;
 
       feedReadyRef.current = true;
@@ -268,6 +342,21 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
       cancelled = true;
     };
   }, [userId, loadMore]);
+
+  useEffect(() => {
+    function onConnectionsCompleted() {
+      connectionsCompletedTodayRef.current = true;
+    }
+    window.addEventListener(
+      "gentle-stream-connections-completed",
+      onConnectionsCompleted
+    );
+    return () =>
+      window.removeEventListener(
+        "gentle-stream-connections-completed",
+        onConnectionsCompleted
+      );
+  }, []);
 
   // Keep activeCategoryRef in sync
   useEffect(() => {
@@ -295,11 +384,22 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
     const next = activeCategory === cat ? null : cat;
     setActiveCategory(next);
     activeCategoryRef.current = next;
-    setSections([]);
+    setSections((prev) => {
+      const hadConnections = prev.some(
+        (s) =>
+          s.sectionType === "game" &&
+          s.gameType === "connections" &&
+          s.connectionsDaily === true
+      );
+      if (!hadConnections) connectionsShownInSessionRef.current = false;
+      return [];
+    });
     sectionCountRef.current = 0;
     loadingRef.current = false;
     setLoading(false);
     lastArticleCategoryRef.current = undefined;
+    renderedArticleKeysRef.current = new Set();
+    renderedDbArticleIdsRef.current = new Set();
     loadMore(next);
   };
 
@@ -310,8 +410,11 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
       setSections([]);
       sectionCountRef.current = 0;
       gameSlotOrdinalRef.current = 0;
+      connectionsShownInSessionRef.current = false;
       loadingRef.current = false;
       setError(null);
+      renderedArticleKeysRef.current = new Set();
+      renderedDbArticleIdsRef.current = new Set();
       void loadMore();
     },
     [loadMore]
@@ -325,6 +428,7 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
             <ProfileMenu
               userEmail={userEmail}
               onGameRatioSaved={handleGameRatioSaved}
+              isAdmin={isAdmin}
             />
           ) : undefined
         }
@@ -381,7 +485,7 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
                 key={`game-${section.index}`}
                 gameType={section.gameType}
                 difficulty={section.difficulty}
-                category={section.category}
+                connectionsDaily={section.connectionsDaily === true}
               />
             );
           }

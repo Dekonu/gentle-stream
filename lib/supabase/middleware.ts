@@ -115,7 +115,9 @@ export async function updateSession(request: NextRequest) {
     if (request.cookies.get(SESSION_START_COOKIE)) {
       supabaseResponse.cookies.delete(SESSION_START_COOKIE);
     }
-    if (pathname.startsWith("/api")) {
+    // Puzzle generators are public — no user data; route handlers must still run (not 401).
+    const isPublicGameApi = pathname.startsWith("/api/game");
+    if (pathname.startsWith("/api") && !isPublicGameApi) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     if (!isPublicPath(pathname)) {

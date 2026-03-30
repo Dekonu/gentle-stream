@@ -40,6 +40,7 @@ interface CrosswordCardProps {
   puzzle: CrosswordPuzzle;
   onNewPuzzle?: (difficulty: Difficulty) => void;
   metricsEnabled?: boolean;
+  puzzleSignature?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -94,6 +95,26 @@ function nextEmpty(
     const r = slot.row + dr * i;
     const c = slot.col + dc * i;
     if (!letters[r][c]) return [r, c];
+  }
+  return null;
+}
+
+/** Next white cell in a straight line (skips black `#` cells). */
+function nextPlayableCell(
+  grid: string[][],
+  row: number,
+  col: number,
+  dr: number,
+  dc: number
+): { row: number; col: number } | null {
+  const rows = grid.length;
+  const cols = grid[0]?.length ?? 0;
+  let r = row + dr;
+  let c = col + dc;
+  while (r >= 0 && r < rows && c >= 0 && c < cols) {
+    if (grid[r][c] !== "#") return { row: r, col: c };
+    r += dr;
+    c += dc;
   }
   return null;
 }
@@ -439,6 +460,7 @@ export default function CrosswordCard({
   puzzle,
   onNewPuzzle,
   metricsEnabled = true,
+  puzzleSignature,
 }: CrosswordCardProps) {
   const puzzleRef = useRef(puzzle);
   puzzleRef.current = puzzle;
@@ -475,6 +497,7 @@ export default function CrosswordCard({
           variant: p.variant ?? "unknown",
           revealedCells: state.revealed.size,
           revealAll: state.fullGridReveal,
+          puzzleSignature,
         },
       }),
     });
@@ -495,7 +518,32 @@ export default function CrosswordCard({
   // Keyboard input
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      if (
+        target?.closest(
+          "input, textarea, select, [contenteditable=true], [contenteditable='']"
+        )
+      ) {
+        return;
+      }
+      if (state.completed) return;
       if (!state.selected) return;
+      if (
+        e.key === "ArrowUp" ||
+        e.key === "ArrowDown" ||
+        e.key === "ArrowLeft" ||
+        e.key === "ArrowRight"
+      ) {
+        e.preventDefault();
+        const { row, col } = state.selected;
+        const dr =
+          e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
+        const dc =
+          e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
+        const next = nextPlayableCell(puzzle.grid, row, col, dr, dc);
+        if (next) dispatch({ type: "SELECT_CELL", row: next.row, col: next.col });
+        return;
+      }
       if (e.key.length === 1 && e.key.match(/[a-zA-Z]/)) {
         dispatch({ type: "TYPE", letter: e.key });
       } else if (e.key === "Backspace" || e.key === "Delete") {
@@ -511,7 +559,7 @@ export default function CrosswordCard({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [state.selected, state.activeSlot, puzzle.slots, dispatch]);
+  }, [state.selected, state.activeSlot, state.completed, puzzle.grid, puzzle.slots, dispatch]);
 
   // Build number map for cell labels
   const numberMap = useMemo(() => {
@@ -567,10 +615,26 @@ export default function CrosswordCard({
     WebkitUserSelect: "none",
   };
 
-  // ── Completed (full reveal — keep grid visible) ───────────────────────────
+  // ── Completed — always show filled grid so solvers can review the solution ─
 
-  if (state.completed && state.fullGridReveal) {
+  if (state.completed) {
     const emptyErrors = makeEmptyBool(rows, cols);
+    const usedLetterHints = Object.values(state.letterHintsUsed).some((n) => n > 0);
+    const usedRevealOrHint =
+      state.fullGridReveal ||
+      state.revealed.size > 0 ||
+      usedLetterHints;
+
+    const bannerPrimary = state.fullGridReveal
+      ? "Full solution revealed"
+      : "Puzzle complete";
+
+    const bannerSecondary = state.fullGridReveal
+      ? "The completed grid below matches the official solution. Start a new puzzle when you are ready."
+      : usedRevealOrHint
+        ? "The grid below shows your finished solve — letters you revealed or received as hints appear in green."
+        : `Solved in ${formatTime(state.elapsedSecs)}. The grid below is your completed solution — every letter matches the answer key.`;
+
     return (
       <div style={cardStyle}>
         <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
@@ -580,6 +644,12 @@ export default function CrosswordCard({
           <span style={{ fontFamily: "'IM Fell English', Georgia, serif", fontStyle: "italic", fontSize: "0.78rem", color: "#888" }}>
             {puzzle.category}
           </span>
+        </div>
+        <div style={{ textAlign: "center", width: "100%" }}>
+          <div style={{ fontSize: "1.75rem", marginBottom: "0.35rem", lineHeight: 1 }}>✓</div>
+          <div style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "1.15rem", fontWeight: 700, color: "#0d0d0d" }}>
+            {bannerPrimary}
+          </div>
         </div>
         <div
           style={{
@@ -594,7 +664,7 @@ export default function CrosswordCard({
             lineHeight: 1.45,
           }}
         >
-          Full solution shown — study the grid below, then start a new puzzle when you&apos;re ready.
+          {bannerSecondary}
         </div>
         <CrosswordGridBoard
           puzzle={puzzle}
@@ -622,41 +692,6 @@ export default function CrosswordCard({
               cursor: "pointer",
             }}
           >
-            New puzzle
-          </button>
-        )}
-      </div>
-    );
-  }
-
-  // ── Completed (solved or partial reveal — compact win) ─────────────────────
-
-  if (state.completed) {
-    return (
-      <div style={cardStyle}>
-        <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <span style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "1.3rem", fontWeight: 700 }}>
-            Crossword
-          </span>
-          <span style={{ fontFamily: "'IM Fell English', Georgia, serif", fontStyle: "italic", fontSize: "0.78rem", color: "#888" }}>
-            {puzzle.category}
-          </span>
-        </div>
-        <div style={{ textAlign: "center", padding: "2rem 1rem", fontFamily: "'Playfair Display', Georgia, serif" }}>
-          <div style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>✓</div>
-          <div style={{ fontSize: "1.2rem", fontWeight: 700, color: "#0d0d0d" }}>Puzzle complete</div>
-          <div style={{ fontFamily: "'IM Fell English', Georgia, serif", fontStyle: "italic", color: "#888", marginTop: "0.25rem", fontSize: "0.9rem" }}>
-            {state.revealed.size > 0 ? "Completed with hints or reveals" : `Solved in ${formatTime(state.elapsedSecs)}`}
-          </div>
-        </div>
-        {onNewPuzzle && (
-          <button onClick={() => onNewPuzzle("medium")} style={{
-            padding: "0.4rem 1.2rem", border: "1px solid #1a1a1a",
-            background: "#1a1a1a", color: "#faf8f3",
-            fontFamily: "'Playfair Display', Georgia, serif",
-            fontSize: "0.75rem", letterSpacing: "0.06em",
-            textTransform: "uppercase", cursor: "pointer",
-          }}>
             New puzzle
           </button>
         )}
