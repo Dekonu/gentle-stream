@@ -29,6 +29,7 @@ const HERO_IMG_H = 450;
 
 /** When the hero cell is taller than editorial content (grid stretch), offer Sudoku in the slack. */
 const HERO_VERTICAL_GAP_PX = 280;
+let userApiAllowed = true;
 
 function BookmarkOutlineIcon() {
   return (
@@ -260,6 +261,7 @@ export default function ArticleCard({
 
   const emitEngagement = useCallback(
     (eventType: "impression" | "open" | "read_30s" | "read_75pct", eventValue?: number) => {
+      if (!userApiAllowed) return;
       if (!articleId) return;
       trackArticleEngagement({
         articleId,
@@ -287,6 +289,12 @@ export default function ArticleCard({
   }, [articleId]);
 
   useEffect(() => {
+    if (!userApiAllowed) {
+      setShowLikeButton(false);
+      setLikeStatusLoaded(true);
+      setLiked(false);
+      return;
+    }
     if (!articleId) {
       setShowLikeButton(false);
       setLikeStatusLoaded(false);
@@ -303,7 +311,9 @@ export default function ArticleCard({
         );
         if (cancelled) return;
         if (res.status === 401) {
+          userApiAllowed = false;
           setShowLikeButton(false);
+          setLikeStatusLoaded(true);
           setLiked(false);
           return;
         }
@@ -402,6 +412,12 @@ export default function ArticleCard({
   }, [articleId, emitEngagement]);
 
   useEffect(() => {
+    if (!userApiAllowed) {
+      setSaved(false);
+      setSaveRowId(null);
+      setSaveStatusLoaded(true);
+      return;
+    }
     if (!articleId) {
       setSaved(false);
       setSaveRowId(null);
@@ -417,6 +433,13 @@ export default function ArticleCard({
           { credentials: "include" }
         );
         if (cancelled) return;
+        if (res.status === 401) {
+          userApiAllowed = false;
+          setSaved(false);
+          setSaveRowId(null);
+          setSaveStatusLoaded(true);
+          return;
+        }
         if (res.ok) {
           const j = (await res.json()) as {
             saved?: boolean;
@@ -443,7 +466,7 @@ export default function ArticleCard({
   }, [articleId]);
 
   const toggleLike = useCallback(async () => {
-    if (!articleId || likeBusy || !likeStatusLoaded) return;
+    if (!userApiAllowed || !articleId || likeBusy || !likeStatusLoaded) return;
     setLikeBusy(true);
     try {
       if (liked) {
@@ -451,6 +474,12 @@ export default function ArticleCard({
           `/api/user/article-likes?articleId=${encodeURIComponent(articleId)}`,
           { method: "DELETE", credentials: "include" }
         );
+        if (res.status === 401) {
+          userApiAllowed = false;
+          setShowLikeButton(false);
+          setLiked(false);
+          return;
+        }
         if (res.ok) setLiked(false);
       } else {
         const res = await fetch("/api/user/article-likes", {
@@ -462,6 +491,12 @@ export default function ArticleCard({
             articleTitle: article.headline,
           }),
         });
+        if (res.status === 401) {
+          userApiAllowed = false;
+          setShowLikeButton(false);
+          setLiked(false);
+          return;
+        }
         if (res.ok) setLiked(true);
       }
     } finally {
@@ -470,7 +505,14 @@ export default function ArticleCard({
   }, [articleId, article.headline, liked, likeBusy, likeStatusLoaded]);
 
   const toggleSave = useCallback(async () => {
-    if (!canSave || !("id" in article) || !article.id || saveBusy || !saveStatusLoaded) {
+    if (
+      !userApiAllowed ||
+      !canSave ||
+      !("id" in article) ||
+      !article.id ||
+      saveBusy ||
+      !saveStatusLoaded
+    ) {
       return;
     }
     setSaveBusy(true);
@@ -481,6 +523,13 @@ export default function ArticleCard({
           `/api/user/article-saves?id=${encodeURIComponent(saveRowId)}`,
           { method: "DELETE", credentials: "include" }
         );
+        if (res.status === 401) {
+          userApiAllowed = false;
+          setSaved(false);
+          setSaveRowId(null);
+          setSaveMsg("Sign in to manage saved articles.");
+          return;
+        }
         if (!res.ok) {
           const j = (await res.json().catch(() => ({}))) as {
             error?: string;
@@ -515,6 +564,13 @@ export default function ArticleCard({
             undefined,
         }),
       });
+      if (res.status === 401) {
+        userApiAllowed = false;
+        setSaved(false);
+        setSaveRowId(null);
+        setSaveMsg("Sign in to save articles.");
+        return;
+      }
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as {
           error?: string;
