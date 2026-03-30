@@ -60,6 +60,10 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
   const [recipeImagesBusy, setRecipeImagesBusy] = useState(false);
   const [recipeImagesError, setRecipeImagesError] = useState<string | null>(null);
   const [recipeImageInputKey, setRecipeImageInputKey] = useState(0);
+  const [recipeImportUrl, setRecipeImportUrl] = useState("");
+  const [recipeImportBusy, setRecipeImportBusy] = useState(false);
+  const [recipeImportMessage, setRecipeImportMessage] = useState<string | null>(null);
+  const [recipeImportIsError, setRecipeImportIsError] = useState(false);
   const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const bodyCharacterCount = form.body.length;
   const isBodyTooLong = bodyCharacterCount > MAX_SUBMISSION_BODY_CHARS;
@@ -286,6 +290,95 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
     }
   }
 
+  async function importRecipeFromLink() {
+    const url = recipeImportUrl.trim();
+    if (!url) {
+      setRecipeImportMessage("Paste a recipe URL first.");
+      setRecipeImportIsError(true);
+      return;
+    }
+    setRecipeImportBusy(true);
+    setRecipeImportMessage(null);
+    setRecipeImportIsError(false);
+    try {
+      const response = await fetch("/api/creator/recipe-import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ url }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        recipe?: {
+          headline?: string;
+          subheadline?: string;
+          recipeServings?: number | null;
+          recipeIngredients?: string[];
+          recipeInstructions?: string[];
+          recipePrepTimeMinutes?: number | null;
+          recipeCookTimeMinutes?: number | null;
+          recipeImages?: string[];
+          sourceStage?: string;
+          warnings?: string[];
+        };
+      };
+      if (!response.ok || !payload.recipe) {
+        setRecipeImportMessage(
+          `Import failed (${response.status}): ${payload.error ?? "Could not import this recipe link."}`
+        );
+        setRecipeImportIsError(true);
+        return;
+      }
+
+      const recipe = payload.recipe;
+      setForm((prev) => ({
+        ...prev,
+        contentKind: "recipe",
+        headline: typeof recipe.headline === "string" && recipe.headline.trim().length > 0 ? recipe.headline : prev.headline,
+        subheadline: typeof recipe.subheadline === "string" ? recipe.subheadline : prev.subheadline,
+        recipeServings:
+          typeof recipe.recipeServings === "number" && Number.isFinite(recipe.recipeServings)
+            ? String(Math.trunc(recipe.recipeServings))
+            : prev.recipeServings,
+        recipeIngredientsText:
+          Array.isArray(recipe.recipeIngredients) && recipe.recipeIngredients.length > 0
+            ? recipe.recipeIngredients.join("\n")
+            : prev.recipeIngredientsText,
+        recipeInstructionsText:
+          Array.isArray(recipe.recipeInstructions) && recipe.recipeInstructions.length > 0
+            ? recipe.recipeInstructions.join("\n\n")
+            : prev.recipeInstructionsText,
+        recipePrepTimeMinutes:
+          typeof recipe.recipePrepTimeMinutes === "number" &&
+          Number.isFinite(recipe.recipePrepTimeMinutes)
+            ? String(Math.trunc(recipe.recipePrepTimeMinutes))
+            : prev.recipePrepTimeMinutes,
+        recipeCookTimeMinutes:
+          typeof recipe.recipeCookTimeMinutes === "number" &&
+          Number.isFinite(recipe.recipeCookTimeMinutes)
+            ? String(Math.trunc(recipe.recipeCookTimeMinutes))
+            : prev.recipeCookTimeMinutes,
+        recipeImages:
+          Array.isArray(recipe.recipeImages) && recipe.recipeImages.length > 0
+            ? recipe.recipeImages.slice(0, 3)
+            : prev.recipeImages,
+      }));
+
+      const stage = typeof recipe.sourceStage === "string" ? recipe.sourceStage : "extractor";
+      const warningText =
+        Array.isArray(recipe.warnings) && recipe.warnings.length > 0
+          ? ` (${recipe.warnings[0]})`
+          : "";
+      setRecipeImportMessage(`Imported via ${stage}.${warningText}`);
+      setRecipeImportIsError(false);
+    } catch {
+      setRecipeImportMessage("Could not import recipe right now.");
+      setRecipeImportIsError(true);
+    } finally {
+      setRecipeImportBusy(false);
+    }
+  }
+
   return (
     <div style={{ minHeight: "100vh", background: "#ede9e1", padding: "1rem" }}>
       <div style={{ maxWidth: "980px", margin: "0 auto", display: "grid", gap: "1rem" }}>
@@ -493,6 +586,57 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                 </h3>
 
                 <div style={{ display: "grid", gap: "0.55rem" }}>
+                  <div style={{ display: "grid", gap: "0.35rem" }}>
+                    <label style={{ fontSize: "0.85rem", color: "#555", fontWeight: 600 }}>
+                      Import recipe from link
+                    </label>
+                    <div style={{ display: "flex", gap: "0.45rem", flexWrap: "wrap" }}>
+                      <input
+                        value={recipeImportUrl}
+                        onChange={(e) => setRecipeImportUrl(e.target.value)}
+                        placeholder="https://example.com/recipe"
+                        style={{
+                          flex: "1 1 280px",
+                          padding: "0.45rem",
+                          border: "1px solid #bbb",
+                          minWidth: 0,
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void importRecipeFromLink()}
+                        disabled={recipeImportBusy}
+                        style={{
+                          padding: "0.45rem 0.65rem",
+                          border: "1px solid #1a472a",
+                          background: "#fff",
+                          cursor: recipeImportBusy ? "wait" : "pointer",
+                          fontFamily: "'Playfair Display', Georgia, serif",
+                        }}
+                      >
+                        {recipeImportBusy ? "Importing..." : "Import"}
+                      </button>
+                    </div>
+                    {recipeImportMessage ? (
+                      <p
+                        style={{
+                          margin: 0,
+                          fontSize: "0.8rem",
+                          color: recipeImportIsError ? "#8b4513" : "#2f5f3a",
+                          background: recipeImportIsError ? "#fff0e6" : "#edf7ef",
+                          border: `1px solid ${recipeImportIsError ? "#e4bf9a" : "#b6d7bf"}`,
+                          padding: "0.38rem 0.5rem",
+                        }}
+                      >
+                        {recipeImportMessage}
+                      </p>
+                    ) : (
+                      <p style={{ margin: 0, fontSize: "0.8rem", color: "#888" }}>
+                        Imports are limited to allowlisted domains.
+                      </p>
+                    )}
+                  </div>
+
                   <div style={{ display: "flex", gap: "0.55rem", flexWrap: "wrap" }}>
                     <div style={{ flex: "1 1 160px" }}>
                       <label style={{ fontSize: "0.85rem", color: "#555", fontWeight: 600 }}>
