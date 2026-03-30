@@ -82,6 +82,7 @@ export interface CreatorProfile {
 
 export type ArticleSubmissionStatus =
   | "pending"
+  | "changes_requested"
   | "approved"
   | "rejected"
   | "withdrawn";

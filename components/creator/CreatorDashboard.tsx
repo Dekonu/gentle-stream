@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CATEGORIES } from "@/lib/constants";
 import type { ArticleSubmission } from "@/lib/types";
@@ -173,11 +174,35 @@ export function CreatorDashboard() {
     <div style={{ minHeight: "100vh", background: "#ede9e1", padding: "1rem" }}>
       <div style={{ maxWidth: "980px", margin: "0 auto", display: "grid", gap: "1rem" }}>
         <div style={{ background: "#faf8f3", border: "1px solid #d8d2c7", padding: "1rem" }}>
-          <h1 style={{ margin: 0, fontFamily: "'Playfair Display', Georgia, serif", fontSize: "1.5rem" }}>
-            Creator studio
-          </h1>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: "0.75rem",
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
+            <h1 style={{ margin: 0, fontFamily: "'Playfair Display', Georgia, serif", fontSize: "1.5rem" }}>
+              Creator studio
+            </h1>
+            <Link
+              href="/"
+              style={{
+                padding: "0.36rem 0.62rem",
+                border: "1px solid #888",
+                background: "#fff",
+                color: "#1a1a1a",
+                textDecoration: "none",
+                fontSize: "0.82rem",
+                fontFamily: "'IM Fell English', Georgia, serif",
+              }}
+            >
+              Back to app
+            </Link>
+          </div>
           <p style={{ margin: "0.35rem 0 0", color: "#666", fontFamily: "'IM Fell English', Georgia, serif" }}>
-            Draft and submit stories. Pending stories can still be edited or withdrawn.
+            Draft and submit stories. Pending or revision-requested stories can still be edited or withdrawn.
           </p>
         </div>
 
@@ -327,15 +352,20 @@ export function CreatorDashboard() {
                   <p style={{ margin: "0.35rem 0 0", color: "#666", fontSize: "0.86rem" }}>
                     {submission.category} • {new Date(submission.createdAt).toLocaleString()}
                   </p>
+                  {submission.adminNote ? (
+                    <p style={{ margin: "0.35rem 0 0", color: "#8b6d2f", fontSize: "0.84rem" }}>
+                      Moderator note: {submission.adminNote}
+                    </p>
+                  ) : null}
                   {submission.rejectionReason ? (
                     <p style={{ margin: "0.35rem 0 0", color: "#8b4513", fontSize: "0.84rem" }}>
                       Rejection reason: {submission.rejectionReason}
                     </p>
                   ) : null}
-                  {submission.status === "pending" ? (
+                  {submission.status === "pending" || submission.status === "changes_requested" ? (
                     <div style={{ marginTop: "0.45rem", display: "flex", gap: "0.45rem", flexWrap: "wrap" }}>
                       <button onClick={() => beginEdit(submission)} style={{ padding: "0.35rem 0.6rem", border: "1px solid #999", background: "#fff", cursor: "pointer" }}>
-                        Edit
+                        {submission.status === "changes_requested" ? "Revise" : "Edit"}
                       </button>
                       <button onClick={() => withdrawSubmission(submission.id)} style={{ padding: "0.35rem 0.6rem", border: "1px solid #b05", background: "#fff", cursor: "pointer" }}>
                         Withdraw

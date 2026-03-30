@@ -49,6 +49,7 @@ function isCategory(value: string): value is Category {
 function toSubmissionStatus(value: string): ArticleSubmissionStatus {
   if (
     value === "pending" ||
+    value === "changes_requested" ||
     value === "approved" ||
     value === "rejected" ||
     value === "withdrawn"
@@ -243,8 +244,8 @@ export async function updateSubmissionForAuthor(input: {
     .single();
   if (existingError || !existing) throw new Error("Submission not found");
   const row = existing as ArticleSubmissionRow;
-  if (row.status !== "pending") {
-    throw new Error("Only pending submissions can be changed");
+  if (row.status !== "pending" && row.status !== "changes_requested") {
+    throw new Error("Only pending or changes-requested submissions can be changed");
   }
 
   const updates: Record<string, unknown> = {};
@@ -256,6 +257,14 @@ export async function updateSubmissionForAuthor(input: {
   if (input.locale !== undefined) updates.locale = input.locale;
   if (input.explicitHashtags !== undefined) {
     updates.explicit_hashtags = normaliseHashtags(input.explicitHashtags);
+  }
+  if (row.status === "changes_requested") {
+    // Any creator edit after moderation feedback is treated as a resubmission.
+    updates.status = "pending";
+    updates.admin_note = null;
+    updates.rejection_reason = null;
+    updates.reviewed_by_user_id = null;
+    updates.reviewed_at = null;
   }
   if (input.withdraw) {
     updates.status = "withdrawn";
@@ -286,7 +295,7 @@ export async function listSubmissionsForAdmin(status?: ArticleSubmissionStatus):
 export async function reviewSubmission(input: {
   submissionId: string;
   reviewerUserId: string;
-  action: "approve" | "reject";
+  action: "approve" | "request_changes" | "reject";
   adminNote: string | null;
   rejectionReason: string | null;
 }): Promise<{ submission: ArticleSubmission; publishedArticle: StoredArticle | null }> {
@@ -299,6 +308,25 @@ export async function reviewSubmission(input: {
   const submission = row as ArticleSubmissionRow;
   if (submission.status !== "pending") {
     throw new Error("Submission is no longer pending");
+  }
+
+  if (input.action === "request_changes") {
+    const { data: requested, error: requestError } = await db
+      .from("article_submissions")
+      .update({
+        status: "changes_requested",
+        admin_note:
+          input.adminNote ??
+          "Please revise this draft based on moderation guidance and resubmit.",
+        rejection_reason: null,
+        reviewed_by_user_id: input.reviewerUserId,
+        reviewed_at: new Date().toISOString(),
+      })
+      .eq("id", input.submissionId)
+      .select("*")
+      .single();
+    if (requestError) throw new Error(`reviewSubmission request_changes: ${requestError.message}`);
+    return { submission: rowToSubmission(requested as ArticleSubmissionRow), publishedArticle: null };
   }
 
   if (input.action === "reject") {

@@ -7,6 +7,7 @@ import type { ArticleSubmissionStatus } from "@/lib/types";
 function parseStatus(value: string | null): ArticleSubmissionStatus | undefined {
   if (
     value === "pending" ||
+    value === "changes_requested" ||
     value === "approved" ||
     value === "rejected" ||
     value === "withdrawn"
