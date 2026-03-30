@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "clean": "node scripts/clean-next.mjs",
     "dev": "next dev",
     "dev-light": "cross-env DEV_LIGHT=1 next dev",
     "build": "next build",
@@ -12,6 +13,7 @@
     "ingest:all": "tsx scripts/ingest/run.ts --all",
     "ingest:tag": "tsx scripts/ingest/run.ts --tag-only",
     "articles:dedup-cleanup": "tsx -r dotenv/config scripts/articles-dedup-cleanup.ts dotenv_config_path=.env.local",
+    "articles:remove-test-dedup": "tsx -r dotenv/config scripts/cleanup-test-dedup-articles.ts dotenv_config_path=.env.local",
     "validate:supabase-key": "tsx scripts/validate-supabase-public-key.ts",
     "games:word-pool": "tsx scripts/word-pool-ingest.ts",
     "games:blocked-crosswords": "tsx scripts/blocked-crossword-ingest.ts",

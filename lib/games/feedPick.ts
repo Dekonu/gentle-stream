@@ -4,9 +4,9 @@
  * Picks a game type and difficulty for a feed slot.
  * Extracted here so NewsFeed stays decoupled from the game type list.
  *
- * Feed slots use `feedGamePickForOrdinal` so each game type (including crossword)
+ * Feed slots use `feedGamePickForOrdinal` so each game type (crossword, sudoku, …)
  * appears equally often over time: every block of N game slots contains each type
- * once, with order shuffled per block (deterministic seed) so runs still feel random.
+ * once. Connections is excluded — it is a separate daily puzzle in NewsFeed (NYT-style).
  *
  * `randomFeedGamePick` is uniform over types for any legacy / one-off callers.
  */
@@ -18,12 +18,14 @@ interface FeedGamePick {
   difficulty: Difficulty;
 }
 
-/** All types that can appear in the main feed rotation — equal share each cycle. */
+/**
+ * Games in the rotating feed (Connections is NYT-style: one daily puzzle, handled
+ * separately in NewsFeed — not part of this rotation).
+ */
 const ALL_FEED_GAME_TYPES: GameType[] = [
   "sudoku",
   "word_search",
   "crossword",
-  "connections",
   "killer_sudoku",
   "nonogram",
 ];

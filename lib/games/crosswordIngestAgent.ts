@@ -2,20 +2,20 @@
  * Crossword Ingest Agent
  *
  * Step 1 (algorithmic): fill a 7×7 grid using crosswordGridFiller.ts
- * Step 2 (LLM): send the filled grid to Claude and ask it to write
- *               a clue for each answer word
+ * Step 2 (clues): Wiktionary + Datamuse heuristics by default, or Claude when
+ *                 CROSSWORD_CLUES_SOURCE=anthropic
  * Step 3 (DB):  store the complete puzzle in the games table
- *
- * One API call generates clues for the entire puzzle (all across + down).
- * Claude is given the answer words and category for context so clues
- * can be thematic and interesting rather than generic.
  *
  * Run via manual script if you need legacy word-square top-up (see package.json).
  * Production cron uses blocked 7×7 ingest (`blockedCrosswordIngestAgent`).
  */
 
-import { clueForSlot } from "./crosswordClueMerge";
+import { allCrosswordSlotsHaveRealClues, clueForSlot } from "./crosswordClueMerge";
 import { fetchCrosswordCluesFromAnthropic } from "./crosswordAnthropicClues";
+import {
+  crosswordCluesPreferAnthropic,
+  fetchCrosswordCluesHeuristic,
+} from "./crosswordHeuristicClues";
 import { fillCrosswordGrid, type CrosswordSlot } from "./crosswordGridFiller";
 import { db } from "../db/client";
 import type { Category } from "../constants";
@@ -42,8 +42,11 @@ export interface CrosswordPuzzle {
 export async function runCrosswordIngest(
   targetCategory?: Category
 ): Promise<number> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
+  if (crosswordCluesPreferAnthropic() && !process.env.ANTHROPIC_API_KEY?.trim()) {
+    throw new Error(
+      "CROSSWORD_CLUES_SOURCE=anthropic requires ANTHROPIC_API_KEY"
+    );
+  }
 
   const categories = targetCategory ? [targetCategory] : [...CATEGORIES];
   let inserted = 0;
@@ -51,7 +54,7 @@ export async function runCrosswordIngest(
   for (const category of categories) {
     for (let i = 0; i < PUZZLES_PER_CATEGORY; i++) {
       try {
-        const puzzle = await generateOneCrossword(apiKey, category);
+        const puzzle = await generateOneCrossword(category);
         if (!puzzle) {
           console.warn(`[CrosswordIngest] Grid fill failed for "${category}" attempt ${i + 1}`);
           continue;
@@ -88,7 +91,6 @@ export async function getCrosswordPoolSize(): Promise<number> {
 // ─── Generation ───────────────────────────────────────────────────────────────
 
 async function generateOneCrossword(
-  apiKey: string,
   category: string
 ): Promise<CrosswordPuzzle | null> {
   // Step 1: fill grid algorithmically
@@ -97,8 +99,11 @@ async function generateOneCrossword(
 
   const { grid, slots } = filled;
 
-  // Step 2: get clues from Claude
-  const clues = await fetchCrosswordCluesFromAnthropic(apiKey, slots, category);
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+  const clues =
+    crosswordCluesPreferAnthropic() && apiKey
+      ? await fetchCrosswordCluesFromAnthropic(apiKey, slots, category)
+      : await fetchCrosswordCluesHeuristic(slots, category);
 
   // Step 3: merge clues into slots (per slot id — answer alone can repeat in word squares)
   const slotsWithClues = slots.map((slot) => ({
@@ -109,6 +114,13 @@ async function generateOneCrossword(
       (s) => `Definition needed (${s.length} letters)`
     ),
   }));
+
+  if (!allCrosswordSlotsHaveRealClues(slotsWithClues)) {
+    console.warn(
+      `[CrosswordIngest] Incomplete or placeholder clues for "${category}" — not storing`
+    );
+    return null;
+  }
 
   return {
     grid,

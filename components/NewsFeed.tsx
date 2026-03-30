@@ -73,6 +73,9 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
   const sectionCountRef = useRef(0);
   /** Counts game sections only — drives fair rotation in feedGamePickForOrdinal. */
   const gameSlotOrdinalRef = useRef(0);
+  /** NYT-style: at most one Connections slot per session; hide after completion today. */
+  const connectionsCompletedTodayRef = useRef(false);
+  const connectionsShownInSessionRef = useRef(false);
   const activeCategoryRef = useRef<Category | null>(null);
   const userIdRef = useRef<string>("anonymous");
   /** Bumps on each [userId] bootstrap so Strict Mode / fast remounts only run one initial loadMore. */
@@ -107,16 +110,32 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
 
     // ── Decide: game slot or article section? ────────────────────────────────
     if (shouldBeGame(currentIndex, gameRatioRef.current)) {
-      const { gameType, difficulty } = feedGamePickForOrdinal(
-        gameSlotOrdinalRef.current++
-      );
+      const offerDailyConnections =
+        !connectionsCompletedTodayRef.current &&
+        !connectionsShownInSessionRef.current;
+
+      let gameType: GameFeedSection["gameType"];
+      let difficulty: GameFeedSection["difficulty"];
+      let connectionsDaily = false;
+
+      if (offerDailyConnections) {
+        connectionsShownInSessionRef.current = true;
+        gameType = "connections";
+        difficulty = "medium";
+        connectionsDaily = true;
+      } else {
+        const pick = feedGamePickForOrdinal(gameSlotOrdinalRef.current++);
+        gameType = pick.gameType;
+        difficulty = pick.difficulty;
+      }
+
       const gameSection: GameFeedSection = {
         sectionType: "game",
         gameType,
         difficulty,
         index: currentIndex,
-        // Pass the last seen article category for word bank theming
         category: lastArticleCategoryRef.current,
+        ...(connectionsDaily ? { connectionsDaily: true } : {}),
       };
       setSections((prev) => [...prev, gameSection]);
       sectionCountRef.current += 1;
@@ -238,6 +257,7 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
     loadingRef.current = false;
     sectionCountRef.current = 0;
     gameSlotOrdinalRef.current = 0;
+    connectionsShownInSessionRef.current = false;
     lastArticleCategoryRef.current = undefined;
     renderedArticleKeysRef.current = new Set();
     renderedDbArticleIdsRef.current = new Set();
@@ -285,6 +305,33 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
         }
       }
 
+      let completedConnectionsToday = false;
+      try {
+        const cdRes = await fetch("/api/user/connections-daily", {
+          credentials: "include",
+        });
+        if (cdRes.ok) {
+          const cd = (await cdRes.json()) as { completedToday?: boolean };
+          if (cd.completedToday === true) completedConnectionsToday = true;
+        }
+      } catch {
+        /* offline */
+      }
+      if (!completedConnectionsToday) {
+        try {
+          const dayKey = new Date().toISOString().slice(0, 10);
+          if (
+            localStorage.getItem(`gentle_stream_connections_done_${dayKey}`) ===
+            "1"
+          ) {
+            completedConnectionsToday = true;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      connectionsCompletedTodayRef.current = completedConnectionsToday;
+
       if (cancelled || gen !== feedBootstrapGenRef.current) return;
 
       feedReadyRef.current = true;
@@ -296,6 +343,21 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
       cancelled = true;
     };
   }, [userId, loadMore]);
+
+  useEffect(() => {
+    function onConnectionsCompleted() {
+      connectionsCompletedTodayRef.current = true;
+    }
+    window.addEventListener(
+      "gentle-stream-connections-completed",
+      onConnectionsCompleted
+    );
+    return () =>
+      window.removeEventListener(
+        "gentle-stream-connections-completed",
+        onConnectionsCompleted
+      );
+  }, []);
 
   // Keep activeCategoryRef in sync
   useEffect(() => {
@@ -323,7 +385,16 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
     const next = activeCategory === cat ? null : cat;
     setActiveCategory(next);
     activeCategoryRef.current = next;
-    setSections([]);
+    setSections((prev) => {
+      const hadConnections = prev.some(
+        (s) =>
+          s.sectionType === "game" &&
+          s.gameType === "connections" &&
+          s.connectionsDaily === true
+      );
+      if (!hadConnections) connectionsShownInSessionRef.current = false;
+      return [];
+    });
     sectionCountRef.current = 0;
     loadingRef.current = false;
     setLoading(false);
@@ -340,6 +411,7 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
       setSections([]);
       sectionCountRef.current = 0;
       gameSlotOrdinalRef.current = 0;
+      connectionsShownInSessionRef.current = false;
       loadingRef.current = false;
       setError(null);
       renderedArticleKeysRef.current = new Set();
@@ -414,6 +486,7 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
                 gameType={section.gameType}
                 difficulty={section.difficulty}
                 category={section.category}
+                connectionsDaily={section.connectionsDaily === true}
               />
             );
           }

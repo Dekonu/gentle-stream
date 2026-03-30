@@ -40,6 +40,8 @@ interface ConnectionsCardProps {
   onNewPuzzle?: (difficulty: Difficulty) => void;
   metricsEnabled?: boolean;
   puzzleSignature?: string;
+  /** NYT-style: no "New puzzle"; completion ends the daily */
+  dailyPuzzle?: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -165,10 +167,12 @@ export default function ConnectionsCard({
   onNewPuzzle,
   metricsEnabled = true,
   puzzleSignature,
+  dailyPuzzle = false,
 }: ConnectionsCardProps) {
   const puzzleRef = useRef(puzzle);
   puzzleRef.current = puzzle;
   const completionLogged = useRef(false);
+  const completionDispatched = useRef(false);
 
   const [state, dispatchRaw] = useReducer(
     (s: GameState, a: Action) => reducer(s, a, puzzleRef.current),
@@ -187,7 +191,21 @@ export default function ConnectionsCard({
   useEffect(() => {
     dispatch({ type: "RESET" });
     completionLogged.current = false;
+    completionDispatched.current = false;
   }, [puzzle, dispatch]);
+
+  useEffect(() => {
+    if (state.completed && !completionDispatched.current) {
+      completionDispatched.current = true;
+      try {
+        window.dispatchEvent(new CustomEvent("gentle-stream-connections-completed"));
+        const d = new Date().toISOString().slice(0, 10);
+        localStorage.setItem(`gentle_stream_connections_done_${d}`, "1");
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [state.completed]);
 
   useEffect(() => {
     if (!metricsEnabled || !state.completed || completionLogged.current) return;
@@ -352,6 +370,7 @@ export default function ConnectionsCard({
           </span>
           <span style={{ fontFamily: "'IM Fell English', Georgia, serif", fontStyle: "italic", fontSize: "0.78rem", color: "#888" }}>
             {puzzle.category}
+            {dailyPuzzle ? " · Today’s puzzle" : ""}
           </span>
         </div>
 
@@ -406,7 +425,7 @@ export default function ConnectionsCard({
           </div>
         )}
 
-        {onNewPuzzle && (
+        {onNewPuzzle && !dailyPuzzle && (
           <button onClick={() => onNewPuzzle("medium")} style={{
             padding: "0.4rem 1.2rem",
             border: "1px solid #1a1a1a",
@@ -431,7 +450,10 @@ export default function ConnectionsCard({
           Connections
         </span>
         <span style={{ fontFamily: "'IM Fell English', Georgia, serif", fontStyle: "italic", fontSize: "0.78rem", color: "#888", display: "flex", gap: "1rem" }}>
-          <span>{puzzle.category}</span>
+          <span>
+            {puzzle.category}
+            {dailyPuzzle ? " · Today’s puzzle" : ""}
+          </span>
           {state.startedAt && (
             <span style={{ fontVariantNumeric: "tabular-nums" }}>{formatTime(state.elapsedSecs)}</span>
           )}

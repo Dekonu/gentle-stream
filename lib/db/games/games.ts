@@ -21,6 +21,39 @@ interface GameRow {
   created_at: string;
 }
 
+function hashStringToUint32(s: string): number {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) {
+    h = Math.imul(h, 33) ^ s.charCodeAt(i);
+  }
+  return h >>> 0;
+}
+
+/**
+ * Same calendar day (UTC) → same puzzle for everyone, NYT-style.
+ * Picks a stable row from the pool using the date as seed (no per-user excludes).
+ */
+export async function getDailyConnectionsGameRow(
+  utcDateKey: string,
+  category?: string
+): Promise<GameRow | null> {
+  let query = db
+    .from("games")
+    .select("*")
+    .eq("type", "connections")
+    .order("id", { ascending: true })
+    .limit(400);
+
+  if (category) query = query.eq("category", category);
+
+  const { data, error } = await query;
+  if (error || !data?.length) return null;
+
+  const rows = data as GameRow[];
+  const idx = hashStringToUint32(`connections-daily|${utcDateKey}`) % rows.length;
+  return rows[idx] ?? null;
+}
+
 // ─── Read ─────────────────────────────────────────────────────────────────────
 
 function pickRowPreferringLowUse(

@@ -1,5 +1,6 @@
 export {
   getGameFromPool,
+  getDailyConnectionsGameRow,
   markGameUsed,
   countGamePool,
   getCrosswordFromPool,

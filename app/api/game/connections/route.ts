@@ -10,7 +10,11 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { getGameFromPool, markGameUsed } from "@/lib/db/games";
+import {
+  getGameFromPool,
+  getDailyConnectionsGameRow,
+  markGameUsed,
+} from "@/lib/db/games";
 import {
   runConnectionsIngest,
   type ConnectionsPuzzle,
@@ -33,6 +37,7 @@ function parseExcludeSignatures(raw: string | null): string[] {
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const rawCategory = searchParams.get("category") ?? undefined;
+  const isDaily = searchParams.get("daily") === "1";
   const excludeSignatures = parseExcludeSignatures(
     searchParams.get("excludeSignatures")
   );
@@ -40,20 +45,42 @@ export async function GET(request: NextRequest) {
     ? rawCategory
     : undefined;
 
-  // ── 1. Try pool ─────────────────────────────────────────────────────────────
-  try {
-    const row = await getGameFromPool("connections", category, {
-      randomTieBreak: true,
-      excludeSignatures,
-      allowExcludedFallback: false,
-    });
-    if (row) {
-      void markGameUsed(row.id);
-      const puzzle = ensureConnectionsIdentity(row.payload as ConnectionsPuzzle);
-      return NextResponse.json({ ...puzzle, fromPool: true });
+  const utcDateKey = new Date().toISOString().slice(0, 10);
+
+  // ── 0. Daily puzzle (NYT-style: same for everyone on a calendar day, UTC) ─
+  if (isDaily) {
+    try {
+      const row = await getDailyConnectionsGameRow(utcDateKey, category);
+      if (row) {
+        void markGameUsed(row.id);
+        const puzzle = ensureConnectionsIdentity(row.payload as ConnectionsPuzzle);
+        return NextResponse.json({
+          ...puzzle,
+          fromPool: true,
+          daily: true,
+          dailyDate: utcDateKey,
+        });
+      }
+    } catch (e) {
+      console.warn("[/api/game/connections] Daily pool fetch failed:", e);
     }
-  } catch (e) {
-    console.warn("[/api/game/connections] Pool fetch failed:", e);
+    console.log(`[/api/game/connections] Daily mode — pool empty — generating live`);
+  } else {
+    // ── 1. Try pool (random / exclude-aware) ─────────────────────────────────
+    try {
+      const row = await getGameFromPool("connections", category, {
+        randomTieBreak: true,
+        excludeSignatures,
+        allowExcludedFallback: false,
+      });
+      if (row) {
+        void markGameUsed(row.id);
+        const puzzle = ensureConnectionsIdentity(row.payload as ConnectionsPuzzle);
+        return NextResponse.json({ ...puzzle, fromPool: true });
+      }
+    } catch (e) {
+      console.warn("[/api/game/connections] Pool fetch failed:", e);
+    }
   }
 
   // ── 2. Live generation fallback ─────────────────────────────────────────────
@@ -83,10 +110,24 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    if (isDaily) {
+      const row = await getDailyConnectionsGameRow(utcDateKey, category);
+      if (row) {
+        void markGameUsed(row.id);
+        const puzzle = ensureConnectionsIdentity(row.payload as ConnectionsPuzzle);
+        return NextResponse.json({
+          ...puzzle,
+          fromPool: false,
+          daily: true,
+          dailyDate: utcDateKey,
+        });
+      }
+    }
+
     // Fetch the freshly generated puzzle
     const row = await getGameFromPool("connections", category, {
       randomTieBreak: true,
-      excludeSignatures,
+      excludeSignatures: isDaily ? [] : excludeSignatures,
       allowExcludedFallback: false,
     });
     if (!row) {
@@ -98,7 +139,11 @@ export async function GET(request: NextRequest) {
 
     void markGameUsed(row.id);
     const puzzle = ensureConnectionsIdentity(row.payload as ConnectionsPuzzle);
-    return NextResponse.json({ ...puzzle, fromPool: false });
+    return NextResponse.json({
+      ...puzzle,
+      fromPool: false,
+      ...(isDaily ? { daily: true, dailyDate: utcDateKey } : {}),
+    });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Generation failed";
     return NextResponse.json({ error: message }, { status: 500 });

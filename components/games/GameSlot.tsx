@@ -27,6 +27,8 @@ interface GameSlotProps {
   embedded?: boolean;
   /** Load/save in-progress games to the signed-in user (off for hero embeds). */
   persistCloud?: boolean;
+  /** NYT-style daily Connections — same puzzle for everyone; no replay / exclude churn */
+  connectionsDaily?: boolean;
 }
 
 type AnyPuzzle = SudokuPuzzle | KillerSudokuPuzzle | WordSearchPuzzle | NonogramPuzzle | CrosswordPuzzle | ConnectionsPuzzle;
@@ -36,6 +38,24 @@ type PuzzleWithUniqueness = AnyPuzzle & {
 };
 
 const RECENT_SIGNATURE_LIMIT = 12;
+
+/** Preload must not block on user APIs — slow/hanging auth or DB would leave "Setting the grid…" forever. */
+const USER_PREFS_FETCH_TIMEOUT_MS = 8_000;
+const PUZZLE_FETCH_TIMEOUT_MS = 45_000;
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit | undefined,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const tid = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    window.clearTimeout(tid);
+  }
+}
 
 function signatureStorageKey(gameType: GameType): string {
   return `gentle_stream_recent_puzzle_signatures_${gameType}`;
@@ -73,11 +93,14 @@ function puzzleEndpoint(
   gameType: GameType,
   diff: Difficulty,
   category?: string,
-  excludeSignatures?: string[]
+  excludeSignatures?: string[],
+  connectionsDaily?: boolean
 ): string {
   const params = new URLSearchParams({ difficulty: diff });
   if (category) params.set("category", category);
-  if (excludeSignatures && excludeSignatures.length > 0) {
+  if (gameType === "connections" && connectionsDaily) {
+    params.set("daily", "1");
+  } else if (excludeSignatures && excludeSignatures.length > 0) {
     params.set("excludeSignatures", excludeSignatures.join(","));
   }
   if (gameType === "sudoku")        return `/api/game/sudoku?${params}`;
@@ -104,6 +127,7 @@ export default function GameSlot({
   category,
   embedded = false,
   persistCloud = true,
+  connectionsDaily = false,
 }: GameSlotProps) {
   const [puzzle, setPuzzle] = useState<AnyPuzzle | null>(null);
   const [loading, setLoading] = useState(true);
@@ -118,10 +142,11 @@ export default function GameSlot({
   const buildExcludeSignatures = useCallback(
     (allowReplay: boolean): string[] => {
       if (allowReplay) return [];
+      if (gameType === "connections" && connectionsDaily) return [];
       const recent = readRecentSignatures(gameType);
       return Array.from(new Set([...completedSignatures, ...recent])).slice(-200);
     },
-    [gameType, completedSignatures]
+    [gameType, completedSignatures, connectionsDaily]
   );
 
   const fetchPuzzleFromApi = useCallback(
@@ -136,9 +161,10 @@ export default function GameSlot({
           gameType,
           diff,
           category,
-          excludeSignatures
+          excludeSignatures,
+          connectionsDaily
         );
-        const res = await fetch(url);
+        const res = await fetchWithTimeout(url, undefined, PUZZLE_FETCH_TIMEOUT_MS);
         if (res.status === 409 && !allowReplay) {
           setHasNoUniqueAvailable(true);
           setPuzzle(null);
@@ -154,7 +180,7 @@ export default function GameSlot({
         setError("Could not load puzzle — try again.");
       }
     },
-    [gameType, category, buildExcludeSignatures]
+    [gameType, category, buildExcludeSignatures, connectionsDaily]
   );
 
   useEffect(() => {
@@ -162,27 +188,33 @@ export default function GameSlot({
 
     async function bootstrap() {
       const useCloud = persistCloud && !embedded;
-      try {
-        const sigRes = await fetch(
-          `/api/user/game-completion?gameType=${gameType}`,
-          { credentials: "include" }
-        );
-        if (sigRes.ok && !cancelled) {
-          const body = (await sigRes.json()) as { signatures?: unknown };
-          const signatures = Array.isArray(body?.signatures)
-            ? body.signatures.filter((s): s is string => typeof s === "string")
-            : [];
-          setCompletedSignatures(signatures);
+      // Embedded hero/sidebar games: skip user APIs — they blocked puzzle load and only
+      // matter for exclude list (localStorage recent sigs still apply via buildExcludeSignatures).
+      if (!embedded) {
+        try {
+          const sigRes = await fetchWithTimeout(
+            `/api/user/game-completion?gameType=${gameType}`,
+            { credentials: "include" },
+            USER_PREFS_FETCH_TIMEOUT_MS
+          );
+          if (sigRes.ok && !cancelled) {
+            const body = (await sigRes.json()) as { signatures?: unknown };
+            const signatures = Array.isArray(body?.signatures)
+              ? body.signatures.filter((s): s is string => typeof s === "string")
+              : [];
+            setCompletedSignatures(signatures);
+          }
+        } catch {
+          // anonymous / timeout / network: continue with local recent signatures only
         }
-      } catch {
-        // anonymous / network: continue with local recent signatures only
       }
 
       if (useCloud && (gameType === "sudoku" || gameType === "word_search")) {
         try {
-          const res = await fetch(
+          const res = await fetchWithTimeout(
             `/api/user/game-save?gameType=${gameType}`,
-            { credentials: "include" }
+            { credentials: "include" },
+            USER_PREFS_FETCH_TIMEOUT_MS
           );
           if (res.ok) {
             const row = await res.json();
@@ -222,9 +254,10 @@ export default function GameSlot({
           gameType,
           difficulty,
           category,
-          buildExcludeSignatures(false)
+          buildExcludeSignatures(false),
+          connectionsDaily
         );
-        const res = await fetch(url);
+        const res = await fetchWithTimeout(url, undefined, PUZZLE_FETCH_TIMEOUT_MS);
         if (res.status === 409) {
           if (!cancelled) {
             setHasNoUniqueAvailable(true);
@@ -242,7 +275,9 @@ export default function GameSlot({
           setCurrentDifficulty(difficulty);
         }
       } catch {
-        if (!cancelled) setError("Could not load puzzle — try again.");
+        if (!cancelled) {
+          setError("Could not load puzzle — try again.");
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -252,7 +287,15 @@ export default function GameSlot({
     return () => {
       cancelled = true;
     };
-  }, [gameType, category, difficulty, persistCloud, embedded, buildExcludeSignatures]);
+  }, [
+    gameType,
+    category,
+    difficulty,
+    persistCloud,
+    embedded,
+    buildExcludeSignatures,
+    connectionsDaily,
+  ]);
 
   const handleNewPuzzle = useCallback(
     async (diff: Difficulty) => {
@@ -425,9 +468,10 @@ export default function GameSlot({
     return (
       <ConnectionsCard
         puzzle={puzzle as ConnectionsPuzzle}
-        onNewPuzzle={handleNewPuzzle}
+        onNewPuzzle={connectionsDaily ? undefined : handleNewPuzzle}
         metricsEnabled={metricsOn}
         puzzleSignature={puzzleSignature}
+        dailyPuzzle={connectionsDaily}
       />
     );
   }

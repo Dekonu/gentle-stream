@@ -145,6 +145,8 @@ export interface GameFeedSection {
   index: number;
   /** Article category of the preceding feed section — used for word bank theming */
   category?: string;
+  /** NYT-style daily Connections: fetch with ?daily=1, hide replay */
+  connectionsDaily?: boolean;
 }
 
 /** A single row in the infinite scroll feed — either articles or a game */

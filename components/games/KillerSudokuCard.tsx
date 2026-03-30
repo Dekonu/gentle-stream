@@ -10,6 +10,7 @@ import {
   cellInFlashUnits,
   completedSudokuUnits,
 } from "@/lib/games/sudokuLineComplete";
+import { useGridSelectionColor } from "@/lib/games/useGridSelectionColor";
 
 const MAX_MISTAKES = 3;
 
@@ -17,7 +18,7 @@ const MAX_MISTAKES = 3;
 
 interface KillerMistakeUndoSnapshot {
   values: number[][];
-  /** Mistake count before the wrong move that pushed this snapshot. */
+  /** Mistake count before the wrong move that pushed this snapshot (undo keeps the live tally). */
   mistakes: number;
 }
 
@@ -208,10 +209,8 @@ function reducer(
         state.mistakeUndoStack[state.mistakeUndoStack.length - 1];
       const mistakeUndoStack = state.mistakeUndoStack.slice(0, -1);
       const values = cloneValues(snap.values);
-      const mistakes = Math.min(
-        MAX_MISTAKES,
-        Math.max(0, snap.mistakes)
-      );
+      // Keep mistake tally — undo clears the wrong digit but does not erase a counted mistake.
+      const mistakes = state.mistakes;
       const failed = mistakes >= MAX_MISTAKES;
       const errors = computeErrors(values, puzzle.cages);
       const completed = isComplete(values, puzzle.solution);
@@ -289,6 +288,7 @@ export default function KillerSudokuCard({
   );
   const dispatch = dispatchRaw;
   const [lineFlashUnits, setLineFlashUnits] = useState<string[]>([]);
+  const [selectionColor, setSelectionColor] = useGridSelectionColor();
   const lineCompleteRef = useRef<Set<string>>(new Set());
   const lastKillerPuzzleKeyRef = useRef<string>("");
 
@@ -377,6 +377,14 @@ export default function KillerSudokuCard({
 
       if (state.failed) return;
       if (!state.selected) return;
+      if (
+        e.key === "ArrowUp" ||
+        e.key === "ArrowDown" ||
+        e.key === "ArrowLeft" ||
+        e.key === "ArrowRight"
+      ) {
+        e.preventDefault();
+      }
       const num = parseInt(e.key, 10);
       if (num >= 1 && num <= 9) dispatch({ type: "INPUT", num });
       else if (e.key === "Backspace" || e.key === "Delete" || e.key === "0") dispatch({ type: "ERASE" });
@@ -522,6 +530,39 @@ export default function KillerSudokuCard({
         <GameHowToPlayLink href={GAME_HOW_TO_URL.killer_sudoku} />
       </div>
 
+      <div
+        style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          gap: "0.45rem",
+          marginBottom: "0.25rem",
+          fontFamily: "'IM Fell English', Georgia, serif",
+          fontStyle: "italic",
+          fontSize: "0.72rem",
+          color: "#666",
+        }}
+      >
+        <span>Selected cell</span>
+        <input
+          type="color"
+          value={selectionColor}
+          onChange={(e) => setSelectionColor(e.target.value)}
+          title="Background color for the selected cell"
+          aria-label="Selected cell color"
+          style={{
+            width: "2rem",
+            height: "1.35rem",
+            padding: 0,
+            border: "1px solid #ccc",
+            borderRadius: "3px",
+            cursor: "pointer",
+            background: "#faf8f3",
+          }}
+        />
+      </div>
+
       {/* Grid */}
       <div style={{
         display: "grid",
@@ -545,7 +586,7 @@ export default function KillerSudokuCard({
 
             let bg = "#faf8f3";
             if (celebrating) bg = "#f0e6c8";
-            else if (isSelected) bg = "#d4c27a";
+            else if (isSelected) bg = selectionColor;
             else if (isPeer) bg = "#ede9e1";
             if (wrongSolution && !celebrating) bg = "#fce8e6";
 
@@ -682,7 +723,7 @@ export default function KillerSudokuCard({
         <span style={{ display: "block", marginTop: "0.35rem" }}>
           Wrong digits in <strong style={{ fontWeight: 600, color: "#c0392b" }}>red</strong>;{" "}
           <strong style={{ fontWeight: 600, color: "#888" }}>Undo</strong> or{" "}
-          <strong style={{ fontWeight: 600, color: "#888" }}>Ctrl+Z</strong> after a mistake.
+          <strong style={{ fontWeight: 600, color: "#888" }}>Ctrl+Z</strong> clears the last wrong digit — mistakes stay counted.
         </span>
       </p>
     </div>

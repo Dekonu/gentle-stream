@@ -11,6 +11,7 @@ import {
   cellInFlashUnits,
   completedSudokuUnits,
 } from "@/lib/games/sudokuLineComplete";
+import { useGridSelectionColor } from "@/lib/games/useGridSelectionColor";
 
 const MAX_MISTAKES = 3;
 
@@ -22,7 +23,7 @@ type NoteMask = number;
 interface MistakeUndoSnapshot {
   values: number[][];
   notes: NoteMask[][];
-  /** Mistake count *before* the wrong move that pushed this snapshot (authoritative on undo). */
+  /** Mistake count before the wrong move that pushed this snapshot (cloud resume; undo keeps the live tally). */
   mistakes: number;
 }
 
@@ -250,6 +251,20 @@ function stableSudokuPuzzleKey(p: SudokuPuzzle): string {
   return p.solution.map((row) => row.join("")).join("");
 }
 
+/** True only before any player progress — used to avoid late cloud HYDRATE wiping mistakes. */
+function isSudokuLocallyPristine(state: BoardState, puzzle: SudokuPuzzle): boolean {
+  if (state.completed || state.failed) return false;
+  if (state.mistakes !== 0) return false;
+  if (state.mistakeUndoStack.length > 0) return false;
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      if (state.values[r][c] !== puzzle.given[r][c]) return false;
+      if (state.notes[r][c] !== 0) return false;
+    }
+  }
+  return true;
+}
+
 function makeInitialState(puzzle: SudokuPuzzle): BoardState {
   return {
     values: puzzle.given.map((row) => [...row]),
@@ -349,10 +364,8 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
       const mistakeUndoStack = state.mistakeUndoStack.slice(0, -1);
       const values = cloneValues(snap.values);
       const notes = cloneNotes(snap.notes);
-      const mistakes = Math.min(
-        MAX_MISTAKES,
-        Math.max(0, snap.mistakes)
-      );
+      // Keep mistake tally — undo clears the wrong digit but does not erase a counted mistake.
+      const mistakes = state.mistakes;
       const failed = mistakes >= MAX_MISTAKES;
       const errors = computeErrors(values, puzzle.given);
       const completed = isComplete(values, puzzle.solution);
@@ -460,6 +473,7 @@ export default function SudokuCard({
   const dispatch = dispatchRaw;
   const [notesMode, setNotesMode] = useState(false);
   const [lineFlashUnits, setLineFlashUnits] = useState<string[]>([]);
+  const [selectionColor, setSelectionColor] = useGridSelectionColor();
   const stateRef = useRef(state);
   stateRef.current = state;
   const completionLogged = useRef(false);
@@ -504,7 +518,13 @@ export default function SudokuCard({
       return;
     }
 
+    // Late-arriving cloud slice (e.g. second GameSlot bootstrap after completions load).
+    // Never hydrate over local progress — stale saves often have mistakes: 0 and wipe the counter.
     if (initialCloudSlice && !boot.cloudHydrated) {
+      if (!isSudokuLocallyPristine(stateRef.current, puzzle)) {
+        boot.cloudHydrated = true;
+        return;
+      }
       dispatch({
         type: "HYDRATE",
         values: initialCloudSlice.values,
@@ -624,6 +644,14 @@ export default function SudokuCard({
       if (state.failed) return;
 
       if (!state.selected) return;
+      if (
+        e.key === "ArrowUp" ||
+        e.key === "ArrowDown" ||
+        e.key === "ArrowLeft" ||
+        e.key === "ArrowRight"
+      ) {
+        e.preventDefault();
+      }
       const num = parseInt(e.key, 10);
       if (num >= 1 && num <= 9) {
         e.preventDefault();
@@ -752,7 +780,7 @@ export default function SudokuCard({
 
     let bg = "#faf8f3";
     if (celebrating) bg = "#f0e6c8";
-    else if (isSelected) bg = "#d4c27a";
+    else if (isSelected) bg = selectionColor;
     else if (hl === "same-num" && val !== 0) bg = "#e8d98a";
     else if (hl === "peer") bg = "#ede9e1";
     if (wrongSolution && !celebrating) bg = "#fce8e6";
@@ -1022,6 +1050,39 @@ export default function SudokuCard({
         <GameHowToPlayLink href={GAME_HOW_TO_URL.sudoku} />
       </div>
 
+      <div
+        style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          gap: "0.45rem",
+          marginBottom: "0.25rem",
+          fontFamily: "'IM Fell English', Georgia, serif",
+          fontStyle: "italic",
+          fontSize: "0.72rem",
+          color: "#666",
+        }}
+      >
+        <span>Selected cell</span>
+        <input
+          type="color"
+          value={selectionColor}
+          onChange={(e) => setSelectionColor(e.target.value)}
+          title="Background color for the selected cell"
+          aria-label="Selected cell color"
+          style={{
+            width: "2rem",
+            height: "1.35rem",
+            padding: 0,
+            border: "1px solid #ccc",
+            borderRadius: "3px",
+            cursor: "pointer",
+            background: "#faf8f3",
+          }}
+        />
+      </div>
+
       {/* Grid */}
       <div style={gridStyle}>
         {state.values.map((row, r) =>
@@ -1197,7 +1258,7 @@ export default function SudokuCard({
         <span style={{ display: "block", marginTop: "0.25rem" }}>
           Wrong digits appear in <strong style={{ fontWeight: 600, color: "#c0392b" }}>red</strong>;{" "}
           <strong style={{ fontWeight: 600, color: "#888" }}>Undo</strong> or{" "}
-          <strong style={{ fontWeight: 600, color: "#888" }}>Ctrl+Z</strong> reverts the last mistake.
+          <strong style={{ fontWeight: 600, color: "#888" }}>Ctrl+Z</strong> clears the last wrong digit — mistakes stay counted.
         </span>
       </p>
     </div>

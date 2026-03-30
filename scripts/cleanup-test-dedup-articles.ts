@@ -1,0 +1,50 @@
+/**
+ * Deletes integration-test articles from scripts/test-dedup.ts and
+ * scripts/test-url-dedup.ts. Same logic as lib/db/migrations/017 and 018.
+ *
+ * Run when rows still appear in the app after migrations were not applied:
+ *
+ *   npm run articles:remove-test-dedup
+ *
+ * Requires .env.local with NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.
+ */
+
+import { config } from "dotenv";
+config({ path: ".env.local" });
+
+import { db } from "../lib/db/client";
+
+async function main() {
+  const { data: byHeadline, error: e1 } = await db
+    .from("articles")
+    .delete()
+    .or("headline.ilike.%TEST_DEDUP%,headline.ilike.%TEST_URL_DEDUP%")
+    .select("id");
+
+  if (e1) throw new Error(e1.message);
+
+  const { data: byFixture, error: e2 } = await db
+    .from("articles")
+    .delete()
+    .ilike("byline", "%Test Runner%")
+    .ilike("location", "%Testland%")
+    .ilike("subheadline", "%test subheadline%")
+    .select("id");
+
+  if (e2) throw new Error(e2.message);
+
+  const n1 = byHeadline?.length ?? 0;
+  const n2 = byFixture?.length ?? 0;
+  console.log(
+    `Removed ${n1} row(s) matching TEST_DEDUP / TEST_URL_DEDUP in headline.`
+  );
+  console.log(
+    `Removed ${n2} row(s) matching Test Runner + Testland + test subheadline fixture.`
+  );
+  console.log(`Total deleted: ${n1 + n2}`);
+}
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
