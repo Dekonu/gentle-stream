@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import Masthead from "./Masthead";
+import Masthead, { MASTHEAD_TOP_BAR_HEIGHT_PX } from "./Masthead";
 import { ProfileMenu } from "./user/ProfileMenu";
-import CategoryBar from "./CategoryBar";
+import CategoryDrawer from "./CategoryDrawer";
 import NewsSection from "./NewsSection";
 import GameSlot from "./games/GameSlot";
 import LoadingSection from "./LoadingSection";
@@ -52,6 +52,9 @@ function shouldBeGame(sectionIndex: number, gameRatio: number): boolean {
 }
 
 const FEED_FETCH_TIMEOUT_MS = 90_000;
+const SENTINEL_PREFETCH_PX = 900;
+const MIN_LOAD_GAP_MS = 650;
+const REACHED_END_COOLDOWN_MS = 20_000;
 
 export interface NewsFeedProps {
   /** Stable id from Supabase `auth.users` — used for ranking, seen state, future metrics. */
@@ -88,13 +91,29 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   // Plain UUID IDs only — sent to /api/feed excludeIds for DB-level exclusion.
   const renderedDbArticleIdsRef = useRef<Set<string>>(new Set());
 
+  // Prevent repeated loads when we have reached the end for this session/view.
+  const reachedEndRef = useRef(false);
+  // If the sentinel comes into view while we're loading, remember that so we can
+  // fetch again immediately after the current request finishes.
+  const pendingLoadRef = useRef(false);
+  const lastLoadStartAtRef = useRef(0);
+  const reachedEndTimeoutIdRef = useRef<number | null>(null);
+
   // Sentinel ref — plain IntersectionObserver (no library dependency on stale state)
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
 
   const loadMore = useCallback(async (overrideCategory?: Category | null) => {
     if (!feedReadyRef.current) return;
-    if (loadingRef.current) return;
+    if (reachedEndRef.current) return;
+    if (loadingRef.current) {
+      pendingLoadRef.current = true;
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastLoadStartAtRef.current < MIN_LOAD_GAP_MS) return;
+    lastLoadStartAtRef.current = now;
 
     loadingRef.current = true;
     setLoading(true);
@@ -107,43 +126,41 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
 
     const currentIndex = sectionCountRef.current;
 
-    // ── Decide: game slot or article section? ────────────────────────────────
-    if (shouldBeGame(currentIndex, gameRatioRef.current)) {
-      const offerDailyConnections =
-        !connectionsCompletedTodayRef.current &&
-        !connectionsShownInSessionRef.current;
+    try {
+      // ── Decide: game slot or article section? ────────────────────────────────
+      if (shouldBeGame(currentIndex, gameRatioRef.current)) {
+        const offerDailyConnections =
+          !connectionsCompletedTodayRef.current &&
+          !connectionsShownInSessionRef.current;
 
-      let gameType: GameFeedSection["gameType"];
-      let difficulty: GameFeedSection["difficulty"];
-      let connectionsDaily = false;
+        let gameType: GameFeedSection["gameType"];
+        let difficulty: GameFeedSection["difficulty"];
+        let connectionsDaily = false;
 
-      if (offerDailyConnections) {
-        connectionsShownInSessionRef.current = true;
-        gameType = "connections";
-        difficulty = "medium";
-        connectionsDaily = true;
-      } else {
-        const pick = feedGamePickForOrdinal(gameSlotOrdinalRef.current++);
-        gameType = pick.gameType;
-        difficulty = pick.difficulty;
+        if (offerDailyConnections) {
+          connectionsShownInSessionRef.current = true;
+          gameType = "connections";
+          difficulty = "medium";
+          connectionsDaily = true;
+        } else {
+          const pick = feedGamePickForOrdinal(gameSlotOrdinalRef.current++);
+          gameType = pick.gameType;
+          difficulty = pick.difficulty;
+        }
+
+        const gameSection: GameFeedSection = {
+          sectionType: "game",
+          gameType,
+          difficulty,
+          index: currentIndex,
+          ...(connectionsDaily ? { connectionsDaily: true } : {}),
+        };
+        setSections((prev) => [...prev, gameSection]);
+        sectionCountRef.current += 1;
+        return;
       }
 
-      const gameSection: GameFeedSection = {
-        sectionType: "game",
-        gameType,
-        difficulty,
-        index: currentIndex,
-        ...(connectionsDaily ? { connectionsDaily: true } : {}),
-      };
-      setSections((prev) => [...prev, gameSection]);
-      sectionCountRef.current += 1;
-      loadingRef.current = false;
-      setLoading(false);
-      return;
-    }
-
-    // ── Article section ──────────────────────────────────────────────────────
-    try {
+      // ── Article section ──────────────────────────────────────────────────────
       const params = new URLSearchParams();
       params.set("sectionIndex", String(currentIndex));
       if (category) params.set("category", category);
@@ -155,6 +172,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         () => controller.abort(),
         FEED_FETCH_TIMEOUT_MS
       );
+
       let res: Response;
       try {
         res = await fetch(`/api/feed?${params.toString()}`, {
@@ -163,6 +181,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       } finally {
         window.clearTimeout(timeoutId);
       }
+
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `HTTP ${res.status}`);
@@ -184,6 +203,27 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       });
 
       if (uniqueForView.length === 0) {
+        reachedEndRef.current = currentIndex > 0;
+        if (reachedEndRef.current) {
+          if (reachedEndTimeoutIdRef.current) {
+            window.clearTimeout(reachedEndTimeoutIdRef.current);
+          }
+          reachedEndTimeoutIdRef.current = window.setTimeout(() => {
+            reachedEndRef.current = false;
+            pendingLoadRef.current = false;
+
+            const el = sentinelRef.current;
+            if (!el || !feedReadyRef.current) return;
+
+            const rect = el.getBoundingClientRect();
+            const vh = window.innerHeight;
+            const nearViewport =
+              rect.top < vh + SENTINEL_PREFETCH_PX &&
+              rect.bottom > -SENTINEL_PREFETCH_PX;
+
+            if (nearViewport) void loadMore();
+          }, REACHED_END_COOLDOWN_MS);
+        }
         setError(
           currentIndex > 0
             ? "No more stories right now."
@@ -205,30 +245,17 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       for (const article of uniqueForView) {
         const key = articleUniqKey(article);
         renderedArticleKeysRef.current.add(key);
-        if ("id" in article && typeof article.id === "string" && article.id.length > 0) {
+        if (
+          "id" in article &&
+          typeof article.id === "string" &&
+          article.id.length > 0
+        ) {
           renderedDbArticleIdsRef.current.add(article.id);
         }
       }
       sectionCountRef.current += 1;
-
-      // IntersectionObserver only fires on visibility *changes*. If the sentinel
-      // stayed in the viewport while we loaded, it won't fire again — queue another
-      // fetch when there's still room below (infinite scroll).
-      if (uniqueForView.length > 0) {
-        requestAnimationFrame(() => {
-          const el = sentinelRef.current;
-          if (!el || loadingRef.current) return;
-          const margin = 280;
-          const rect = el.getBoundingClientRect();
-          const vh = window.innerHeight;
-          const isNearViewport =
-            rect.top < vh + margin && rect.bottom > -margin;
-          if (isNearViewport) void loadMore();
-        });
-      }
     } catch (e: unknown) {
-      const aborted =
-        e instanceof Error && e.name === "AbortError";
+      const aborted = e instanceof Error && e.name === "AbortError";
       const msg = aborted
         ? "Request timed out — the server may still be sourcing stories. Scroll or retry in a moment."
         : e instanceof Error
@@ -238,6 +265,25 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     } finally {
       loadingRef.current = false;
       setLoading(false);
+
+      const el = sentinelRef.current;
+      if (!el || reachedEndRef.current) return;
+
+      const rect = el.getBoundingClientRect();
+      const vh = window.innerHeight;
+      const nearViewport =
+        rect.top < vh + SENTINEL_PREFETCH_PX &&
+        rect.bottom > -SENTINEL_PREFETCH_PX;
+
+      if (pendingLoadRef.current || nearViewport) {
+        pendingLoadRef.current = false;
+        requestAnimationFrame(() => {
+          if (loadingRef.current || reachedEndRef.current) return;
+          void loadMore();
+        });
+      } else {
+        pendingLoadRef.current = false;
+      }
     }
   }, []); // stable — reads everything from refs
 
@@ -251,6 +297,13 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     setError(null);
     setLoading(false);
     loadingRef.current = false;
+    reachedEndRef.current = false;
+    if (reachedEndTimeoutIdRef.current) {
+      window.clearTimeout(reachedEndTimeoutIdRef.current);
+      reachedEndTimeoutIdRef.current = null;
+    }
+    pendingLoadRef.current = false;
+    lastLoadStartAtRef.current = 0;
     sectionCountRef.current = 0;
     gameSlotOrdinalRef.current = 0;
     connectionsShownInSessionRef.current = false;
@@ -366,21 +419,36 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     const el = sentinelRef.current;
     const io = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting && !loadingRef.current) {
-          void loadMore();
-        }
+        if (!entries[0]?.isIntersecting) return;
+        if (loadingRef.current) pendingLoadRef.current = true;
+        else void loadMore();
       },
-      { threshold: 0, rootMargin: "280px" }
+      { threshold: 0, rootMargin: `0px 0px ${SENTINEL_PREFETCH_PX}px 0px` }
     );
     observerRef.current = io;
     if (el) io.observe(el);
     return () => io.disconnect();
-  }, [isFeedReady, sections.length, loadMore]);
+  }, [isFeedReady, loadMore]);
+
+  useEffect(() => {
+    return () => {
+      if (reachedEndTimeoutIdRef.current) {
+        window.clearTimeout(reachedEndTimeoutIdRef.current);
+        reachedEndTimeoutIdRef.current = null;
+      }
+    };
+  }, []);
 
   const handleCategorySelect = (cat: Category) => {
     const next = activeCategory === cat ? null : cat;
     setActiveCategory(next);
     activeCategoryRef.current = next;
+    reachedEndRef.current = false;
+    if (reachedEndTimeoutIdRef.current) {
+      window.clearTimeout(reachedEndTimeoutIdRef.current);
+      reachedEndTimeoutIdRef.current = null;
+    }
+    pendingLoadRef.current = false;
     setSections((prev) => {
       const hadConnections = prev.some(
         (s) =>
@@ -404,6 +472,12 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     (ratio: number) => {
       gameRatioRef.current = ratio;
       localStorage.setItem("gentle_stream_game_ratio", String(ratio));
+      reachedEndRef.current = false;
+      if (reachedEndTimeoutIdRef.current) {
+        window.clearTimeout(reachedEndTimeoutIdRef.current);
+        reachedEndTimeoutIdRef.current = null;
+      }
+      pendingLoadRef.current = false;
       setSections([]);
       sectionCountRef.current = 0;
       gameSlotOrdinalRef.current = 0;
@@ -430,7 +504,11 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           ) : undefined
         }
       />
-      <CategoryBar selected={activeCategory} onSelect={handleCategorySelect} />
+      <CategoryDrawer
+        selected={activeCategory}
+        onSelect={handleCategorySelect}
+        topOffsetPx={MASTHEAD_TOP_BAR_HEIGHT_PX}
+      />
 
       {liveGenerating && (
         <div
@@ -495,11 +573,24 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           );
         })}
 
-        {error && <ErrorBanner message={error} onRetry={() => loadMore()} />}
-        {loading && <LoadingSection />}
+        {error && (
+          <ErrorBanner
+            message={error}
+            onRetry={() => {
+              reachedEndRef.current = false;
+              if (reachedEndTimeoutIdRef.current) {
+                window.clearTimeout(reachedEndTimeoutIdRef.current);
+                reachedEndTimeoutIdRef.current = null;
+              }
+              pendingLoadRef.current = false;
+              void loadMore();
+            }}
+          />
+        )}
 
-        {/* Sentinel — observed directly, not via library */}
+        {/* Sentinel — observed directly. Kept before the loading UI so it doesn't shift while loading. */}
         <div ref={sentinelRef} style={{ height: "1px" }} />
+        {loading && <LoadingSection />}
 
         <footer
           style={{

@@ -16,9 +16,9 @@ const UUID_RE =
 export default async function CreatorPublicProfilePage({
   params,
 }: {
-  params: { userId: string };
+  params: Promise<{ userId: string }>;
 }) {
-  const { userId } = params;
+  const { userId } = await params;
   if (!UUID_RE.test(userId)) notFound();
 
   const creatorProfile = await getCreatorProfile(userId);

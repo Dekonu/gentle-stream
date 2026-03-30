@@ -3,6 +3,8 @@
 import type { ReactNode } from "react";
 import { AppLogo } from "@/components/brand/AppLogo";
 
+export const MASTHEAD_TOP_BAR_HEIGHT_PX = 42;
+
 interface MastheadProps {
   /** Replaces the right meta line (volume / date line) when signed in. */
   accountSlot?: ReactNode;
@@ -19,24 +21,18 @@ function getTodayDate() {
 
 export default function Masthead({ accountSlot }: MastheadProps) {
   return (
-    <header
-      className="hide-scrollbar"
-      style={{
-        borderBottom: "3px double #1a1a1a",
-        paddingBottom: "0.5rem",
-        textAlign: "center",
-        background: "#faf8f3",
-        position: "sticky",
-        top: 0,
-        zIndex: 100,
-        boxShadow: "0 2px 12px rgba(0,0,0,0.10)",
-      }}
-    >
-      {/* Top meta bar */}
+    <>
       <div
         style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          zIndex: 130,
+          background: "#faf8f3",
           borderBottom: "1px solid #1a1a1a",
-          padding: "0.3rem 2rem",
+          height: `${MASTHEAD_TOP_BAR_HEIGHT_PX}px`,
+          padding: "0.3rem 1rem",
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
@@ -63,41 +59,52 @@ export default function Masthead({ accountSlot }: MastheadProps) {
         </span>
       </div>
 
-      {/* Masthead title */}
-      <div
+      <header
+        className="hide-scrollbar"
         style={{
-          padding: "0.5rem 1rem 0.25rem",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: "0.35rem",
+          borderBottom: "3px double #1a1a1a",
+          paddingTop: `${MASTHEAD_TOP_BAR_HEIGHT_PX + 8}px`,
+          paddingBottom: "0.5rem",
+          textAlign: "center",
+          background: "#faf8f3",
+          boxShadow: "0 2px 12px rgba(0,0,0,0.10)",
         }}
       >
-        <AppLogo heightPx={56} priority />
-        <h1
-          style={{
-            fontFamily:
-              "'UnifrakturMaguntia', 'Old Standard TT', Georgia, serif",
-            fontSize: "clamp(2.8rem, 6vw, 5rem)",
-            fontWeight: 400,
-            letterSpacing: "-0.01em",
-            color: "#0d0d0d",
-            margin: 0,
-            lineHeight: 1,
-            textShadow: "1px 1px 0 rgba(0,0,0,0.06)",
-          }}
-        >
-          Gentle Stream
-        </h1>
         <div
           style={{
-            height: "2px",
-            background: "#1a1a1a",
-            margin: "0.35rem auto 0",
-            maxWidth: "620px",
+            padding: "0.5rem 1rem 0.25rem",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "0.35rem",
           }}
-        />
-      </div>
-    </header>
+        >
+          <AppLogo heightPx={56} priority />
+          <h1
+            style={{
+              fontFamily:
+                "'UnifrakturMaguntia', 'Old Standard TT', Georgia, serif",
+              fontSize: "clamp(2.8rem, 6vw, 5rem)",
+              fontWeight: 400,
+              letterSpacing: "-0.01em",
+              color: "#0d0d0d",
+              margin: 0,
+              lineHeight: 1,
+              textShadow: "1px 1px 0 rgba(0,0,0,0.06)",
+            }}
+          >
+            Gentle Stream
+          </h1>
+          <div
+            style={{
+              height: "2px",
+              background: "#1a1a1a",
+              margin: "0.35rem auto 0",
+              maxWidth: "620px",
+            }}
+          />
+        </div>
+      </header>
+    </>
   );
 }

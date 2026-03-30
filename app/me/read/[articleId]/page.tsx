@@ -15,9 +15,9 @@ const UUID_RE =
 export default async function ReadSavedArticlePage({
   params,
 }: {
-  params: { articleId: string };
+  params: Promise<{ articleId: string }>;
 }) {
-  const { articleId } = params;
+  const { articleId } = await params;
   if (!UUID_RE.test(articleId)) notFound();
 
   let userId: string;
