@@ -4,15 +4,22 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { ConnectionsPuzzle, ConnectionsGroup, ConnectionsTier } from "@/lib/games/connectionsIngestAgent";
 import type { Difficulty } from "@/lib/games/types";
 
-// ─── Tier colours ─────────────────────────────────────────────────────────────
-// Using the app's warm palette — newsprint tones rather than NYT's primaries
+// ─── Tier colours (NYT Connections–style: yellow → green → blue → purple) ───
 
 const TIER_STYLES: Record<ConnectionsTier, { bg: string; text: string; label: string }> = {
-  1: { bg: "#d4c27a", text: "#2c2000", label: "Straightforward" },   // warm yellow
-  2: { bg: "#8fb87a", text: "#0d2200", label: "Moderate"        },   // sage green
-  3: { bg: "#7a9eb8", text: "#001828", label: "Tricky"          },   // dusty blue
-  4: { bg: "#9b7ab8", text: "#1a0028", label: "Devious"         },   // muted purple
+  1: { bg: "#f9df6d", text: "#121212", label: "Straightforward" },
+  2: { bg: "#a0cf7a", text: "#121212", label: "Moderate" },
+  3: { bg: "#b4c7e7", text: "#121212", label: "Tricky" },
+  4: { bg: "#c1a7e2", text: "#121212", label: "Devious" },
 };
+
+const NYT_FONT =
+  'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+
+const TILE_DEFAULT_BG = "#efeee6";
+const TILE_SELECTED_BG = "#5a5a5a";
+const TILE_SELECTED_FG = "#ffffff";
+const TILE_TEXT = "#121212";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -270,14 +277,17 @@ export default function ConnectionsCard({
   // ── Styles ──────────────────────────────────────────────────────────────────
 
   const cardStyle: React.CSSProperties = {
-    borderTop: "3px double #1a1a1a",
-    borderBottom: "2px solid #1a1a1a",
-    background: "#faf8f3",
-    padding: "1.5rem 1.5rem 1.2rem",
+    border: "1px solid #e3e3e3",
+    borderRadius: "4px",
+    background: "#ffffff",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
+    padding: "1.25rem 1.25rem 1.5rem",
     display: "flex",
     flexDirection: "column",
-    alignItems: "center",
-    gap: "0.875rem",
+    alignItems: "stretch",
+    gap: "1rem",
+    maxWidth: "560px",
+    margin: "0 auto",
     userSelect: "none",
     WebkitUserSelect: "none",
   };
@@ -286,42 +296,69 @@ export default function ConnectionsCard({
 
   function tileStyle(word: string): React.CSSProperties {
     const isSelected = state.selected.has(word);
-    const group = getGroupForWord(puzzle, word);
-    const isSolved = group && state.solved.includes(group.tier);
 
     return {
       width: TILE_W,
-      aspectRatio: "1.9 / 1",
+      minHeight: "42px",
+      aspectRatio: "1.85 / 1",
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
-      background: isSelected ? "#1a1a1a" : "#ede9e1",
-      color: isSelected ? "#faf8f3" : "#1a1a1a",
-      fontFamily: "'Playfair Display', Georgia, serif",
-      fontSize: "clamp(0.65rem, 1.6vw, 0.88rem)",
+      textAlign: "center",
+      padding: "6px 4px",
+      boxSizing: "border-box",
+      background: isSelected ? TILE_SELECTED_BG : TILE_DEFAULT_BG,
+      color: isSelected ? TILE_SELECTED_FG : TILE_TEXT,
+      fontFamily: NYT_FONT,
+      fontSize: "clamp(0.7rem, 1.65vw, 0.8125rem)",
       fontWeight: 700,
-      letterSpacing: "0.04em",
+      letterSpacing: "0.06em",
+      textTransform: "uppercase",
+      lineHeight: 1.25,
       cursor: "pointer",
-      borderRadius: 6,
-      transition: "background 0.12s ease, transform 0.08s ease",
-      transform: isSelected ? "scale(0.96)" : "scale(1)",
+      borderRadius: "4px",
+      border: "none",
+      transition: "background 0.1s ease, color 0.1s ease, transform 0.08s ease",
+      transform: isSelected ? "scale(0.98)" : "scale(1)",
       WebkitTapHighlightColor: "transparent",
     };
   }
 
-  // ── Mistakes indicator ───────────────────────────────────────────────────────
+  // ── Mistakes indicator (NYT-style small dots) ───────────────────────────────
   const MistakeDots = () => (
-    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-      <span style={{ fontFamily: "'IM Fell English', Georgia, serif", fontStyle: "italic", fontSize: "0.75rem", color: "#888" }}>
+    <div
+      style={{
+        display: "flex",
+        gap: "10px",
+        alignItems: "center",
+        justifyContent: "center",
+        flexWrap: "wrap",
+      }}
+    >
+      <span
+        style={{
+          fontFamily: NYT_FONT,
+          fontSize: "0.875rem",
+          fontWeight: 500,
+          color: "#737373",
+        }}
+      >
         Mistakes remaining:
       </span>
-      {Array.from({ length: 4 }, (_, i) => (
-        <div key={i} style={{
-          width: 12, height: 12, borderRadius: "50%",
-          background: i < state.mistakesLeft ? "#1a1a1a" : "#ddd",
-          transition: "background 0.3s ease",
-        }} />
-      ))}
+      <div style={{ display: "flex", gap: "5px", alignItems: "center" }}>
+        {Array.from({ length: 4 }, (_, i) => (
+          <div
+            key={i}
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              background: i < state.mistakesLeft ? "#3d3d3d" : "#e5e5e5",
+              transition: "background 0.25s ease",
+            }}
+          />
+        ))}
+      </div>
     </div>
   );
 
@@ -329,31 +366,41 @@ export default function ConnectionsCard({
   const SolvedRow = ({ group }: { group: ConnectionsGroup }) => {
     const style = TIER_STYLES[group.tier];
     return (
-      <div style={{
-        width: "100%",
-        padding: "0.6rem 1rem",
-        background: style.bg,
-        borderRadius: 6,
-        textAlign: "center",
-      }}>
-        <div style={{
-          fontFamily: "'Playfair Display', Georgia, serif",
-          fontSize: "0.82rem",
-          fontWeight: 700,
-          color: style.text,
-          letterSpacing: "0.05em",
-          textTransform: "uppercase",
-        }}>
+      <div
+        style={{
+          width: "100%",
+          padding: "0.65rem 0.85rem",
+          background: style.bg,
+          borderRadius: "4px",
+          textAlign: "center",
+        }}
+      >
+        <div
+          style={{
+            fontFamily: NYT_FONT,
+            fontSize: "0.8125rem",
+            fontWeight: 700,
+            color: style.text,
+            letterSpacing: "0.04em",
+            textTransform: "uppercase",
+          }}
+        >
           {group.label}
         </div>
-        <div style={{
-          fontFamily: "Georgia, serif",
-          fontSize: "0.72rem",
-          color: style.text,
-          opacity: 0.8,
-          marginTop: 2,
-        }}>
-          {group.words.join("  ·  ")}
+        <div
+          style={{
+            fontFamily: NYT_FONT,
+            fontSize: "0.75rem",
+            fontWeight: 600,
+            color: style.text,
+            opacity: 0.92,
+            marginTop: "0.35rem",
+            letterSpacing: "0.04em",
+            textTransform: "uppercase",
+            lineHeight: 1.35,
+          }}
+        >
+          {group.words.join(", ")}
         </div>
       </div>
     );
@@ -365,24 +412,28 @@ export default function ConnectionsCard({
     return (
       <div style={cardStyle}>
         <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <span style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "1.3rem", fontWeight: 700 }}>
+          <span style={{ fontFamily: NYT_FONT, fontSize: "1.125rem", fontWeight: 700, color: "#121212" }}>
             Connections
           </span>
-          <span style={{ fontFamily: "'IM Fell English', Georgia, serif", fontStyle: "italic", fontSize: "0.78rem", color: "#888" }}>
+          <span style={{ fontFamily: NYT_FONT, fontSize: "0.8125rem", color: "#737373", fontWeight: 500 }}>
             {puzzle.category}
             {dailyPuzzle ? " · Today’s puzzle" : ""}
           </span>
         </div>
 
-        {/* All groups revealed */}
-        {puzzle.groups.map((g) => <SolvedRow key={g.tier} group={g} />)}
+        {/* All groups revealed (yellow → … → purple) */}
+        {[...puzzle.groups]
+          .sort((a, b) => a.tier - b.tier)
+          .map((g) => (
+            <SolvedRow key={g.tier} group={g} />
+          ))}
 
         {/* Result */}
-        <div style={{ textAlign: "center", padding: "0.5rem 0", fontFamily: "'Playfair Display', Georgia, serif" }}>
-          <div style={{ fontSize: "1.1rem", fontWeight: 700, color: "#0d0d0d" }}>
+        <div style={{ textAlign: "center", padding: "0.35rem 0", fontFamily: NYT_FONT }}>
+          <div style={{ fontSize: "1.0625rem", fontWeight: 700, color: "#121212" }}>
             {won ? "Puzzle solved" : "Better luck next time"}
           </div>
-          <div style={{ fontFamily: "'IM Fell English', Georgia, serif", fontStyle: "italic", color: "#888", fontSize: "0.85rem", marginTop: 2 }}>
+          <div style={{ color: "#737373", fontSize: "0.875rem", marginTop: 6, fontWeight: 500 }}>
             {won
               ? `Completed in ${formatTime(state.elapsedSecs)} with ${4 - state.mistakesLeft} mistake${4 - state.mistakesLeft === 1 ? "" : "s"}`
               : `${state.solved.length} of 4 groups found`}
@@ -393,31 +444,41 @@ export default function ConnectionsCard({
         {puzzle.redHerrings.length > 0 && (
           <div style={{ width: "100%" }}>
             <button
-              onClick={() => setShowReveal(v => !v)}
+              type="button"
+              onClick={() => setShowReveal((v) => !v)}
               style={{
-                width: "100%", padding: "0.4rem",
+                width: "100%",
+                padding: "0.5rem",
                 background: "transparent",
-                border: "1px solid #ccc",
-                fontFamily: "'Playfair Display', Georgia, serif",
-                fontSize: "0.72rem", letterSpacing: "0.06em",
-                textTransform: "uppercase", cursor: "pointer", color: "#888",
+                border: "1px solid #d4d4d4",
+                borderRadius: "9999px",
+                fontFamily: NYT_FONT,
+                fontSize: "0.8125rem",
+                fontWeight: 600,
+                cursor: "pointer",
+                color: "#525252",
               }}
             >
               {showReveal ? "Hide" : "Show"} the traps
             </button>
             {showReveal && (
-              <div style={{ marginTop: "0.5rem", display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={{ marginTop: "0.5rem", display: "flex", flexDirection: "column", gap: 6 }}>
                 {puzzle.redHerrings.map((rh) => (
-                  <div key={rh.word} style={{
-                    padding: "0.3rem 0.6rem",
-                    background: "#ede9e1",
-                    borderRadius: 4,
-                    fontFamily: "Georgia, serif",
-                    fontSize: "0.75rem",
-                    color: "#555",
-                  }}>
-                    <strong style={{ color: "#1a1a1a" }}>{rh.word}</strong>
-                    {" — could also seem like: "}{rh.couldAlsoBelong}
+                  <div
+                    key={rh.word}
+                    style={{
+                      padding: "0.45rem 0.65rem",
+                      background: TILE_DEFAULT_BG,
+                      borderRadius: "4px",
+                      fontFamily: NYT_FONT,
+                      fontSize: "0.8125rem",
+                      color: "#525252",
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    <strong style={{ color: TILE_TEXT }}>{rh.word}</strong>
+                    {" — could also seem like: "}
+                    {rh.couldAlsoBelong}
                   </div>
                 ))}
               </div>
@@ -426,14 +487,22 @@ export default function ConnectionsCard({
         )}
 
         {onNewPuzzle && !dailyPuzzle && (
-          <button onClick={() => onNewPuzzle("medium")} style={{
-            padding: "0.4rem 1.2rem",
-            border: "1px solid #1a1a1a",
-            background: "#1a1a1a", color: "#faf8f3",
-            fontFamily: "'Playfair Display', Georgia, serif",
-            fontSize: "0.75rem", letterSpacing: "0.06em",
-            textTransform: "uppercase", cursor: "pointer",
-          }}>
+          <button
+            type="button"
+            onClick={() => onNewPuzzle("medium")}
+            style={{
+              alignSelf: "center",
+              padding: "0.55rem 1.35rem",
+              border: "none",
+              borderRadius: "9999px",
+              background: "#121212",
+              color: "#ffffff",
+              fontFamily: NYT_FONT,
+              fontSize: "0.875rem",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
             New puzzle
           </button>
         )}
@@ -446,23 +515,43 @@ export default function ConnectionsCard({
     <div style={cardStyle}>
       {/* Header */}
       <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <span style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "1.3rem", fontWeight: 700 }}>
+        <span style={{ fontFamily: NYT_FONT, fontSize: "1.125rem", fontWeight: 700, color: "#121212" }}>
           Connections
         </span>
-        <span style={{ fontFamily: "'IM Fell English', Georgia, serif", fontStyle: "italic", fontSize: "0.78rem", color: "#888", display: "flex", gap: "1rem" }}>
+        <span
+          style={{
+            fontFamily: NYT_FONT,
+            fontSize: "0.8125rem",
+            color: "#737373",
+            fontWeight: 500,
+            display: "flex",
+            gap: "0.75rem",
+            alignItems: "baseline",
+          }}
+        >
           <span>
             {puzzle.category}
             {dailyPuzzle ? " · Today’s puzzle" : ""}
           </span>
           {state.startedAt && (
-            <span style={{ fontVariantNumeric: "tabular-nums" }}>{formatTime(state.elapsedSecs)}</span>
+            <span style={{ fontVariantNumeric: "tabular-nums", color: "#525252" }}>{formatTime(state.elapsedSecs)}</span>
           )}
         </span>
       </div>
 
-      {/* Instruction */}
-      <p style={{ margin: 0, fontFamily: "'IM Fell English', Georgia, serif", fontStyle: "italic", fontSize: "0.78rem", color: "#888", alignSelf: "flex-start" }}>
-        Find four groups of four — select four words, then submit
+      {/* Instruction — NYT-style centered prompt */}
+      <p
+        style={{
+          margin: 0,
+          fontFamily: NYT_FONT,
+          fontSize: "1rem",
+          fontWeight: 500,
+          color: "#121212",
+          textAlign: "center",
+          lineHeight: 1.4,
+        }}
+      >
+        Create four groups of four!
       </p>
 
       {/* Solved rows (appear above remaining tiles) */}
@@ -504,16 +593,19 @@ export default function ConnectionsCard({
 
       {/* One-away hint */}
       {oneAwayHint && (
-        <div style={{
-          fontFamily: "'IM Fell English', Georgia, serif",
-          fontStyle: "italic",
-          fontSize: "0.8rem",
-          color: "#7a4400",
-          background: "#fdf6e3",
-          border: "1px solid #e8d9a0",
-          padding: "0.3rem 0.8rem",
-          borderRadius: 4,
-        }}>
+        <div
+          style={{
+            fontFamily: NYT_FONT,
+            fontSize: "0.875rem",
+            fontWeight: 600,
+            color: "#92400e",
+            background: "#fef9c3",
+            border: "1px solid #fde047",
+            padding: "0.45rem 0.9rem",
+            borderRadius: "4px",
+            textAlign: "center",
+          }}
+        >
           One away…
         </div>
       )}
@@ -521,40 +613,23 @@ export default function ConnectionsCard({
       {/* Mistakes */}
       <MistakeDots />
 
-      {/* Action row */}
-      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", justifyContent: "center" }}>
+      {/* Action row — pill buttons like NYT */}
+      <div
+        style={{
+          display: "flex",
+          gap: "0.65rem",
+          flexWrap: "wrap",
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
         <ActionBtn onClick={() => dispatch({ type: "SHUFFLE" })}>Shuffle</ActionBtn>
         <ActionBtn onClick={() => dispatch({ type: "DESELECT_ALL" })} disabled={state.selected.size === 0}>
           Deselect all
         </ActionBtn>
-        <ActionBtn
-          onClick={handleSubmit}
-          disabled={state.selected.size !== 4}
-          primary
-        >
+        <ActionBtn onClick={handleSubmit} disabled={state.selected.size !== 4} primary>
           Submit
         </ActionBtn>
-      </div>
-
-      {/* Tier legend */}
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center", marginTop: 2 }}>
-        {([1, 2, 3, 4] as ConnectionsTier[]).map((tier) => {
-          const s = TIER_STYLES[tier];
-          const solved = state.solved.includes(tier);
-          return (
-            <div key={tier} style={{
-              padding: "0.15rem 0.5rem",
-              borderRadius: 3,
-              background: solved ? s.bg : "#ede9e1",
-              fontFamily: "Georgia, serif",
-              fontSize: "0.65rem",
-              color: solved ? s.text : "#aaa",
-              transition: "all 0.3s ease",
-            }}>
-              {s.label}
-            </div>
-          );
-        })}
       </div>
     </div>
   );
@@ -573,22 +648,24 @@ function ActionBtn({
   disabled?: boolean;
   primary?: boolean;
 }) {
+  const filled = primary && !disabled;
   return (
     <button
+      type="button"
       onClick={onClick}
       disabled={disabled}
       style={{
-        padding: "0.35rem 1rem",
-        border: "1px solid #1a1a1a",
-        background: primary && !disabled ? "#1a1a1a" : "transparent",
-        color: disabled ? "#ccc" : primary ? "#faf8f3" : "#1a1a1a",
-        borderColor: disabled ? "#ddd" : "#1a1a1a",
-        fontFamily: "'Playfair Display', Georgia, serif",
-        fontSize: "0.72rem",
-        letterSpacing: "0.06em",
-        textTransform: "uppercase",
+        padding: "0.55rem 1.15rem",
+        borderRadius: "9999px",
+        border: filled ? "1px solid #121212" : "1px solid #121212",
+        background: filled ? "#121212" : "#ffffff",
+        color: disabled ? "#a3a3a3" : filled ? "#ffffff" : "#121212",
+        borderColor: disabled ? "#d4d4d4" : "#121212",
+        fontFamily: NYT_FONT,
+        fontSize: "0.875rem",
+        fontWeight: 600,
         cursor: disabled ? "not-allowed" : "pointer",
-        transition: "background 0.12s ease",
+        transition: "background 0.12s ease, color 0.12s ease, border-color 0.12s ease",
       }}
     >
       {children}

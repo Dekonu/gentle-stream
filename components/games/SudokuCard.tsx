@@ -92,11 +92,15 @@ function CellNotes({ mask }: { mask: NoteMask }) {
     justifyContent: "center",
     fontFamily: "'Playfair Display', Georgia, serif",
   };
+  // Slight bias down/right — aligned with Killer Sudoku note placement / common puzzle apps.
   return (
     <div
       style={{
         position: "absolute",
-        inset: "2px",
+        top: 5,
+        right: 3,
+        bottom: 3,
+        left: 8,
         display: "grid",
         gridTemplateColumns: "repeat(3, 1fr)",
         gridTemplateRows: "repeat(3, 1fr)",
@@ -787,10 +791,10 @@ export default function SudokuCard({
 
     const borderRight = (c + 1) % 3 === 0 && c < 8
       ? "2px solid #1a1a1a"
-      : "0.5px solid #ccc";
+      : "0.5px solid #ddd";
     const borderBottom = (r + 1) % 3 === 0 && r < 8
       ? "2px solid #1a1a1a"
-      : "0.5px solid #ccc";
+      : "0.5px solid #ddd";
 
     return {
       position: "relative",

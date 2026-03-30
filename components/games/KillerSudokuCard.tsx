@@ -223,6 +223,94 @@ function clearDigitNotesFromCagePeers(
 
 /** Inset from cell edge (px) so dashed cage lines read clearly inside the solid grid. */
 const CAGE_LINE_INSET = 3;
+/** Visible cage outline — always drawn on cage boundaries, including along 3×3 lines and puzzle edge. */
+/** Muted dashed cage lines — alpha so they sit behind sums and digits. */
+const CAGE_DASH_BORDER = "2.5px dashed rgba(74, 85, 104, 0.38)";
+/** Corner reserved for cage sum text so dashes don’t run through the label (matches NYT-style gap). */
+const CAGE_SUM_GAP_W = 26;
+const CAGE_SUM_GAP_H = 13;
+
+function KillerCageInsetOverlay({
+  showTop,
+  showBottom,
+  showLeft,
+  showRight,
+  sumLabelCorner,
+}: {
+  showTop: boolean;
+  showBottom: boolean;
+  showLeft: boolean;
+  showRight: boolean;
+  /** Sum is in this cell’s top-left — skip that corner on top/left dashes. */
+  sumLabelCorner: boolean;
+}) {
+  const inset = CAGE_LINE_INSET;
+  const skipW = sumLabelCorner ? CAGE_SUM_GAP_W : 0;
+  const skipH = sumLabelCorner ? CAGE_SUM_GAP_H : 0;
+
+  const lineBase: React.CSSProperties = {
+    position: "absolute",
+    zIndex: 0,
+    pointerEvents: "none",
+  };
+
+  return (
+    <>
+      {showTop ? (
+        <div
+          aria-hidden
+          style={{
+            ...lineBase,
+            top: inset,
+            left: inset + skipW,
+            right: inset,
+            height: 0,
+            borderTop: CAGE_DASH_BORDER,
+          }}
+        />
+      ) : null}
+      {showLeft ? (
+        <div
+          aria-hidden
+          style={{
+            ...lineBase,
+            left: inset,
+            top: inset + skipH,
+            bottom: inset,
+            width: 0,
+            borderLeft: CAGE_DASH_BORDER,
+          }}
+        />
+      ) : null}
+      {showRight ? (
+        <div
+          aria-hidden
+          style={{
+            ...lineBase,
+            right: inset,
+            top: inset,
+            bottom: inset,
+            width: 0,
+            borderRight: CAGE_DASH_BORDER,
+          }}
+        />
+      ) : null}
+      {showBottom ? (
+        <div
+          aria-hidden
+          style={{
+            ...lineBase,
+            bottom: inset,
+            left: inset,
+            right: inset,
+            height: 0,
+            borderBottom: CAGE_DASH_BORDER,
+          }}
+        />
+      ) : null}
+    </>
+  );
+}
 
 function KillerCellNotes({
   mask,
@@ -786,11 +874,11 @@ export default function KillerSudokuCard({
             const boxLeft = c % 3 === 0 && c > 0;
             const boxRight = (c + 1) % 3 === 0 && c < 8;
             const boxBottom = (r + 1) % 3 === 0 && r < 8;
-            // Cage dashed lines sit *inside* the cell so they don’t sit on the shared grid line.
-            const innerCageTop = borders.top && !boxTop && r > 0;
-            const innerCageBottom = borders.bottom && !boxBottom && r < 8;
-            const innerCageLeft = borders.left && !boxLeft && c > 0;
-            const innerCageRight = borders.right && !boxRight && c < 8;
+            // Full cage outline: every cage edge, including where it meets a thick box line or board edge.
+            const innerCageTop = borders.top;
+            const innerCageBottom = borders.bottom;
+            const innerCageLeft = borders.left;
+            const innerCageRight = borders.right;
 
             return (
               <div
@@ -825,22 +913,12 @@ export default function KillerSudokuCard({
                   borderBottom: boxBottom ? "2px solid #1a1a1a" : "0.5px solid #ddd",
                 }}
               >
-                {/* Inset cage outline — dashed, inside the cell margin */}
-                <div
-                  aria-hidden
-                  style={{
-                    position: "absolute",
-                    left: CAGE_LINE_INSET,
-                    top: CAGE_LINE_INSET,
-                    right: CAGE_LINE_INSET,
-                    bottom: CAGE_LINE_INSET,
-                    zIndex: 0,
-                    pointerEvents: "none",
-                    borderTop: innerCageTop ? "1.5px dashed #666" : "none",
-                    borderLeft: innerCageLeft ? "1.5px dashed #666" : "none",
-                    borderRight: innerCageRight ? "1.5px dashed #666" : "none",
-                    borderBottom: innerCageBottom ? "1.5px dashed #666" : "none",
-                  }}
+                <KillerCageInsetOverlay
+                  showTop={innerCageTop}
+                  showBottom={innerCageBottom}
+                  showLeft={innerCageLeft}
+                  showRight={innerCageRight}
+                  sumLabelCorner={cageSum !== undefined}
                 />
                 {/* Cage sum label — top-left corner of each cage */}
                 {cageSum !== undefined && (
