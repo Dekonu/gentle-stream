@@ -50,7 +50,6 @@ export default function RabbitHoleCard({
     modeFromSeed(puzzle.uniquenessSignature ?? puzzle.topic)
   );
   const [visitedLinks, setVisitedLinks] = useState<Record<string, boolean>>({});
-  const [startedAt, setStartedAt] = useState<number | null>(null);
   const completionLoggedRef = useRef(false);
 
   const visitedCount = useMemo(
@@ -61,7 +60,6 @@ export default function RabbitHoleCard({
   useEffect(() => {
     setDesignMode(modeFromSeed(puzzle.uniquenessSignature ?? puzzle.topic));
     setVisitedLinks({});
-    setStartedAt(null);
     completionLoggedRef.current = false;
   }, [puzzle.uniquenessSignature, puzzle.topic]);
 
@@ -71,8 +69,7 @@ export default function RabbitHoleCard({
     if (completionLoggedRef.current) return;
 
     completionLoggedRef.current = true;
-    const durationSeconds =
-      startedAt == null ? 0 : Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    const durationSeconds = Math.max(5, visitedCount * 8);
     void fetch("/api/user/game-completion", {
       method: "POST",
       credentials: "include",
@@ -93,12 +90,10 @@ export default function RabbitHoleCard({
     puzzle.difficulty,
     puzzle.links.length,
     puzzleSignature,
-    startedAt,
     visitedCount,
   ]);
 
   function markVisited(linkHref: string) {
-    if (startedAt == null) setStartedAt(Date.now());
     setVisitedLinks((prev) => ({ ...prev, [linkHref]: true }));
   }
 
