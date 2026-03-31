@@ -21,6 +21,7 @@ interface UserProfileRow {
   username_set_at?: string | null;
   avatar_url?: string | null;
   weather_location?: string | null;
+  weather_unit_system?: "metric" | "imperial" | null;
   theme_preference?: "light" | "dark" | null;
   preferred_emotions: string[];
   preferred_locales: string[];
@@ -47,6 +48,7 @@ const DEFAULT_ENABLED_GAME_TYPES: GameType[] = [
   "nonogram",
   "connections",
 ] as const;
+const DEFAULT_WEATHER_LOCATION = "San Jose, CA, US";
 let isUserSeenArticlesTableAvailable = true;
 const env = getEnv();
 const isSeenTableEnabled =
@@ -113,7 +115,8 @@ function rowToProfile(row: UserProfileRow): UserProfile {
     username: row.username ?? null,
     usernameSetAt: row.username_set_at ?? null,
     avatarUrl: row.avatar_url ?? null,
-    weatherLocation: row.weather_location ?? null,
+    weatherLocation: row.weather_location ?? DEFAULT_WEATHER_LOCATION,
+    weatherUnitSystem: row.weather_unit_system ?? "metric",
     themePreference: row.theme_preference ?? null,
     preferredEmotions: row.preferred_emotions ?? [],
     preferredLocales: row.preferred_locales ?? ["global"],
@@ -135,7 +138,19 @@ export async function getOrCreateUserProfile(
     .eq("user_id", userId)
     .single();
 
-  if (data && !error) return rowToProfile(data as UserProfileRow);
+  if (data && !error) {
+    const row = data as UserProfileRow;
+    if (!row.weather_location || !row.weather_location.trim()) {
+      const { data: updated, error: updateError } = await db
+        .from("user_profiles")
+        .update({ weather_location: DEFAULT_WEATHER_LOCATION })
+        .eq("user_id", userId)
+        .select("*")
+        .single();
+      if (!updateError && updated) return rowToProfile(updated as UserProfileRow);
+    }
+    return rowToProfile(row);
+  }
 
   // Create a new default profile
   const newProfile = {
@@ -144,6 +159,8 @@ export async function getOrCreateUserProfile(
     game_ratio: DEFAULT_GAME_RATIO,
     enabled_game_types: [...DEFAULT_ENABLED_GAME_TYPES],
     user_role: "general" as const,
+    weather_location: DEFAULT_WEATHER_LOCATION,
+    weather_unit_system: "metric",
     preferred_emotions: [],
     preferred_locales: ["global"],
     seen_article_ids: [],
@@ -290,6 +307,7 @@ export async function updateUserPreferences(
       | "categoryWeights"
       | "gameRatio"
       | "enabledGameTypes"
+      | "weatherUnitSystem"
       | "themePreference"
       | "preferredEmotions"
       | "preferredLocales"
@@ -304,6 +322,9 @@ export async function updateUserPreferences(
   }
   if (prefs.themePreference !== undefined) {
     updates.theme_preference = prefs.themePreference ?? null;
+  }
+  if (prefs.weatherUnitSystem !== undefined) {
+    updates.weather_unit_system = prefs.weatherUnitSystem ?? "metric";
   }
   if (prefs.preferredEmotions) updates.preferred_emotions = prefs.preferredEmotions;
   if (prefs.preferredLocales) updates.preferred_locales = prefs.preferredLocales;

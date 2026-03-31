@@ -8,9 +8,12 @@ import {
 import { getSessionUserId } from "@/lib/api/sessionUser";
 import { parseJsonBody } from "@/lib/validation/http";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
+import { getEnv } from "@/lib/env";
 
 const USERNAME_RE = /^[a-z0-9_]{3,30}$/;
 const EDGE_PUNCTUATION = ",.;:/\\|_-";
+const WEATHER_LOCATION_DEFAULT = "San Jose, CA, US";
+const GOOGLE_GEOCODE_API = "https://maps.googleapis.com/maps/api/geocode/json";
 
 function collapseSpaces(input: string): string {
   return input
@@ -30,6 +33,40 @@ function trimEdgePunctuation(input: string): string {
 function normalizeWeatherLocation(input: string): string {
   const collapsed = collapseSpaces(input.trim());
   return trimEdgePunctuation(collapsed);
+}
+
+async function canonicalizeWeatherLocation(input: string): Promise<string | null> {
+  const normalized = normalizeWeatherLocation(input);
+  if (!normalized) return WEATHER_LOCATION_DEFAULT;
+
+  const env = getEnv();
+  const apiKey =
+    env.GOOGLE_MAPS_SERVER_API_KEY?.trim() ??
+    env.NEXT_PUBLIC_GOOGLE_PLACES_API_KEY?.trim() ??
+    "";
+  if (!apiKey) return normalized;
+
+  const params = new URLSearchParams({
+    address: normalized,
+    key: apiKey,
+  });
+  try {
+    const res = await fetch(`${GOOGLE_GEOCODE_API}?${params.toString()}`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const body = (await res.json().catch(() => ({}))) as {
+      status?: string;
+      results?: Array<{ formatted_address?: string }>;
+    };
+    if (body.status !== "OK" || !Array.isArray(body.results) || body.results.length === 0)
+      return null;
+    const formatted = normalizeWeatherLocation(body.results[0]?.formatted_address ?? "");
+    if (!formatted) return null;
+    return formatted.slice(0, 120);
+  } catch {
+    return null;
+  }
 }
 
 const profilePatchSchema = z.object({
@@ -154,7 +191,15 @@ export async function PATCH(request: NextRequest) {
   if (body.weatherLocation !== undefined) {
     if (body.weatherLocation === null || body.weatherLocation === "") weatherLocation = null;
     else if (typeof body.weatherLocation === "string") {
-      const t = normalizeWeatherLocation(body.weatherLocation);
+      const t = await canonicalizeWeatherLocation(body.weatherLocation);
+      if (!t) {
+        return apiErrorResponse({
+          request,
+          status: 400,
+          code: API_ERROR_CODES.VALIDATION,
+          message: "weatherLocation is not a valid location",
+        });
+      }
       if (t.length > 120) {
         return apiErrorResponse({
           request,
@@ -163,7 +208,7 @@ export async function PATCH(request: NextRequest) {
           message: "weatherLocation too long",
         });
       }
-      weatherLocation = t.length ? t : null;
+      weatherLocation = t.length ? t : WEATHER_LOCATION_DEFAULT;
     } else {
       return apiErrorResponse({
         request,

@@ -18,7 +18,7 @@ import type {
   SpotifyMoodTileData,
   NasaModuleData,
 } from "@/lib/types";
-import WeatherFillerCard from "@/components/feed/WeatherFillerCard";
+import WeatherCard from "@/components/feed/WeatherCard";
 import SpotifyMoodTile from "@/components/feed/SpotifyMoodTile";
 import NasaApodCard from "@/components/feed/NasaApodCard";
 import PlaceAutocompleteInput from "@/components/location/PlaceAutocompleteInput";
@@ -86,6 +86,7 @@ export function ProfileMenu({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [themeSaving, setThemeSaving] = useState(false);
+  const [weatherUnitSaving, setWeatherUnitSaving] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
   const [ratioDraft, setRatioDraft] = useState(0.2);
   const [profileForm, setProfileForm] = useState({
@@ -196,7 +197,11 @@ export function ProfileMenu({
     if (!open) return;
     function onDocMouseDown(e: MouseEvent) {
       const el = wrapRef.current;
-      if (el && !el.contains(e.target as Node)) setOpen(false);
+      const target = e.target;
+      if (target instanceof Element && target.closest('[data-place-autocomplete="true"]')) {
+        return;
+      }
+      if (el && !el.contains(target as Node)) setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setOpen(false);
@@ -244,6 +249,39 @@ export function ProfileMenu({
       setSaveError("Could not update theme preference.");
     } finally {
       setThemeSaving(false);
+    }
+  }
+
+  async function saveWeatherUnitSystem(next: "metric" | "imperial") {
+    setSaveError(null);
+    setWeatherUnitSaving(true);
+    try {
+      const res = await fetch("/api/user/preferences", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ weatherUnitSystem: next }),
+      });
+      const data = (await res.json().catch(() => ({}))) as UserProfile & { error?: string };
+      if (!res.ok) {
+        setSaveError(typeof data.error === "string" ? data.error : "Could not save units preference.");
+        return;
+      }
+      setProfile(data as UserProfile);
+      try {
+        localStorage.setItem("gentle_stream_weather_unit_system", next);
+      } catch {
+        /* ignore */
+      }
+      window.dispatchEvent(
+        new CustomEvent("gentle-stream-weather-unit-system", {
+          detail: { weatherUnitSystem: next },
+        })
+      );
+    } catch {
+      setSaveError("Could not save units preference.");
+    } finally {
+      setWeatherUnitSaving(false);
     }
   }
 
@@ -1327,6 +1365,52 @@ export function ProfileMenu({
             >
               {themePreference === "dark" ? "Dark mode" : "Light mode"}
             </span>
+            <div style={{ marginTop: "0.65rem" }}>
+              <div
+                style={{
+                  fontFamily: "'IM Fell English', Georgia, serif",
+                  fontSize: "0.72rem",
+                  color: "#666",
+                  marginBottom: "0.3rem",
+                }}
+              >
+                Units
+              </div>
+              <div
+                style={{
+                  display: "inline-flex",
+                  border: "1px solid #c8bea9",
+                  borderRadius: "999px",
+                  overflow: "hidden",
+                }}
+              >
+                {([
+                  { id: "metric", label: "Metric" },
+                  { id: "imperial", label: "Imperial" },
+                ] as const).map((unit) => {
+                  const active = (profile?.weatherUnitSystem ?? "metric") === unit.id;
+                  return (
+                    <button
+                      key={unit.id}
+                      type="button"
+                      disabled={weatherUnitSaving}
+                      onClick={() => void saveWeatherUnitSystem(unit.id)}
+                      style={{
+                        border: "none",
+                        background: active ? "#1a1a1a" : "#f5f1e8",
+                        color: active ? "#fff" : "#5d5445",
+                        fontSize: "0.66rem",
+                        padding: "0.22rem 0.5rem",
+                        cursor: weatherUnitSaving ? "wait" : "pointer",
+                        lineHeight: 1.35,
+                      }}
+                    >
+                      {unit.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </section>
 
           <section style={{ marginBottom: "1rem" }}>
@@ -1733,7 +1817,11 @@ export function ProfileMenu({
                   Loading weather&hellip;
                 </p>
               ) : weatherModuleData ? (
-                <WeatherFillerCard data={weatherModuleData} reason="singleton" />
+                <WeatherCard
+                  data={weatherModuleData}
+                  reason="singleton"
+                  weatherUnitSystem={profile?.weatherUnitSystem ?? "metric"}
+                />
               ) : (
                 <p
                   style={{

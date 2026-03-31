@@ -2,17 +2,17 @@
 
 import Link from "next/link";
 import type { ReadingRailConfig, ReadingRailModule } from "@/lib/types";
-import WeatherFillerCard from "./WeatherFillerCard";
+import WeatherCard from "./WeatherCard";
 import SpotifyMoodTile from "./SpotifyMoodTile";
 import NasaApodCard from "./NasaApodCard";
 import GeneratedArtModuleCard from "./GeneratedArtModuleCard";
-import TodoFillerCard from "./TodoFillerCard";
+import TodoCard from "./TodoCard";
 
 function renderModule(mod: ReadingRailModule, key: string) {
   const reason = "singleton" as const;
   switch (mod.kind) {
     case "weather":
-      return <WeatherFillerCard key={key} data={mod.data} reason={reason} />;
+      return <WeatherCard key={key} data={mod.data} reason={reason} />;
     case "spotify":
       return <SpotifyMoodTile key={key} data={mod.data} reason={reason} />;
     case "nasa":
@@ -20,7 +20,7 @@ function renderModule(mod: ReadingRailModule, key: string) {
     case "generated_art":
       return <GeneratedArtModuleCard key={key} data={mod.data} reason={reason} />;
     case "todo":
-      return <TodoFillerCard key={key} data={mod.data} reason={reason} />;
+      return <TodoCard key={key} data={mod.data} reason={reason} />;
     default:
       return null;
   }

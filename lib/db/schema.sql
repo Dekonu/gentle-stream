@@ -91,6 +91,8 @@ CREATE TABLE IF NOT EXISTS user_profiles (
   username           TEXT,
   avatar_url         TEXT,
   weather_location   TEXT,
+  weather_unit_system TEXT NOT NULL DEFAULT 'metric'
+                    CHECK (weather_unit_system IN ('metric', 'imperial')),
   theme_preference   TEXT CHECK (theme_preference IN ('light', 'dark')),
   username_set_at    TIMESTAMPTZ,
 

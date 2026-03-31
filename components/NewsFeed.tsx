@@ -7,9 +7,9 @@ import CategoryDrawer from "./CategoryDrawer";
 import { MfaChallengeGate } from "./auth/mfa/MfaChallengeGate";
 import NewsSection from "./NewsSection";
 import GameSlot from "./games/GameSlot";
-import WeatherFillerCard from "./feed/WeatherFillerCard";
+import WeatherCard from "./feed/WeatherCard";
 import SpotifyMoodTile from "./feed/SpotifyMoodTile";
-import TodoFillerCard from "./feed/TodoFillerCard";
+import TodoCard from "./feed/TodoCard";
 import GeneratedArtModuleCard from "./feed/GeneratedArtModuleCard";
 import NasaApodCard from "./feed/NasaApodCard";
 import LoadingSection from "./LoadingSection";
@@ -147,6 +147,11 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   const [activeSearchQuery, setActiveSearchQuery] = useState("");
   const [liveGenerating, setLiveGenerating] = useState(false);
   const [themePreference, setThemePreference] = useState<"light" | "dark">("light");
+  const [weatherUnitSystem, setWeatherUnitSystem] = useState<"metric" | "imperial">("metric");
+  const [weatherModalOpen, setWeatherModalOpen] = useState(false);
+  const [weatherModalLoading, setWeatherModalLoading] = useState(false);
+  const [weatherModalError, setWeatherModalError] = useState<string | null>(null);
+  const [weatherModalData, setWeatherModalData] = useState<WeatherModuleData | null>(null);
   /** True once game ratio is resolved for the current session/user bootstrap. */
   const [isFeedReady, setIsFeedReady] = useState(false);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
@@ -340,6 +345,31 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     },
     [resolveBrowserGeo]
   );
+
+  const openWeatherModal = useCallback(() => {
+    setWeatherModalOpen(true);
+    setWeatherModalError(null);
+    setWeatherModalLoading(true);
+    void (async () => {
+      try {
+        const weatherData = await fetchModuleData({
+          moduleType: "weather",
+          category: activeCategoryRef.current ?? undefined,
+        });
+        if (!weatherData || weatherData.mode !== "weather") {
+          setWeatherModalError("Could not load weather details right now.");
+          setWeatherModalData(null);
+          return;
+        }
+        setWeatherModalData(weatherData as WeatherModuleData);
+      } catch {
+        setWeatherModalError("Could not load weather details right now.");
+        setWeatherModalData(null);
+      } finally {
+        setWeatherModalLoading(false);
+      }
+    })();
+  }, [fetchModuleData]);
 
   const fetchModuleSection = useCallback(
     async (input: {
@@ -1030,6 +1060,20 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           } else {
             preferredWeatherLocationRef.current = null;
           }
+          if (
+            profile.weatherUnitSystem === "metric" ||
+            profile.weatherUnitSystem === "imperial"
+          ) {
+            setWeatherUnitSystem(profile.weatherUnitSystem);
+            try {
+              localStorage.setItem(
+                "gentle_stream_weather_unit_system",
+                profile.weatherUnitSystem
+              );
+            } catch {
+              /* ignore */
+            }
+          }
           if (profile.themePreference === "light" || profile.themePreference === "dark") {
             serverThemePreference = profile.themePreference;
             try {
@@ -1083,6 +1127,14 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         } catch {
           /* ignore */
         }
+      }
+      try {
+        const storedUnitSystem = localStorage.getItem("gentle_stream_weather_unit_system");
+        if (storedUnitSystem === "metric" || storedUnitSystem === "imperial") {
+          setWeatherUnitSystem(storedUnitSystem);
+        }
+      } catch {
+        /* ignore */
       }
 
       if (cancelled || gen !== feedBootstrapGenRef.current) return;
@@ -1232,6 +1284,34 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", themePreference);
   }, [themePreference]);
+
+  useEffect(() => {
+    function onWeatherUnitSystemUpdated(e: Event) {
+      const ce = e as CustomEvent<{ weatherUnitSystem?: unknown }>;
+      const next = ce.detail?.weatherUnitSystem;
+      if (next === "metric" || next === "imperial") {
+        setWeatherUnitSystem(next);
+      }
+    }
+    window.addEventListener(
+      "gentle-stream-weather-unit-system",
+      onWeatherUnitSystemUpdated as EventListener
+    );
+    return () =>
+      window.removeEventListener(
+        "gentle-stream-weather-unit-system",
+        onWeatherUnitSystemUpdated as EventListener
+      );
+  }, []);
+
+  useEffect(() => {
+    if (!weatherModalOpen) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setWeatherModalOpen(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [weatherModalOpen]);
 
   useEffect(() => {
     function updateScrollTopVisibility() {
@@ -1441,6 +1521,23 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
             </button>
           );
         })}
+        <button
+          type="button"
+          onClick={openWeatherModal}
+          style={{
+            border: "1px solid #9fb59b",
+            background: "#e6f2e3",
+            color: "#23402a",
+            padding: "0.35rem 0.55rem",
+            fontFamily: "'Playfair Display', Georgia, serif",
+            fontSize: "0.7rem",
+            letterSpacing: "0.04em",
+            textTransform: "uppercase",
+            cursor: "pointer",
+          }}
+        >
+          Weather
+        </button>
         <div style={{ marginLeft: "auto", display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
           <input
             value={searchInput}
@@ -1565,7 +1662,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
             }
             if (section.moduleType === "todo") {
               return (
-                <TodoFillerCard
+                <TodoCard
                   key={`module-${section.index}-todo`}
                   data={section.data as TodoModuleData}
                   reason={section.reason}
@@ -1591,10 +1688,11 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
               );
             }
             return (
-              <WeatherFillerCard
+              <WeatherCard
                 key={`module-${section.index}-weather`}
                 data={section.data as WeatherModuleData}
                 reason={section.reason}
+                weatherUnitSystem={weatherUnitSystem}
               />
             );
           }
@@ -1686,6 +1784,88 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         >
           ↑
         </button>
+      ) : null}
+      {weatherModalOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Comprehensive weather"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setWeatherModalOpen(false);
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.42)",
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "1.2rem",
+          }}
+        >
+          <div
+            style={{
+              width: "min(760px, 96vw)",
+              background: "#faf8f3",
+              border: "1.5px solid #1a1a1a",
+              boxShadow: "0 18px 60px rgba(0,0,0,0.25)",
+              padding: "1rem 1rem 0.9rem",
+              maxHeight: "min(88vh, 820px)",
+              overflowY: "auto",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                marginBottom: "0.75rem",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setWeatherModalOpen(false)}
+                style={{
+                  border: "1px solid #1a1a1a",
+                  background: "transparent",
+                  width: "1.6rem",
+                  height: "1.6rem",
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: "1rem",
+                  lineHeight: 1,
+                  cursor: "pointer",
+                }}
+                aria-label="Close weather modal"
+                title="Close"
+              >
+                ×
+              </button>
+            </div>
+            {weatherModalLoading ? (
+              <p
+                style={{
+                  margin: "0.4rem 0 0",
+                  fontFamily: "'IM Fell English', Georgia, serif",
+                  fontStyle: "italic",
+                  color: "#888",
+                  fontSize: "0.82rem",
+                }}
+              >
+                Loading weather...
+              </p>
+            ) : weatherModalError ? (
+              <p style={{ color: "#8b4513", fontSize: "0.78rem", margin: 0 }}>
+                {weatherModalError}
+              </p>
+            ) : weatherModalData ? (
+              <WeatherCard
+                data={weatherModalData}
+                reason="singleton"
+                weatherUnitSystem={weatherUnitSystem}
+              />
+            ) : null}
+          </div>
+        </div>
       ) : null}
     </div>
   );

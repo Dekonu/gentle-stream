@@ -3,12 +3,12 @@
 import { useMemo, useState } from "react";
 import type { TodoModuleData } from "@/lib/types";
 
-interface TodoFillerCardProps {
+interface TodoCardProps {
   data: TodoModuleData;
   reason: "gap" | "interval" | "singleton";
 }
 
-export default function TodoFillerCard({ data, reason }: TodoFillerCardProps) {
+export default function TodoCard({ data, reason }: TodoCardProps) {
   const [items, setItems] = useState(data.items);
   const [newItemLabel, setNewItemLabel] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);

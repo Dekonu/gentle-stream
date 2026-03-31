@@ -126,6 +126,7 @@ export default function PlaceAutocompleteInput({
   const requestTimerRef = useRef<number | null>(null);
   const cacheRef = useRef<Map<string, PlaceSuggestion[]>>(new Map());
   const blurTimerRef = useRef<number | null>(null);
+  const hasUserEditedRef = useRef(false);
   const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [isOpen, setIsOpen] = useState(false);
@@ -167,6 +168,7 @@ export default function PlaceAutocompleteInput({
 
   useEffect(() => {
     if (!isReady || disabled) return;
+    if (!hasUserEditedRef.current) return;
     const query = value.trim();
     if (!query || query.length < 2) {
       setSuggestions([]);
@@ -234,6 +236,7 @@ export default function PlaceAutocompleteInput({
   function commitSelection(selection: PlaceSuggestion) {
     onChange(selection.description);
     onSelect?.({ placeId: selection.placeId, label: selection.description });
+    hasUserEditedRef.current = false;
     setIsOpen(false);
     setActiveIndex(-1);
   }
@@ -244,10 +247,11 @@ export default function PlaceAutocompleteInput({
   }, [activeSuggestion, listId]);
 
   return (
-    <div style={{ position: "relative" }}>
+    <div data-place-autocomplete="true" style={{ position: "relative" }}>
       <input
         value={value}
         onChange={(event) => {
+          hasUserEditedRef.current = true;
           onChange(event.target.value);
           if (!isOpen) setIsOpen(true);
         }}
@@ -296,6 +300,7 @@ export default function PlaceAutocompleteInput({
       />
       {isOpen && hasResults ? (
         <ul
+          data-place-autocomplete="true"
           id={listId}
           role="listbox"
           style={{
