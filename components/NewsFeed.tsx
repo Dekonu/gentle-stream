@@ -240,19 +240,6 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
 
   const resolveBrowserGeo = useCallback(async (): Promise<{ lat: number; lon: number } | null> => {
     if (browserGeoRef.current) return browserGeoRef.current;
-    try {
-      const stored = localStorage.getItem("gentle_stream_browser_geo");
-      if (stored) {
-        const parsed = JSON.parse(stored) as { lat?: unknown; lon?: unknown };
-        if (typeof parsed.lat === "number" && typeof parsed.lon === "number") {
-          browserGeoRef.current = { lat: parsed.lat, lon: parsed.lon };
-          return browserGeoRef.current;
-        }
-      }
-    } catch {
-      /* ignore malformed cache */
-    }
-
     if (browserGeoAttemptedRef.current) return null;
     browserGeoAttemptedRef.current = true;
     if (typeof navigator === "undefined" || !navigator.geolocation) return null;
@@ -265,11 +252,6 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
             lon: position.coords.longitude,
           };
           browserGeoRef.current = coords;
-          try {
-            localStorage.setItem("gentle_stream_browser_geo", JSON.stringify(coords));
-          } catch {
-            /* ignore storage write failures */
-          }
           resolve(coords);
         },
         () => resolve(null),

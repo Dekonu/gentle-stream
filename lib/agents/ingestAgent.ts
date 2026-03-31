@@ -679,7 +679,7 @@ function parseArticleFromText(
   category: string,
   sourceUrls: string[]
 ): RawArticle {
-  const cleaned = text.replace(/```json|```/g, "").trim();
+  const cleaned = stripCodeFences(text);
 
   const objStart = cleaned.indexOf("{");
   const objEnd   = cleaned.lastIndexOf("}");
@@ -731,10 +731,31 @@ function estimateReadingTime(body: string): number {
 }
 
 function stripCitations(text: string): string {
-  return text
-    .replace(/<cite[^>]*>/gi, "")
-    .replace(/<\/cite>/gi, "")
-    .trim();
+  const closeTag = "</cite>";
+  let output = text;
+
+  // Remove opening <cite ...> tags.
+  while (true) {
+    const lower = output.toLowerCase();
+    const start = lower.indexOf("<cite");
+    if (start < 0) break;
+    const end = output.indexOf(">", start);
+    if (end < 0) {
+      output = output.slice(0, start);
+      break;
+    }
+    output = output.slice(0, start) + output.slice(end + 1);
+  }
+
+  // Remove closing </cite> tags.
+  while (true) {
+    const lower = output.toLowerCase();
+    const idx = lower.indexOf(closeTag);
+    if (idx < 0) break;
+    output = output.slice(0, idx) + output.slice(idx + closeTag.length);
+  }
+
+  return output.trim();
 }
 
 function resolvePipelineMode(
@@ -1041,7 +1062,7 @@ async function callClaudeWithWebSearch(input: ClaudeRequestInput): Promise<{
 }
 
 function parseJsonPayload(text: string): unknown {
-  const cleaned = text.replace(/```json|```/g, "").trim();
+  const cleaned = stripCodeFences(text);
   if (!cleaned) return null;
   const objStart = cleaned.indexOf("{");
   const objEnd = cleaned.lastIndexOf("}");
@@ -1063,6 +1084,17 @@ function parseJsonPayload(text: string): unknown {
     }
   }
   return null;
+}
+
+function stripCodeFences(text: string): string {
+  return text
+    .split("```json")
+    .join("")
+    .split("```JSON")
+    .join("")
+    .split("```")
+    .join("")
+    .trim();
 }
 
 function composeImagePromptFallback(

@@ -91,6 +91,7 @@ export function ProfileMenu({
   const [spotifyModuleData, setSpotifyModuleData] = useState<SpotifyMoodTileData | null>(null);
   const [apodModuleData, setApodModuleData] = useState<NasaModuleData | null>(null);
   const [apodLoading, setApodLoading] = useState(false);
+  const browserGeoRef = useRef<{ lat: number; lon: number } | null>(null);
 
   useEffect(() => {
     if (!profile?.avatarUrl) {
@@ -275,17 +276,7 @@ export function ProfileMenu({
   }
 
   async function getBrowserCoordinates(): Promise<{ lat: number; lon: number } | null> {
-    try {
-      const stored = localStorage.getItem("gentle_stream_browser_geo");
-      if (stored) {
-        const parsed = JSON.parse(stored) as { lat?: unknown; lon?: unknown };
-        if (typeof parsed.lat === "number" && typeof parsed.lon === "number") {
-          return { lat: parsed.lat, lon: parsed.lon };
-        }
-      }
-    } catch {
-      /* ignore malformed cache */
-    }
+    if (browserGeoRef.current) return browserGeoRef.current;
 
     if (typeof navigator === "undefined" || !navigator.geolocation) return null;
     return await new Promise((resolve) => {
@@ -295,11 +286,7 @@ export function ProfileMenu({
             lat: position.coords.latitude,
             lon: position.coords.longitude,
           };
-          try {
-            localStorage.setItem("gentle_stream_browser_geo", JSON.stringify(coords));
-          } catch {
-            /* ignore storage issues */
-          }
+          browserGeoRef.current = coords;
           resolve(coords);
         },
         () => resolve(null),
