@@ -20,9 +20,10 @@ export default function InlineModuleCard({
     return (
       <aside
         style={{
-          borderTop: "1px solid #d4cfc4",
-          padding: "0.45rem 0.55rem",
-          background: "rgba(250,248,243,0.9)",
+          borderTop: "1px solid var(--gs-border)",
+          padding: "0.5rem 0.6rem",
+          background: "var(--gs-surface-soft)",
+          borderRadius: "0 0 var(--gs-radius-sm) var(--gs-radius-sm)",
         }}
       >
         <div
@@ -66,9 +67,10 @@ export default function InlineModuleCard({
     return (
       <aside
         style={{
-          borderTop: "1px solid #d4cfc4",
-          padding: "0.45rem 0.55rem",
-          background: "rgba(250,248,243,0.9)",
+          borderTop: "1px solid var(--gs-border)",
+          padding: "0.5rem 0.6rem",
+          background: "var(--gs-surface-soft)",
+          borderRadius: "0 0 var(--gs-radius-sm) var(--gs-radius-sm)",
         }}
       >
         <div
@@ -89,7 +91,8 @@ export default function InlineModuleCard({
             width: "100%",
             maxHeight: 130,
             objectFit: "cover",
-            border: "1px solid #d7d0c1",
+            border: "1px solid var(--gs-border)",
+            borderRadius: "var(--gs-radius-xs)",
           }}
         />
       </aside>
