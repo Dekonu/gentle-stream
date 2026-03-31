@@ -1,6 +1,7 @@
 "use client";
 
 import type { GeneratedImageModuleData } from "@/lib/types";
+import GeneratedArtImage from "./GeneratedArtImage";
 
 interface GeneratedArtModuleCardProps {
   data: GeneratedImageModuleData;
@@ -76,10 +77,12 @@ export default function GeneratedArtModuleCard({
       >
         {data.subtitle}
       </p>
-      <img
-        src={data.imageUrl}
+      <GeneratedArtImage
+        primarySrc={data.imageUrl}
+        fallbackSrc={data.fallbackImageUrl}
         alt=""
         loading="lazy"
+        placeholderMinHeight={180}
         style={{
           width: "100%",
           maxHeight: "min(40vh, 360px)",

@@ -12,6 +12,7 @@ import SpotifyMoodTile from "./feed/SpotifyMoodTile";
 import TodoCard from "./feed/TodoCard";
 import GeneratedArtModuleCard from "./feed/GeneratedArtModuleCard";
 import NasaApodCard from "./feed/NasaApodCard";
+import IconFractalCard from "./feed/IconFractalCard";
 import LoadingSection from "./LoadingSection";
 import ErrorBanner from "./ErrorBanner";
 import type { Category } from "@/lib/constants";
@@ -23,7 +24,9 @@ import type {
   GameFeedSection,
   ModuleFeedSection,
   FeedModuleData,
+  EditorialBreatherModuleData,
   GeneratedImageModuleData,
+  IconFractalModuleData,
   NasaModuleData,
   WeatherModuleData,
   SpotifyMoodTileData,
@@ -36,6 +39,7 @@ import { feedGamePickForOrdinal } from "@/lib/games/feedPick";
 import type { GameType } from "@/lib/games/types";
 import { chooseNewspaperLayout } from "@/lib/feed/newspaperLayout";
 import {
+  buildIconFractalModuleData,
   buildGeneratedImageModuleData,
   chooseGapIntervalModuleType,
   chooseInlineModuleType,
@@ -130,6 +134,37 @@ function spotifyContentSignature(data: SpotifyMoodTileData | null): string | nul
   ].join("::");
 }
 
+function buildEditorialBreatherData(input: {
+  sectionIndex: number;
+  category?: string;
+  motif?: EditorialBreatherModuleData["motif"];
+  href?: string;
+  hrefLabel?: string;
+}): EditorialBreatherModuleData {
+  const motifPool: EditorialBreatherModuleData["motif"][] = [
+    "linework",
+    "divider",
+    "stamp",
+  ];
+  const motif = input.motif ?? motifPool[Math.abs(input.sectionIndex % motifPool.length)]!;
+  const categoryLabel = input.category?.trim() || "Today";
+  const lines = [
+    "A short pause in the page rhythm, before the next column.",
+    "A quiet interlude to keep the print flow breathable.",
+    "An editorial breath between longer reads.",
+    "A subtle spacer that preserves the broadsheet cadence.",
+  ];
+  return {
+    mode: "editorial_breather",
+    title: `${categoryLabel} desk note`,
+    kicker: "Editorial pause",
+    line: lines[Math.abs(input.sectionIndex % lines.length)]!,
+    motif,
+    href: input.href,
+    hrefLabel: input.hrefLabel,
+  };
+}
+
 function readTruthyFlag(input: string | undefined, defaultValue: boolean): boolean {
   if (input == null) return defaultValue;
   const value = input.trim().toLowerCase();
@@ -215,6 +250,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   });
   const weatherBriefLoadedRef = useRef(false);
   const seenSpotifySignaturesRef = useRef<Set<string>>(new Set());
+  const recentBreatherMotifsRef = useRef<EditorialBreatherModuleData["motif"][]>([]);
   const fillerMetricsRef = useRef({
     gapDetected: 0,
     moduleInserted: 0,
@@ -773,24 +809,73 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         const preferredType = chooseInlineModuleType({
           layoutHint,
           todoEnabled: todoModuleEnabled,
+          inlineGapPx: layoutPlan.inlineGapPx,
+          residualGapPx: layoutPlan.residualGapPx,
         });
-        let inlineData = await fetchModuleData({
-          moduleType: preferredType,
-          category: data.category,
-          location: inlineLocation,
-        });
+        const totalBodyChars = orderedArticles.reduce(
+          (sum, article) =>
+            sum +
+            (typeof article.body === "string"
+              ? article.body.length
+              : 0),
+          0
+        );
+        const hasEditorialDensity = orderedArticles.length >= 2 && totalBodyChars >= 1200;
+        let inlineData: FeedModuleData | null = null;
+        if (preferredType === "editorial_breather" && hasEditorialDensity) {
+          const motifPool: EditorialBreatherModuleData["motif"][] = ["linework", "divider", "stamp"];
+          const initialMotif =
+            motifPool[Math.abs((currentIndex + orderedArticles.length) % motifPool.length)]!;
+          const previousMotifs = recentBreatherMotifsRef.current.slice(-2);
+          const motif =
+            previousMotifs.includes(initialMotif)
+              ? motifPool.find((entry) => !previousMotifs.includes(entry)) ?? initialMotif
+              : initialMotif;
+          const topArticle = orderedArticles[0];
+          const topHref =
+            topArticle &&
+            "id" in topArticle &&
+            typeof topArticle.id === "string" &&
+            topArticle.id.length > 0
+              ? `/article/${topArticle.id}`
+              : undefined;
+          inlineData = buildEditorialBreatherData({
+            sectionIndex: currentIndex,
+            category: data.category,
+            motif,
+            href: topHref,
+            hrefLabel: topHref ? "Open lead story" : undefined,
+          });
+          recentBreatherMotifsRef.current = [...recentBreatherMotifsRef.current.slice(-2), motif];
+        } else if (preferredType === "icon_fractal") {
+          inlineData = buildIconFractalModuleData({
+            seed: currentIndex * 97 + orderedArticles.length * 11,
+          });
+        } else {
+          const fetchType: "generated_art" | "todo" =
+            preferredType === "todo" ? "todo" : "generated_art";
+          inlineData = await fetchModuleData({
+            moduleType: fetchType,
+            category: data.category,
+            location: inlineLocation,
+          });
+        }
         if (!inlineData) {
           inlineData = buildGeneratedImageModuleData({
             category: data.category,
             location: inlineLocation,
           });
         }
-        const resolvedType: "generated_art" | "todo" =
+        const resolvedType: "generated_art" | "todo" | "editorial_breather" | "icon_fractal" =
           inlineData.mode === "generated_art"
             ? "generated_art"
             : inlineData.mode === "todo"
               ? "todo"
-              : "generated_art";
+              : inlineData.mode === "editorial_breather"
+                ? "editorial_breather"
+                : inlineData.mode === "icon_fractal"
+                  ? "icon_fractal"
+                  : "generated_art";
         section.newspaperLayout.inlineModule = {
           moduleType: resolvedType,
           reason: "inline",
@@ -996,6 +1081,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       singletonPlacedRef.current = { weather: false, spotify: false, nasa: false };
       weatherBriefLoadedRef.current = false;
       seenSpotifySignaturesRef.current = new Set();
+      recentBreatherMotifsRef.current = [];
       void loadMore(overrideCategory);
     },
     [loadMore]
@@ -1041,6 +1127,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     singletonPlacedRef.current = { weather: false, spotify: false, nasa: false };
     weatherBriefLoadedRef.current = false;
     seenSpotifySignaturesRef.current = new Set();
+    recentBreatherMotifsRef.current = [];
 
     const gen = ++feedBootstrapGenRef.current;
     let cancelled = false;
@@ -1725,6 +1812,14 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
                   key={`module-${section.index}-art`}
                   data={section.data as GeneratedImageModuleData}
                   reason={section.reason}
+                />
+              );
+            }
+            if (section.moduleType === "icon_fractal") {
+              return (
+                <IconFractalCard
+                  key={`module-${section.index}-icon-fractal`}
+                  data={section.data as IconFractalModuleData}
                 />
               );
             }

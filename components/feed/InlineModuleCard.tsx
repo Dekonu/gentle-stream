@@ -1,13 +1,18 @@
 "use client";
 
 import type {
+  EditorialBreatherModuleData,
   FeedModuleData,
   GeneratedImageModuleData,
+  IconFractalModuleData,
   TodoModuleData,
 } from "@/lib/types";
+import EditorialBreatherCard from "./EditorialBreatherCard";
+import GeneratedArtImage from "./GeneratedArtImage";
+import IconFractalCard from "./IconFractalCard";
 
 interface InlineModuleCardProps {
-  moduleType: "generated_art" | "todo";
+  moduleType: "generated_art" | "todo" | "editorial_breather" | "icon_fractal";
   data: FeedModuleData;
 }
 
@@ -83,10 +88,12 @@ export default function InlineModuleCard({
         >
           {art.title}
         </div>
-        <img
-          src={art.imageUrl}
+        <GeneratedArtImage
+          primarySrc={art.imageUrl}
+          fallbackSrc={art.fallbackImageUrl}
           alt=""
           loading="lazy"
+          placeholderMinHeight={86}
           style={{
             width: "100%",
             maxHeight: 130,
@@ -97,6 +104,14 @@ export default function InlineModuleCard({
         />
       </aside>
     );
+  }
+
+  if (moduleType === "editorial_breather" && data.mode === "editorial_breather") {
+    return <EditorialBreatherCard data={data as EditorialBreatherModuleData} />;
+  }
+
+  if (moduleType === "icon_fractal" && data.mode === "icon_fractal") {
+    return <IconFractalCard data={data as IconFractalModuleData} />;
   }
 
   return null;
