@@ -9,13 +9,51 @@ let queue: ArticleEngagementEventInput[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let sessionId: string | null = null;
 let engagementDisabled = false;
+const lastEventAtByKey = new Map<string, number>();
+let sequence = 0;
+let fallbackSessionCounter = 0;
+
+interface SessionCrypto {
+  randomUUID?: () => string;
+  getRandomValues?: (array: Uint8Array) => Uint8Array;
+}
+
+function toHex(byte: number): string {
+  return byte.toString(16).padStart(2, "0");
+}
+
+function buildUuidFromBytes(bytes: Uint8Array): string {
+  if (bytes.length < 16) throw new Error("Expected 16 bytes for UUID.");
+  // RFC 4122 version 4 bits.
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, toHex).join("");
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20, 32),
+  ].join("-");
+}
 
 function getSessionId(): string {
   if (sessionId) return sessionId;
-  sessionId =
-    (typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `session-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const webCrypto = (globalThis as { crypto?: SessionCrypto }).crypto;
+  if (webCrypto) {
+    if (typeof webCrypto.randomUUID === "function") {
+      sessionId = webCrypto.randomUUID();
+      return sessionId;
+    }
+    if (typeof webCrypto.getRandomValues === "function") {
+      const bytes = new Uint8Array(16);
+      webCrypto.getRandomValues(bytes);
+      sessionId = buildUuidFromBytes(bytes);
+      return sessionId;
+    }
+  }
+  fallbackSessionCounter += 1;
+  sessionId = `session-${Date.now().toString(36)}-${fallbackSessionCounter.toString(36)}`;
   return sessionId;
 }
 
@@ -62,10 +100,20 @@ export function trackArticleEngagement(
   event: Omit<ArticleEngagementEventInput, "sessionId" | "occurredAt">
 ): void {
   if (engagementDisabled) return;
+  const nowMs = Date.now();
+  const dedupeKey = `${event.articleId}|${event.eventType}|${event.eventValue ?? "null"}`;
+  const lastAt = lastEventAtByKey.get(dedupeKey) ?? 0;
+  if (nowMs - lastAt < 1500) return;
+  lastEventAtByKey.set(dedupeKey, nowMs);
+  sequence += 1;
   queue.push({
     ...event,
     sessionId: getSessionId(),
-    occurredAt: new Date().toISOString(),
+    occurredAt: new Date(nowMs).toISOString(),
+    context: {
+      ...(event.context ?? {}),
+      seq: sequence,
+    },
   });
   if (queue.length >= MAX_BATCH_SIZE) {
     void flushNow();

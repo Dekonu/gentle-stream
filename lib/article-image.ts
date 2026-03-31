@@ -9,12 +9,41 @@ const POLLINATIONS_BASE = "https://image.pollinations.ai/prompt";
 
 /** Strip bracket wrappers and clamp length for URL safety */
 export function sanitizeImagePrompt(prompt: string): string {
-  return prompt
-    .trim()
-    .replace(/^\[+/, "")
-    .replace(/\]+$/, "")
-    .replace(/\s+/g, " ")
-    .slice(0, 400);
+  const trimmed = prompt.trim();
+  const withoutWrappers = stripBracketWrappers(trimmed);
+  const collapsedWhitespace = collapseWhitespace(withoutWrappers);
+  return collapsedWhitespace.slice(0, 400);
+}
+
+function stripBracketWrappers(input: string): string {
+  let start = 0;
+  let end = input.length;
+  while (start < end && input[start] === "[") start += 1;
+  while (end > start && input[end - 1] === "]") end -= 1;
+  return input.slice(start, end);
+}
+
+function collapseWhitespace(input: string): string {
+  let out = "";
+  let prevWasSpace = false;
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i]!;
+    const isSpace =
+      ch === " " ||
+      ch === "\n" ||
+      ch === "\r" ||
+      ch === "\t" ||
+      ch === "\f" ||
+      ch === "\v";
+    if (isSpace) {
+      if (!prevWasSpace) out += " ";
+      prevWasSpace = true;
+      continue;
+    }
+    out += ch;
+    prevWasSpace = false;
+  }
+  return out.trim();
 }
 
 export function composeArticleImagePrompt(input: {

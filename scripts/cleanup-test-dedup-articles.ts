@@ -33,15 +33,27 @@ async function main() {
 
   if (e2) throw new Error(e2.message);
 
+  const { data: byEngagementReco, error: e3 } = await db
+    .from("articles")
+    .delete()
+    .or(
+      "headline.ilike.%TEST_ENG_DB%,headline.ilike.%TEST%ENG%DB%,headline.ilike.%TEST_RECO_E2E%,headline.ilike.%TEST%RECO%E2E%"
+    )
+    .select("id");
+
+  if (e3) throw new Error(e3.message);
+
   const n1 = byHeadline?.length ?? 0;
   const n2 = byFixture?.length ?? 0;
+  const n3 = byEngagementReco?.length ?? 0;
   console.log(
     `Removed ${n1} row(s) matching TEST_DEDUP / TEST_URL_DEDUP in headline.`
   );
   console.log(
     `Removed ${n2} row(s) matching Test Runner + Testland + test subheadline fixture.`
   );
-  console.log(`Total deleted: ${n1 + n2}`);
+  console.log(`Removed ${n3} row(s) matching TEST_ENG_DB / TEST_RECO_E2E in headline.`);
+  console.log(`Total deleted: ${n1 + n2 + n3}`);
 }
 
 main().catch((e) => {

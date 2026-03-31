@@ -201,13 +201,19 @@ async function fetchHtmlWithSafeRedirects(start: URL, allowlist: string[]): Prom
 }
 
 function decodeEntities(input: string): string {
-  return input
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">");
+  const entityMap: Record<string, string> = {
+    nbsp: " ",
+    amp: "&",
+    quot: '"',
+    "#39": "'",
+    lt: "<",
+    gt: ">",
+  };
+  // Single-pass entity decode avoids accidental double-decoding (e.g., &amp;lt; -> &lt;).
+  return input.replace(/&(nbsp|amp|quot|#39|lt|gt);/gi, (full, rawName: string) => {
+    const normalized = rawName.toLowerCase();
+    return entityMap[normalized] ?? full;
+  });
 }
 
 function cleanText(input: string): string {

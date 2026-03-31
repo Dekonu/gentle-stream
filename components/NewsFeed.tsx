@@ -28,6 +28,8 @@ import type {
   WeatherModuleData,
   SpotifyMoodTileData,
   TodoModuleData,
+  RelatedHeadlineItem,
+  ReadingRailModule,
 } from "@/lib/types";
 import { DEFAULT_GAME_RATIO } from "@/lib/constants";
 import { feedGamePickForOrdinal } from "@/lib/games/feedPick";
@@ -238,19 +240,6 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
 
   const resolveBrowserGeo = useCallback(async (): Promise<{ lat: number; lon: number } | null> => {
     if (browserGeoRef.current) return browserGeoRef.current;
-    try {
-      const stored = localStorage.getItem("gentle_stream_browser_geo");
-      if (stored) {
-        const parsed = JSON.parse(stored) as { lat?: unknown; lon?: unknown };
-        if (typeof parsed.lat === "number" && typeof parsed.lon === "number") {
-          browserGeoRef.current = { lat: parsed.lat, lon: parsed.lon };
-          return browserGeoRef.current;
-        }
-      }
-    } catch {
-      /* ignore malformed cache */
-    }
-
     if (browserGeoAttemptedRef.current) return null;
     browserGeoAttemptedRef.current = true;
     if (typeof navigator === "undefined" || !navigator.geolocation) return null;
@@ -263,11 +252,6 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
             lon: position.coords.longitude,
           };
           browserGeoRef.current = coords;
-          try {
-            localStorage.setItem("gentle_stream_browser_geo", JSON.stringify(coords));
-          } catch {
-            /* ignore storage write failures */
-          }
           resolve(coords);
         },
         () => resolve(null),
@@ -760,6 +744,69 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           reason: "inline",
           targetColumn: layoutPlan.inlineTargetColumn,
           data: inlineData,
+        };
+      }
+
+      if (
+        layoutPlan.templateId === "single-hero" &&
+        searchQuery.length < 2 &&
+        section.newspaperLayout
+      ) {
+        await ensureSingletonFeedCached();
+        const cache = singletonFeedCacheRef.current;
+        const hero = orderedArticles[0];
+
+        let primary: ReadingRailModule | undefined;
+        if (cache.weather) primary = { kind: "weather", data: cache.weather };
+        else if (cache.nasa) primary = { kind: "nasa", data: cache.nasa };
+
+        let secondary: ReadingRailModule | undefined;
+        if (cache.spotify) secondary = { kind: "spotify", data: cache.spotify };
+        else {
+          const gen = await fetchModuleData({
+            moduleType: "generated_art",
+            category: data.category,
+            location: inlineLocation,
+          });
+          if (gen?.mode === "generated_art")
+            secondary = {
+              kind: "generated_art",
+              data: gen as GeneratedImageModuleData,
+            };
+        }
+
+        let relatedHeadlines: RelatedHeadlineItem[] = [];
+        if (
+          hero &&
+          "id" in hero &&
+          typeof hero.id === "string" &&
+          hero.id.length > 0 &&
+          "category" in hero &&
+          hero.category
+        ) {
+          try {
+            const res = await fetch(
+              `/api/feed/related?articleId=${encodeURIComponent(hero.id)}&category=${encodeURIComponent(String(hero.category))}&limit=3`,
+              { cache: "no-store" }
+            );
+            if (res.ok) {
+              const j = (await res.json()) as { headlines?: RelatedHeadlineItem[] };
+              relatedHeadlines = j.headlines ?? [];
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+
+        const enabled = Boolean(
+          primary || secondary || relatedHeadlines.length > 0
+        );
+        section.newspaperLayout.readingRail = {
+          enabled,
+          primary,
+          secondary,
+          relatedHeadlines:
+            relatedHeadlines.length > 0 ? relatedHeadlines : undefined,
         };
       }
 
@@ -1572,6 +1619,8 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           <ErrorBanner
             message={error}
             onRetry={() => {
+              // Force a manual retry path regardless of recent timing guards.
+              setError(null);
               reachedEndRef.current = false;
               if (reachedEndTimeoutIdRef.current) {
                 window.clearTimeout(reachedEndTimeoutIdRef.current);
@@ -1581,8 +1630,12 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
                 window.clearTimeout(minGapRetryTimeoutIdRef.current);
                 minGapRetryTimeoutIdRef.current = null;
               }
-              pendingLoadRef.current = false;
-              void loadMore();
+              pendingLoadRef.current = true;
+              lastLoadStartAtRef.current = 0;
+              requestAnimationFrame(() => {
+                if (loadingRef.current) return;
+                void loadMore();
+              });
             }}
           />
         )}

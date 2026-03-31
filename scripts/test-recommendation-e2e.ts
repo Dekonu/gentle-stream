@@ -42,6 +42,30 @@ function assert(condition: boolean, label: string, detail?: string) {
 
 const testUserId = `reco-e2e-${Date.now()}`;
 const insertedIds: string[] = [];
+const TEST_HEADLINE_PREFIX = "TEST_RECO_E2E";
+
+async function purgeStaleFixtures() {
+  const { error: evtErr } = await db
+    .from("article_engagement_events")
+    .delete()
+    .like("user_id", "reco-e2e-%");
+  if (evtErr) throw new Error(`purgeStaleFixtures(events): ${evtErr.message}`);
+
+  const { error: affinityErr } = await db
+    .from("user_article_affinity")
+    .delete()
+    .like("user_id", "reco-e2e-%");
+  if (affinityErr)
+    throw new Error(`purgeStaleFixtures(affinity): ${affinityErr.message}`);
+
+  const { error: articleErr } = await db
+    .from("articles")
+    .delete()
+    .or(
+      `headline.ilike.%${TEST_HEADLINE_PREFIX}%,headline.ilike.%TEST%RECO%E2E%`
+    );
+  if (articleErr) throw new Error(`purgeStaleFixtures(articles): ${articleErr.message}`);
+}
 
 async function seedArticles() {
   const base = {
@@ -176,10 +200,12 @@ async function main() {
 
   try {
     await initDeps();
+    await purgeStaleFixtures();
     await seedArticles();
     await testBeforeAfterAffinityOrdering();
   } finally {
     await cleanup();
+    await purgeStaleFixtures();
   }
 
   console.log("\n══════════════════════════════════════════════");
