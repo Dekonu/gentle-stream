@@ -12,7 +12,7 @@ import {
   getOrCreateUserProfile,
   updateUserPreferences,
 } from "@/lib/db/users";
-import type { GameType } from "@/lib/games/types";
+import type { GameType } from "@gentle-stream/domain/games/types";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 const preferencesBodySchema = z

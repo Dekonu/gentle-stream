@@ -1,5 +1,5 @@
 import { picsumFallbackUrl, pollinationsImageUrl } from "@/lib/article-image";
-import type { GeneratedImageModuleData } from "@/lib/types";
+import type { GeneratedImageModuleData } from "@gentle-stream/domain/types";
 
 export interface ModulePolicyInput {
   seed: number;

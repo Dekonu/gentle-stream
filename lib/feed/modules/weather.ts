@@ -1,6 +1,6 @@
 import { picsumFallbackUrl, pollinationsImageUrl } from "@/lib/article-image";
 import { getEnv } from "@/lib/env";
-import type { WeatherFillerData } from "@/lib/types";
+import type { WeatherFillerData } from "@gentle-stream/domain/types";
 
 interface WeatherSnapshot {
   city: string;
