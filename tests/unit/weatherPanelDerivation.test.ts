@@ -27,11 +27,10 @@ describe("getWeatherPanelIds", () => {
       makeWeatherData({
         alerts: [
           {
-            event: "Wind Advisory",
+            title: "Wind Advisory",
             severity: "minor",
-            startsAtIso: new Date().toISOString(),
-            endsAtIso: new Date().toISOString(),
-            source: "NWS",
+            startsAt: new Date().toISOString(),
+            endsAt: new Date().toISOString(),
           },
         ],
         hourly: [{ isoTime: new Date().toISOString(), tempC: 22, condition: "clear" }],
