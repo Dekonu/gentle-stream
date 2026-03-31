@@ -17,14 +17,23 @@ function makeWeatherData(overrides: Partial<WeatherFillerData> = {}): WeatherFil
 }
 
 describe("getWeatherPanelIds", () => {
-  it("always includes summary, details, and alerts for weather mode", () => {
+  it("always includes summary and details for weather mode", () => {
     const panelIds = getWeatherPanelIds(makeWeatherData());
-    expect(panelIds).toEqual(["summary", "details", "alerts"]);
+    expect(panelIds).toEqual(["summary", "details"]);
   });
 
-  it("adds hourly and weekly panels only when data exists", () => {
+  it("adds alerts, hourly, and weekly panels only when data exists", () => {
     const panelIds = getWeatherPanelIds(
       makeWeatherData({
+        alerts: [
+          {
+            event: "Wind Advisory",
+            severity: "minor",
+            startsAtIso: new Date().toISOString(),
+            endsAtIso: new Date().toISOString(),
+            source: "NWS",
+          },
+        ],
         hourly: [{ isoTime: new Date().toISOString(), tempC: 22, condition: "clear" }],
         daily: [{ isoDate: new Date().toISOString(), minC: 14, maxC: 24, condition: "cloudy" }],
       })
