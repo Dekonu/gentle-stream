@@ -1637,6 +1637,8 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           <ErrorBanner
             message={error}
             onRetry={() => {
+              // Force a manual retry path regardless of recent timing guards.
+              setError(null);
               reachedEndRef.current = false;
               if (reachedEndTimeoutIdRef.current) {
                 window.clearTimeout(reachedEndTimeoutIdRef.current);
@@ -1646,8 +1648,12 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
                 window.clearTimeout(minGapRetryTimeoutIdRef.current);
                 minGapRetryTimeoutIdRef.current = null;
               }
-              pendingLoadRef.current = false;
-              void loadMore();
+              pendingLoadRef.current = true;
+              lastLoadStartAtRef.current = 0;
+              requestAnimationFrame(() => {
+                if (loadingRef.current) return;
+                void loadMore();
+              });
             }}
           />
         )}
