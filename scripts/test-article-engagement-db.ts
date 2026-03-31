@@ -38,6 +38,28 @@ function assert(condition: boolean, label: string, detail?: string) {
 
 const testUserId = `eng-test-user-${Date.now()}`;
 const insertedArticleIds: string[] = [];
+const TEST_HEADLINE_PREFIX = "TEST_ENG_DB";
+
+async function purgeStaleFixtures() {
+  const { error: evtErr } = await db
+    .from("article_engagement_events")
+    .delete()
+    .like("user_id", "eng-test-user-%");
+  if (evtErr) throw new Error(`purgeStaleFixtures(events): ${evtErr.message}`);
+
+  const { error: affinityErr } = await db
+    .from("user_article_affinity")
+    .delete()
+    .like("user_id", "eng-test-user-%");
+  if (affinityErr)
+    throw new Error(`purgeStaleFixtures(affinity): ${affinityErr.message}`);
+
+  const { error: articleErr } = await db
+    .from("articles")
+    .delete()
+    .or(`headline.ilike.%${TEST_HEADLINE_PREFIX}%,headline.ilike.%TEST%ENG%DB%`);
+  if (articleErr) throw new Error(`purgeStaleFixtures(articles): ${articleErr.message}`);
+}
 
 async function testSchemaPresence() {
   console.log("\n── Schema checks ───────────────────────────────────────────────");
@@ -169,11 +191,13 @@ async function main() {
 
   try {
     await initDeps();
+    await purgeStaleFixtures();
     await testSchemaPresence();
     await seedArticles();
     await testAffinityWeightingAndDecay();
   } finally {
     await cleanup();
+    await purgeStaleFixtures();
   }
 
   console.log("\n══════════════════════════════════════════════");
