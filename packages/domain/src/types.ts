@@ -75,6 +75,7 @@ export interface UserProfile {
   usernameSetAt: string | null;
   avatarUrl: string | null;
   weatherLocation?: string | null;
+  weatherUnitSystem?: "metric" | "imperial" | null;
   themePreference?: "light" | "dark" | null;
   seenArticleIds: string[];
   preferredEmotions: string[]; // subset of ArticleSentiment emotions
@@ -264,6 +265,28 @@ export interface WeatherModuleData {
   hourly?: WeatherHourlyItem[];
   daily?: WeatherDailyItem[];
   imageUrl?: string;
+}
+
+export interface WeatherAlertItem {
+  title: string;
+  severity?: string;
+  startsAt?: string;
+  endsAt?: string;
+}
+
+export interface WeatherHourlyItem {
+  isoTime: string;
+  tempC: number;
+  condition: string;
+  precipChancePct?: number;
+}
+
+export interface WeatherDailyItem {
+  isoDate: string;
+  minC: number;
+  maxC: number;
+  condition: string;
+  precipChancePct?: number;
 }
 
 export interface GeneratedImageModuleData {
