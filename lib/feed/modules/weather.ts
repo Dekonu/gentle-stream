@@ -1,9 +1,9 @@
 import { picsumFallbackUrl, pollinationsImageUrl } from "@/lib/article-image";
 import { getEnv } from "@/lib/env";
-import type { WeatherFillerData } from "@gentle-stream/domain/types";
 import type {
   WeatherAlertItem,
   WeatherDailyItem,
+  WeatherFillerData,
   WeatherHourlyItem,
 } from "@gentle-stream/domain/types";
 
