@@ -267,6 +267,28 @@ export interface WeatherModuleData {
   imageUrl?: string;
 }
 
+export interface WeatherAlertItem {
+  title: string;
+  severity?: string;
+  startsAt?: string;
+  endsAt?: string;
+}
+
+export interface WeatherHourlyItem {
+  isoTime: string;
+  tempC: number;
+  condition: string;
+  precipChancePct?: number;
+}
+
+export interface WeatherDailyItem {
+  isoDate: string;
+  minC: number;
+  maxC: number;
+  condition: string;
+  precipChancePct?: number;
+}
+
 export interface GeneratedImageModuleData {
   mode: "generated_art";
   title: string;
@@ -274,6 +296,22 @@ export interface GeneratedImageModuleData {
   imageUrl: string;
   /** Second-chance URL when primary generated art fails at runtime. */
   fallbackImageUrl: string;
+}
+
+export interface EditorialBreatherModuleData {
+  mode: "editorial_breather";
+  title: string;
+  kicker?: string;
+  line: string;
+  motif: "linework" | "stamp" | "divider";
+  href?: string;
+  hrefLabel?: string;
+}
+
+export interface IconFractalModuleData {
+  mode: "icon_fractal";
+  /** Deterministic visual variation for this fractal render. */
+  seed: number;
 }
 
 export interface NasaModuleData {
