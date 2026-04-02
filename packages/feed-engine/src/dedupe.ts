@@ -1,10 +1,25 @@
 import type { Article } from "@gentle-stream/domain/types";
 
 function stripCiteTags(text: string): string {
-  return text
-    .replace(/<cite[^>]*>/gi, "")
-    .replace(/<\/cite>/gi, "")
-    .trim();
+  if (!text) return "";
+  const lower = text.toLowerCase();
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    if (lower.startsWith("</cite>", i)) {
+      i += "</cite>".length;
+      continue;
+    }
+    if (lower.startsWith("<cite", i)) {
+      const close = text.indexOf(">", i + "<cite".length);
+      if (close === -1) break;
+      i = close + 1;
+      continue;
+    }
+    out += text[i];
+    i += 1;
+  }
+  return out.trim();
 }
 
 export function cleanArticleForFeed(article: Article): Article {

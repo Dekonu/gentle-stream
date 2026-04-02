@@ -27,7 +27,23 @@ export function isAllowedEnglishWikipediaHost(hostname: string): boolean {
 
 /** Strip all HTML tags so no active content can execute. */
 export function stripUnsafeWikiHtmlFragment(html: string): string {
-  return html.replace(/<[^>]+>/g, " ");
+  if (!html) return "";
+  let out = "";
+  let insideTag = false;
+  for (const char of html) {
+    if (char === "<") {
+      insideTag = true;
+      out += " ";
+      continue;
+    }
+    if (char === ">") {
+      insideTag = false;
+      out += " ";
+      continue;
+    }
+    if (!insideTag) out += char;
+  }
+  return out.split(/\s+/).filter(Boolean).join(" ");
 }
 
 export function wikiHtmlApiPathForTitle(title: string): string {
