@@ -20,7 +20,10 @@ function safeNextPath(raw: string | null): string {
  * In the browser we always use `window.location.origin` so the address bar wins.
  */
 function resolveAuthRedirectBase(serverHint: string): string {
-  if (typeof window !== "undefined") return window.location.origin.replace(/\/$/, "");
+  if (typeof window !== "undefined") {
+    const origin = window.location?.origin ?? "";
+    if (origin) return origin.replace(/\/$/, "");
+  }
 
   const trimmed = serverHint.trim().replace(/\/$/, "");
   if (trimmed) return trimmed;
@@ -34,6 +37,7 @@ function resolveAuthRedirectBase(serverHint: string): string {
 export interface LoginFormProps {
   /** From server: OAuth/email-verification return origin (dev defaults to http://localhost:3000). */
   authRedirectBaseFromServer?: string;
+  audience?: "subscriber" | "creator";
   /** From `?next=` — passed by the server page to avoid `useSearchParams` + Suspense chunk issues in dev. */
   initialNext?: string | null;
   initialAuthError?: string | null;
@@ -45,6 +49,7 @@ export interface LoginFormProps {
 
 export function LoginForm({
   authRedirectBaseFromServer = "",
+  audience = "subscriber",
   initialNext = null,
   initialAuthError = null,
   initialSessionExpired = false,
@@ -59,6 +64,7 @@ export function LoginForm({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [emailMode, setEmailMode] = useState<"sign_in" | "sign_up">("sign_in");
+  const [birthDate, setBirthDate] = useState("");
   /** Clickwrap: required before OAuth or email auth (unchecked by default). */
   const [legalConsentAccepted, setLegalConsentAccepted] = useState(false);
   const [requiresEmailVerification, setRequiresEmailVerification] = useState(false);
@@ -71,6 +77,7 @@ export function LoginForm({
     process.env.NEXT_PUBLIC_TURNSTILE_ENABLED === "1" ||
     process.env.NEXT_PUBLIC_TURNSTILE_ENABLED === "true";
   const [showCreatorOnboardingNotice, setShowCreatorOnboardingNotice] = useState(false);
+  const isCreatorLogin = audience === "creator";
 
   /**
    * Do not call signOut before OAuth: signOut removes the PKCE code_verifier from
@@ -148,7 +155,9 @@ export function LoginForm({
         body: JSON.stringify({
           email: email.trim(),
           password,
-          mode: emailMode,
+          mode: isCreatorLogin ? "sign_in" : emailMode,
+          audience,
+          birthDate,
           redirectTo,
           turnstileToken,
         }),
@@ -218,7 +227,7 @@ export function LoginForm({
             textAlign: "center",
           }}
         >
-          Gentle Stream
+          {isCreatorLogin ? "Creator login" : "Gentle Stream"}
         </h1>
         <p
           style={{
@@ -231,7 +240,9 @@ export function LoginForm({
             lineHeight: 1.45,
           }}
         >
-          Sign in to read your personalised feed.
+          {isCreatorLogin
+            ? "Sign in to access creator tools. Creator accounts require verified phone and email."
+            : "Sign in to read your personalised feed."}
         </p>
 
         {initialSessionExpired && (
@@ -310,14 +321,16 @@ export function LoginForm({
             </a>
             . For email login or signup, you must agree before continuing.
             <span style={{ display: "block", marginTop: "0.25rem", color: "#777" }}>
-              Google/Facebook sign-in prompts agreement on a follow-up screen.
+              {isCreatorLogin
+                ? "Creator access uses email/password and requires verified phone + email."
+                : "Google/Facebook sign-in prompts agreement on a follow-up screen."}
             </span>
           </span>
         </label>
 
         <button
           type="button"
-          disabled={oauthBusy}
+          disabled={oauthBusy || isCreatorLogin}
           onClick={() => void signInWithOAuth("google")}
           style={{
             width: "100%",
@@ -331,6 +344,7 @@ export function LoginForm({
             cursor: oauthBusy ? "wait" : "pointer",
             opacity: 1,
             marginBottom: "0.6rem",
+            display: isCreatorLogin ? "none" : "block",
           }}
         >
           {oauthBusy && oauthProvider === "google"
@@ -340,7 +354,7 @@ export function LoginForm({
 
         <button
           type="button"
-          disabled={oauthBusy}
+          disabled={oauthBusy || isCreatorLogin}
           onClick={() => void signInWithOAuth("facebook")}
           style={{
             width: "100%",
@@ -354,6 +368,7 @@ export function LoginForm({
             cursor: oauthBusy ? "wait" : "pointer",
             opacity: 1,
             marginBottom: "1.25rem",
+            display: isCreatorLogin ? "none" : "block",
           }}
         >
           {oauthBusy && oauthProvider === "facebook"
@@ -363,7 +378,7 @@ export function LoginForm({
 
         <div
           style={{
-            display: "flex",
+            display: isCreatorLogin ? "none" : "flex",
             alignItems: "center",
             gap: "0.75rem",
             margin: "0 0 1.25rem",
@@ -476,7 +491,7 @@ export function LoginForm({
             <input
               id="login-password"
               type="password"
-              autoComplete={emailMode === "sign_up" ? "new-password" : "current-password"}
+              autoComplete={!isCreatorLogin && emailMode === "sign_up" ? "new-password" : "current-password"}
               required
               minLength={8}
               value={password}
@@ -493,6 +508,42 @@ export function LoginForm({
                 marginBottom: "0.5rem",
               }}
             />
+            {!isCreatorLogin && emailMode === "sign_up" ? (
+              <>
+                <label
+                  htmlFor="login-birthdate"
+                  style={{
+                    display: "block",
+                    fontFamily: "'Playfair Display', Georgia, serif",
+                    fontSize: "0.72rem",
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    color: "#888",
+                    marginBottom: "0.35rem",
+                  }}
+                >
+                  Birthdate
+                </label>
+                <input
+                  id="login-birthdate"
+                  type="date"
+                  required
+                  value={birthDate}
+                  onChange={(e) => setBirthDate(e.target.value)}
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    padding: "0.55rem 0.65rem",
+                    border: "1px solid #ccc",
+                    background: "#fff",
+                    fontFamily: "Georgia, serif",
+                    fontSize: "0.95rem",
+                    marginBottom: "0.5rem",
+                  }}
+                />
+              </>
+            ) : null}
+
             <p
               style={{
                 margin: "0 0 0.85rem",
@@ -502,9 +553,11 @@ export function LoginForm({
                 lineHeight: 1.45,
               }}
             >
-              {emailMode === "sign_up"
-                ? "We will create your account and send a verification email through Supabase before your first password login."
-                : "Use the password linked to your account."}
+              {isCreatorLogin
+                ? "Creator accounts require verified email and verified phone before access."
+                : emailMode === "sign_up"
+                  ? "We will create your account and send a verification email through Supabase before your first password login."
+                  : "Use the password linked to your account."}
             </p>
 
             <button
@@ -526,9 +579,11 @@ export function LoginForm({
             >
               {emailBusy
                 ? "Working…"
-                : emailMode === "sign_up"
-                  ? "Create account"
-                  : "Sign in with email"}
+                : isCreatorLogin
+                  ? "Sign in to creator account"
+                  : emailMode === "sign_up"
+                    ? "Create account"
+                    : "Sign in with email"}
             </button>
 
             {turnstileEnabled && turnstileSiteKey ? (
@@ -565,6 +620,7 @@ export function LoginForm({
 
         <div
           style={{
+            display: isCreatorLogin ? "none" : "block",
             margin: "1.35rem 0 0",
             paddingTop: "1.1rem",
             borderTop: "1px solid #e0dcd4",
@@ -612,7 +668,7 @@ export function LoginForm({
               ·
             </span>
             <a
-              href={`/login?next=${encodeURIComponent("/creator")}`}
+              href={`/creator/login?next=${encodeURIComponent("/creator")}`}
               style={{
                 color: "#1a472a",
                 textDecoration: "underline",
@@ -739,3 +795,20 @@ export function LoginForm({
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

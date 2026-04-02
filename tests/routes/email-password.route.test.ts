@@ -6,6 +6,7 @@ const consumeRateLimitMock = vi.fn();
 const verifyTurnstileTokenMock = vi.fn();
 const createPublicServerClientMock = vi.fn();
 const createSupabaseResponseClientMock = vi.fn();
+const getOrCreateUserProfileMock = vi.fn();
 
 vi.mock("@/lib/security/origin", () => ({
   hasTrustedOrigin: hasTrustedOriginMock,
@@ -28,6 +29,10 @@ vi.mock("@/lib/supabase/public-server", () => ({
 
 vi.mock("@/lib/supabase/response-client", () => ({
   createSupabaseResponseClient: createSupabaseResponseClientMock,
+}));
+
+vi.mock("@/lib/db/users", () => ({
+  getOrCreateUserProfile: getOrCreateUserProfileMock,
 }));
 
 describe("/api/auth/email-password", () => {
@@ -78,6 +83,7 @@ describe("/api/auth/email-password", () => {
         email: "person@example.com",
         password: "password123",
         mode: "sign_up",
+        birthDate: "1990-01-01",
         redirectTo: "http://localhost:3000/login",
         turnstileToken: "token",
       }),
@@ -97,6 +103,12 @@ describe("/api/auth/email-password", () => {
     createSupabaseResponseClientMock.mockReturnValueOnce({
       auth: {
         signInWithPassword: vi.fn().mockResolvedValue({ error: null }),
+        getUser: vi.fn().mockResolvedValue({
+          data: {
+            user: { id: "u1", email_confirmed_at: "2026-01-01T00:00:00.000Z" },
+          },
+          error: null,
+        }),
       },
     });
     process.env.NEXT_PUBLIC_AUTH_REDIRECT_ORIGIN = "http://localhost:3000";

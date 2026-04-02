@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createPublicServerClient } from "@/lib/supabase/public-server";
 import { createSupabaseResponseClient } from "@/lib/supabase/response-client";
+import { getOrCreateUserProfile } from "@/lib/db/users";
 import {
   buildRateLimitKey,
   consumeRateLimit,
@@ -22,6 +23,8 @@ const emailPasswordBodySchema = z
     email: z.string().trim().email(),
     password: z.string().min(8).max(256),
     mode: z.enum(["sign_in", "sign_up"]),
+    audience: z.enum(["subscriber", "creator"]).optional().default("subscriber"),
+    birthDate: z.string().trim().optional().default(""),
     redirectTo: z.string().trim().url(),
     turnstileToken: z.string().trim().optional().default(""),
   })
@@ -84,6 +87,8 @@ export async function POST(request: NextRequest) {
   const email = parsedBody.data.email.trim().toLowerCase();
   const password = parsedBody.data.password;
   const mode = parsedBody.data.mode;
+  const audience = parsedBody.data.audience;
+  const birthDate = parsedBody.data.birthDate.trim();
   const redirectTo = parsedBody.data.redirectTo.trim();
   const turnstileToken = parsedBody.data.turnstileToken.trim();
 
@@ -123,12 +128,48 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  if (mode === "sign_up" && audience === "subscriber" && !birthDate) {
+    return apiErrorResponse({
+      request,
+      status: 400,
+      code: API_ERROR_CODES.MISSING_FIELD,
+      message: "Birthdate is required to create a subscriber account.",
+    });
+  }
+
+  if (mode === "sign_up" && birthDate) {
+    const parsedBirthDate = Date.parse(birthDate);
+    if (Number.isNaN(parsedBirthDate)) {
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.VALIDATION,
+        message: "Birthdate must be a valid date.",
+      });
+    }
+  }
+
+  if (audience === "creator" && mode === "sign_up") {
+    return apiErrorResponse({
+      request,
+      status: 400,
+      code: API_ERROR_CODES.INVALID_REQUEST,
+      message: "Creator login supports sign-in only.",
+    });
+  }
+
   if (mode === "sign_up") {
     const supabase = createPublicServerClient();
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: redirectTo },
+      options: {
+        emailRedirectTo: redirectTo,
+        data: {
+          audience,
+          birthDate: birthDate || null,
+        },
+      },
     });
     if (error) {
       return apiErrorResponse({
@@ -160,6 +201,57 @@ export async function POST(request: NextRequest) {
       code: API_ERROR_CODES.INVALID_REQUEST,
       message: "Invalid email or password.",
     });
+  }
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+  if (userError || !user) {
+    await supabase.auth.signOut();
+    return apiErrorResponse({
+      request,
+      status: 400,
+      code: API_ERROR_CODES.INVALID_REQUEST,
+      message: "Could not load account details after sign-in.",
+    });
+  }
+
+  const emailConfirmedAt =
+    (user as { email_confirmed_at?: string | null }).email_confirmed_at ?? null;
+  if (!emailConfirmedAt) {
+    await supabase.auth.signOut();
+    return apiErrorResponse({
+      request,
+      status: 403,
+      code: API_ERROR_CODES.FORBIDDEN,
+      message: "Please verify your email address before signing in.",
+    });
+  }
+
+  if (audience === "creator") {
+    const phoneConfirmedAt =
+      (user as { phone_confirmed_at?: string | null }).phone_confirmed_at ?? null;
+    if (!user.phone || !phoneConfirmedAt) {
+      await supabase.auth.signOut();
+      return apiErrorResponse({
+        request,
+        status: 403,
+        code: API_ERROR_CODES.FORBIDDEN,
+        message: "Creator login requires a verified phone number.",
+      });
+    }
+
+    const profile = await getOrCreateUserProfile(user.id);
+    if (profile.userRole !== "creator") {
+      await supabase.auth.signOut();
+      return apiErrorResponse({
+        request,
+        status: 403,
+        code: API_ERROR_CODES.FORBIDDEN,
+        message: "This account is not a creator account. Use subscriber login.",
+      });
+    }
   }
 
   const nowSec = Math.floor(Date.now() / 1000);

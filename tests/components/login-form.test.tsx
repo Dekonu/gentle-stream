@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LoginForm } from "@/components/auth/LoginForm";
 
@@ -52,7 +52,10 @@ describe("LoginForm", () => {
       new Response(JSON.stringify({ requiresEmailVerification: false }), { status: 200 })
     );
     const assignMock = vi.fn();
-    vi.stubGlobal("location", { assign: assignMock } as unknown as Location);
+    vi.stubGlobal(
+      "location",
+      { origin: "http://127.0.0.1:3000", assign: assignMock } as unknown as Location
+    );
 
     render(<LoginForm authRedirectBaseFromServer="http://127.0.0.1:3000" />);
 
@@ -68,12 +71,17 @@ describe("LoginForm", () => {
     if (!form) throw new Error("Expected email sign-in form to exist");
     fireEvent.submit(form);
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/auth/email-password",
-      expect.objectContaining({
-        method: "POST",
-      })
-    );
-    expect(assignMock).toHaveBeenCalledWith("/");
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/auth/email-password",
+        expect.objectContaining({
+          method: "POST",
+        })
+      );
+    });
+
+    await waitFor(() => {
+      expect(assignMock).toHaveBeenCalledWith("/");
+    });
   });
 });
