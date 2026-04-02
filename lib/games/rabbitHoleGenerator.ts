@@ -1,1 +1,1 @@
-export { generateRabbitHole } from "../../packages/games-engine/src/rabbit-hole/generator";
+export * from "@gentle-stream/games-engine/rabbit-hole/generator";

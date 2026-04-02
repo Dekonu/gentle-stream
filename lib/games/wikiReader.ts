@@ -1,1 +1,1 @@
-export * from "../../packages/games-engine/src/rabbit-hole/wikiReader";
+export * from "@gentle-stream/games-engine/rabbit-hole/wiki-reader";
