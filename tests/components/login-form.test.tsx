@@ -23,14 +23,15 @@ describe("LoginForm", () => {
     vi.stubGlobal("fetch", vi.fn());
   });
 
-  it("shows consent error when email sign-in is attempted unchecked", async () => {
+  it("shows password length error before calling the API", async () => {
+    const fetchMock = vi.mocked(fetch);
     render(<LoginForm />);
 
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "reader@example.com" },
     });
     fireEvent.change(screen.getByLabelText("Password"), {
-      target: { value: "password123" },
+      target: { value: "short" },
     });
     const submitButton = screen.getByRole("button", {
       name: "Sign in with email",
@@ -40,10 +41,9 @@ describe("LoginForm", () => {
     fireEvent.submit(form);
 
     expect(
-      await screen.findByText(
-        "Please agree to the Terms and Privacy Policy before continuing."
-      )
+      await screen.findByText("Use at least 8 characters for your password.")
     ).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("submits email sign-in after consent and redirects", async () => {
@@ -59,7 +59,6 @@ describe("LoginForm", () => {
 
     render(<LoginForm authRedirectBaseFromServer="http://127.0.0.1:3000" />);
 
-    fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "reader@example.com" },
     });
