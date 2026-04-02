@@ -46,7 +46,7 @@ describe("storage adapters", () => {
   it("web local storage adapter uses window.localStorage when present", async () => {
     const localStorage = new LocalStorageMock();
     (
-      globalThis as {
+      globalThis as unknown as {
         window?: { localStorage: LocalStorageMock };
       }
     ).window = { localStorage };
