@@ -5,7 +5,7 @@ import type {
   WeatherDailyItem,
   WeatherFillerData,
   WeatherHourlyItem,
-} from "@/lib/types";
+} from "@gentle-stream/domain/types";
 
 interface WeatherSnapshot {
   city: string;

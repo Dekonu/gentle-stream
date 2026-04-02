@@ -2,7 +2,7 @@ import { picsumFallbackUrl, pollinationsImageUrl } from "@/lib/article-image";
 import type {
   GeneratedImageModuleData,
   IconFractalModuleData,
-} from "@/lib/types";
+} from "@gentle-stream/domain/types";
 
 const INLINE_BREATHER_MIN_GAP_PX = 145;
 const INLINE_BREATHER_MAX_GAP_PX = 360;
