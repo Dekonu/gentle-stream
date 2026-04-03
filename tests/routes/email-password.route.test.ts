@@ -92,7 +92,8 @@ describe("/api/auth/email-password", () => {
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({
       ok: true,
-      requiresEmailVerification: true,
+      requiresEmailVerification: false,
+      verificationEmailSent: true,
     });
   });
 

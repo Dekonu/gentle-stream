@@ -64,6 +64,7 @@ export function LoginForm({
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [emailMode, setEmailMode] = useState<"sign_in" | "sign_up">("sign_in");
   const [birthDate, setBirthDate] = useState("");
   const [requiresEmailVerification, setRequiresEmailVerification] = useState(false);
@@ -169,6 +170,7 @@ export function LoginForm({
       if (emailMode === "sign_up" || body.requiresEmailVerification) {
         setRequiresEmailVerification(true);
         setPassword("");
+        setShowPassword(false);
         return;
       }
       window.location.assign(nextPath);
@@ -426,18 +428,39 @@ export function LoginForm({
         </div>
 
         {requiresEmailVerification ? (
-          <p
-            style={{
-              fontFamily: "'IM Fell English', Georgia, serif",
-              fontSize: "0.88rem",
-              color: "#1a472a",
-              textAlign: "center",
-              margin: 0,
-              lineHeight: 1.5,
-            }}
-          >
-            Check your inbox to verify your email, then sign in with your password.
-          </p>
+          <div style={{ display: "grid", gap: "0.8rem" }}>
+            <p
+              style={{
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontSize: "0.88rem",
+                color: "#1a472a",
+                textAlign: "center",
+                margin: 0,
+                lineHeight: 1.5,
+              }}
+            >
+              Account created. We sent a verification email via Supabase. You can sign in now with
+              your email and password.
+            </p>
+            <button
+              type="button"
+              onClick={() => setRequiresEmailVerification(false)}
+              style={{
+                width: "100%",
+                padding: "0.56rem 1rem",
+                border: "1px solid #1a1a1a",
+                background: "#fff",
+                color: "#1a1a1a",
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "0.75rem",
+                letterSpacing: "0.05em",
+                textTransform: "uppercase",
+                cursor: "pointer",
+              }}
+            >
+              Back to sign in
+            </button>
+          </div>
         ) : (
           <form onSubmit={submitEmailPassword}>
             <div
@@ -521,26 +544,61 @@ export function LoginForm({
             >
               Password
             </label>
-            <input
-              id="login-password"
-              type="password"
-              autoComplete={!isCreatorLogin && emailMode === "sign_up" ? "new-password" : "current-password"}
-              required
-              minLength={8}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="At least 8 characters"
-              style={{
-                width: "100%",
-                boxSizing: "border-box",
-                padding: "0.55rem 0.65rem",
-                border: "1px solid #ccc",
-                background: "#fff",
-                fontFamily: "Georgia, serif",
-                fontSize: "0.95rem",
-                marginBottom: "0.5rem",
-              }}
-            />
+            <div style={{ position: "relative", marginBottom: "0.5rem" }}>
+              <input
+                id="login-password"
+                type={showPassword ? "text" : "password"}
+                autoComplete={!isCreatorLogin && emailMode === "sign_up" ? "new-password" : "current-password"}
+                required
+                minLength={8}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="At least 8 characters"
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  padding: "0.55rem 2.4rem 0.55rem 0.65rem",
+                  border: "1px solid #ccc",
+                  background: "#fff",
+                  fontFamily: "Georgia, serif",
+                  fontSize: "0.95rem",
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                title={showPassword ? "Hide password" : "Show password"}
+                style={{
+                  position: "absolute",
+                  right: "0.45rem",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  border: "none",
+                  background: "transparent",
+                  color: "#666",
+                  cursor: "pointer",
+                  padding: "0.2rem",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                {showPassword ? (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M3 3l18 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                    <path d="M10.58 10.58a2 2 0 102.83 2.83" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                    <path d="M9.36 5.95A10.86 10.86 0 0112 5.5c5.05 0 9.27 3.11 10.5 6.5a11.8 11.8 0 01-4.04 5.13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                    <path d="M6.23 8.22A11.8 11.8 0 001.5 12c1.23 3.39 5.45 6.5 10.5 6.5a10.86 10.86 0 004.03-.76" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                  </svg>
+                ) : (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M1.5 12c1.23-3.39 5.45-6.5 10.5-6.5S21.27 8.61 22.5 12c-1.23 3.39-5.45 6.5-10.5 6.5S2.73 15.39 1.5 12z" stroke="currentColor" strokeWidth="1.8" />
+                    <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" />
+                  </svg>
+                )}
+              </button>
+            </div>
             {!isCreatorLogin && emailMode === "sign_up" ? (
               <>
                 <label
@@ -589,7 +647,7 @@ export function LoginForm({
               {isCreatorLogin
                 ? "Creator accounts require verified email and verified phone before access."
                 : emailMode === "sign_up"
-                  ? "We will create your account and send a verification email through Supabase before your first password login."
+                  ? "We will create your account and send a verification email through Supabase. You can still sign in with password right away."
                   : "Use the password linked to your account."}
             </p>
 
