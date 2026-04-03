@@ -10,6 +10,7 @@ import {
 import { getOrCreateUserProfile } from "@/lib/db/users";
 import { parseJsonBody } from "@/lib/validation/http";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
+import { CREATOR_ONBOARDING_ENABLED } from "@/lib/feature-flags/regulatory";
 
 function isCategory(value: string): value is Category {
   return CATEGORIES.includes(value as Category);
@@ -36,6 +37,16 @@ const onboardingBodySchema = z.object({
 });
 
 export async function GET(request: NextRequest) {
+  if (!CREATOR_ONBOARDING_ENABLED) {
+    return apiErrorResponse({
+      request,
+      status: 503,
+      code: API_ERROR_CODES.INVALID_REQUEST,
+      message:
+        "Creator onboarding is a work in progress and is temporarily disabled pending approval from the appropriate regulatory agencies.",
+    });
+  }
+
   const supabase = createClient();
   const {
     data: { user },
@@ -60,6 +71,16 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  if (!CREATOR_ONBOARDING_ENABLED) {
+    return apiErrorResponse({
+      request,
+      status: 503,
+      code: API_ERROR_CODES.INVALID_REQUEST,
+      message:
+        "Creator onboarding is a work in progress and is temporarily disabled pending approval from the appropriate regulatory agencies.",
+    });
+  }
+
   const supabase = createClient();
   const {
     data: { user },

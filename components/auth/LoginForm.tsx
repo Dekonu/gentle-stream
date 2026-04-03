@@ -5,6 +5,7 @@ import Script from "next/script";
 import type { Provider } from "@supabase/supabase-js";
 import { AppLogo } from "@/components/brand/AppLogo";
 import { createClient } from "@/lib/supabase/client";
+import { CREATOR_LOGIN_ENABLED } from "@/lib/feature-flags/regulatory";
 
 function safeNextPath(raw: string | null): string {
   if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/";
@@ -76,6 +77,7 @@ export function LoginForm({
     process.env.NEXT_PUBLIC_TURNSTILE_ENABLED === "true";
   const [showCreatorOnboardingNotice, setShowCreatorOnboardingNotice] = useState(false);
   const isCreatorLogin = audience === "creator";
+  const isCreatorLoginDisabled = isCreatorLogin && !CREATOR_LOGIN_ENABLED;
 
   /**
    * Do not call signOut before OAuth: signOut removes the PKCE code_verifier from
@@ -204,6 +206,59 @@ export function LoginForm({
     textTransform: "uppercase",
     cursor: emailBusy ? "wait" : "pointer",
   };
+
+  if (isCreatorLoginDisabled) {
+    return (
+      <div style={shell}>
+        <div style={card}>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: "0.35rem" }}>
+            <AppLogo heightPx={40} priority />
+          </div>
+          <h1
+            style={{
+              fontFamily: "'Playfair Display', Georgia, serif",
+              fontSize: "1.65rem",
+              fontWeight: 700,
+              margin: "0 0 0.35rem",
+              color: "#0d0d0d",
+              textAlign: "center",
+            }}
+          >
+            Creator login
+          </h1>
+          <p
+            style={{
+              fontFamily: "'IM Fell English', Georgia, serif",
+              fontStyle: "italic",
+              fontSize: "0.92rem",
+              color: "#8b4513",
+              textAlign: "center",
+              margin: "0 0 1.1rem",
+              lineHeight: 1.5,
+            }}
+          >
+            Creator login is a work in progress and is temporarily disabled pending approval
+            from the appropriate regulatory agencies.
+          </p>
+          <p
+            style={{
+              margin: 0,
+              textAlign: "center",
+              fontFamily: "'IM Fell English', Georgia, serif",
+              fontSize: "0.82rem",
+              color: "#555",
+            }}
+          >
+            You can continue using subscriber login from{" "}
+            <a href="/login" style={{ color: "#1a472a", textDecoration: "underline" }}>
+              the main sign-in page
+            </a>
+            .
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={shell}>
@@ -639,7 +694,7 @@ export function LoginForm({
                 font: "inherit",
               }}
             >
-              Sign up & onboarding
+              Creator access (work in progress)
             </button>
             <span style={{ color: "#bbb", margin: "0 0.35rem" }} aria-hidden>
               ·
@@ -744,8 +799,8 @@ export function LoginForm({
                 lineHeight: 1.5,
               }}
             >
-              Please log into your regular account first using Google, Facebook, or
-              email/password. After login, continue to creator onboarding from your account.
+              Creator onboarding and creator login are temporarily disabled while we wait for
+              approval from the appropriate regulatory agencies. This area is a work in progress.
             </p>
             <button
               type="button"

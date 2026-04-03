@@ -6,6 +6,7 @@ import { EnrollTotp } from "./EnrollTotp";
 import { EnrollPhone } from "./EnrollPhone";
 import { ListFactors, type MfaFactorRow } from "./ListFactors";
 import { formatMfaError } from "./errorMessage";
+import { PHONE_MFA_ENABLED } from "@/lib/feature-flags/regulatory";
 
 interface AssuranceLevelInfo {
   currentLevel?: string | null;
@@ -19,8 +20,6 @@ function friendlyAalLabel(value: string | null | undefined) {
 }
 
 export function MfaSettings() {
-  const PHONE_MFA_ENABLED = false;
-
   const [loading, setLoading] = useState(true);
   const [emailVerified, setEmailVerified] = useState(false);
   const [factors, setFactors] = useState<MfaFactorRow[]>([]);
@@ -193,11 +192,14 @@ export function MfaSettings() {
         )}
 
         {!PHONE_MFA_ENABLED ? (
-          <p style={{ margin: 0, color: "#777", fontSize: "0.82rem" }}>
-            Phone MFA (SMS/WhatsApp) is temporarily disabled.
+          <p style={{ margin: 0, color: "#8b4513", fontSize: "0.82rem", lineHeight: 1.5 }}>
+            Phone MFA (SMS/WhatsApp) is a work in progress and is temporarily disabled pending
+            approval from the appropriate regulatory agencies.
           </p>
         ) : null}
-        <EnrollPhone disabled={!canEnroll || !PHONE_MFA_ENABLED} onChanged={reload} />
+        {PHONE_MFA_ENABLED ? (
+          <EnrollPhone disabled={!canEnroll} onChanged={reload} />
+        ) : null}
       </div>
     </section>
   );

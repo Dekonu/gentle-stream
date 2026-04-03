@@ -17,6 +17,7 @@ import {
   SESSION_START_COOKIE,
   sessionStartCookieOptions,
 } from "@/lib/auth/session-policy";
+import { CREATOR_LOGIN_ENABLED } from "@/lib/feature-flags/regulatory";
 
 const emailPasswordBodySchema = z
   .object({
@@ -98,6 +99,16 @@ export async function POST(request: NextRequest) {
       status: 400,
       code: API_ERROR_CODES.VALIDATION,
       message: "Invalid email address.",
+    });
+  }
+
+  if (audience === "creator" && !CREATOR_LOGIN_ENABLED) {
+    return apiErrorResponse({
+      request,
+      status: 503,
+      code: API_ERROR_CODES.INVALID_REQUEST,
+      message:
+        "Creator login is a work in progress and is temporarily disabled pending approval from the appropriate regulatory agencies.",
     });
   }
   if (!redirectTo || !isAllowedRedirectTo(request, redirectTo)) {
