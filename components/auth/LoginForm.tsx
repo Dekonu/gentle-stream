@@ -65,7 +65,6 @@ export function LoginForm({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
   const [emailMode, setEmailMode] = useState<"sign_in" | "sign_up">("sign_in");
   const [birthDate, setBirthDate] = useState("");
   const [requiresEmailVerification, setRequiresEmailVerification] = useState(false);
