@@ -14,6 +14,10 @@ import { getAvailableStockSnapshotByCategory } from "@/lib/db/articles";
 import { getPreferredLocaleDemand } from "@/lib/db/users";
 import { runIngestAgent } from "@/lib/agents/ingestAgent";
 import {
+  resolveIngestDiscoveryProvider,
+  type IngestDiscoveryProvider,
+} from "@/lib/agents/ingestDiscoveryProvider";
+import {
   appendCronIngestCategoryLogs,
   createCronIngestRun,
   finishCronIngestRun,
@@ -37,6 +41,12 @@ export const maxDuration = 300;
 
 const DEFAULT_RUNTIME_BUDGET_MS = 240_000;
 const DEFAULT_MAX_EXPANSIONS_PER_RUN = 20;
+/**
+ * Manual rollout switch:
+ * - "anthropic_web_search" for baseline checks
+ * - "rss_seeded_primary" for RSS-first rollout
+ */
+const MANUAL_DISCOVERY_PROVIDER: IngestDiscoveryProvider = "rss_seeded_primary";
 
 function readPositiveInt(value: string | undefined, fallback: number): number {
   const n = Number(value);
@@ -62,6 +72,10 @@ function resolveIngestPipeline(category: Category): "legacy" | "overhaul" {
     .filter(Boolean);
   if (canary.length === 0) return "overhaul";
   return canary.includes(category.toLowerCase()) ? "overhaul" : "legacy";
+}
+
+function resolveDiscoveryProviderForManualRollout(): IngestDiscoveryProvider {
+  return resolveIngestDiscoveryProvider(MANUAL_DISCOVERY_PROVIDER);
 }
 
 export async function GET(request: NextRequest) {
@@ -124,6 +138,8 @@ export async function GET(request: NextRequest) {
   let totalOutputTokens = 0;
   let totalPolicyRejected = 0;
   let totalBatchFallbacks = 0;
+  const discoveryRunsByProvider: Record<string, number> = {};
+  const insertedByProvider: Record<string, number> = {};
   let categoriesChecked = 0;
   let remainingExpansionBudget = readPositiveInt(
     process.env.CRON_INGEST_MAX_EXPANSIONS_PER_RUN,
@@ -139,6 +155,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const snapshot = await getAvailableStockSnapshotByCategory();
+    const discoveryProvider = resolveDiscoveryProviderForManualRollout();
     const localeDemand = await getPreferredLocaleDemand(12);
     const localeCycle = localeDemand.map((entry) => entry.locale).filter(Boolean);
     let localeIndex = 0;
@@ -236,6 +253,7 @@ export async function GET(request: NextRequest) {
         const remainingRuntimeMs = Math.max(5_000, runtimeBudgetMs - (Date.now() - runStartedAt) - 2_000);
         const result = await runIngestAgent(cat as Category, cappedIngestCount, {
           pipeline,
+          discoveryProvider,
           maxExpansionCalls: cappedIngestCount,
           softDeadlineMs: remainingRuntimeMs,
           targetLocale,
@@ -261,6 +279,10 @@ export async function GET(request: NextRequest) {
         totalOutputTokens += result.outputTokens;
         totalPolicyRejected += result.policyRejectedCount;
         totalBatchFallbacks += result.batchFallbackCount;
+        discoveryRunsByProvider[result.discoveryProvider] =
+          (discoveryRunsByProvider[result.discoveryProvider] ?? 0) + 1;
+        insertedByProvider[result.discoveryProvider] =
+          (insertedByProvider[result.discoveryProvider] ?? 0) + insertedCount;
         remainingExpansionBudget = Math.max(0, remainingExpansionBudget - result.expansionCount);
 
         if (result.errorSummary) {
@@ -391,6 +413,8 @@ export async function GET(request: NextRequest) {
         totalFailed,
         totalPolicyRejected,
         totalBatchFallbacks,
+      discoveryRunsByProvider,
+      insertedByProvider,
         warningCount,
         durationMs: Date.now() - runStartedAt,
       },
@@ -420,6 +444,8 @@ export async function GET(request: NextRequest) {
       precheckRejected: totalPrecheckRejected,
       policyRejected: totalPolicyRejected,
       batchFallbacks: totalBatchFallbacks,
+      discoveryRunsByProvider,
+      insertedByProvider,
       expansions: totalExpansions,
       inputTokens: totalInputTokens,
       outputTokens: totalOutputTokens,

@@ -1542,6 +1542,23 @@ export function ProfileMenu({
               >
                 Open moderation queue
               </Link>
+              <div style={{ marginTop: "0.35rem" }}>
+                <Link
+                  href="/admin/feeds"
+                  onClick={() => setOpen(false)}
+                  style={{
+                    display: "inline-block",
+                    fontFamily: "'Playfair Display', Georgia, serif",
+                    fontSize: "0.8rem",
+                    fontWeight: 700,
+                    color: "#1a472a",
+                    textDecoration: "underline",
+                    textUnderlineOffset: "3px",
+                  }}
+                >
+                  Manage RSS feeds
+                </Link>
+              </div>
             </section>
           ) : null}
 

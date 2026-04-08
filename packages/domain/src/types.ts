@@ -152,6 +152,23 @@ export interface SavedArticleListItem {
   isRead: boolean;
 }
 
+export interface RssFeedRecord {
+  id: string;
+  feedUrl: string;
+  publisher: string;
+  label: string;
+  categoryHint: string;
+  localeHint: string;
+  isEnabled: boolean;
+  toneRiskScore: number;
+  lastFetchedAt: string | null;
+  lastSuccessAt: string | null;
+  lastError: string | null;
+  consecutiveFailures: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** Per difficulty bucket within a game type (easy / medium / hard). */
 export interface GameDifficultyBucketStats {
   completions: number;

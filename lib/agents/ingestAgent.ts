@@ -18,6 +18,7 @@ import {
 } from "@/lib/anthropic/messageBatch";
 import { captureException, captureMessage, startSpan } from "@/lib/observability";
 import { checkUpliftPolicy } from "@/lib/agents/upliftPolicyFilter";
+import { discoverCandidatesFromRss } from "@/lib/rss/discovery";
 import {
   resolveIngestDiscoveryProvider,
   type IngestDiscoveryProvider,
@@ -87,6 +88,7 @@ interface TokenBudget {
 
 interface RunIngestAgentOptions {
   pipeline?: "legacy" | "overhaul";
+  discoveryProvider?: IngestDiscoveryProvider;
   maxExpansionCalls?: number;
   inputTokenCap?: number;
   outputTokenCap?: number;
@@ -168,7 +170,9 @@ async function runOverhaulIngest(
   let stoppedEarly = false;
   const startedAt = Date.now();
   const targetLocale = resolveTargetLocale(options.targetLocale);
-  const discoveryProvider = resolveIngestDiscoveryProvider(env.INGEST_DISCOVERY_PROVIDER);
+  const discoveryProvider = options.discoveryProvider
+    ? options.discoveryProvider
+    : resolveIngestDiscoveryProvider(env.INGEST_DISCOVERY_PROVIDER);
 
   const [seenHeadlines, seenUrls] = await Promise.all([
     getRecentHeadlines(category, 60),
@@ -915,13 +919,71 @@ async function fetchDiscoveryCandidates(
   seenHeadlines: string[],
   seenUrls: string[]
 ): Promise<DiscoveryResult> {
-  if (discoveryProvider === "rss_seed_only")
+  if (discoveryProvider === "rss_seed_only" || discoveryProvider === "rss_seeded_primary") {
+    const rssCandidates = await discoverCandidatesFromRss({
+      categoryHint: category,
+      targetLocale,
+      targetCount,
+      seenUrls,
+      seenHeadlines,
+    });
+    if (discoveryProvider === "rss_seed_only" || rssCandidates.length >= targetCount) {
+      return {
+        candidates: normalizeDiscoveryCandidates(rssCandidates),
+        usage: { input_tokens: 0, output_tokens: 0 },
+        retryCount: 0,
+        provider: discoveryProvider,
+      };
+    }
+    const remainingCount = Math.max(0, targetCount - rssCandidates.length);
+    if (remainingCount === 0)
+      return {
+        candidates: normalizeDiscoveryCandidates(rssCandidates),
+        usage: { input_tokens: 0, output_tokens: 0 },
+        retryCount: 0,
+        provider: discoveryProvider,
+      };
+    const webFallback = await fetchDiscoveryCandidatesAnthropic(
+      apiKey,
+      category,
+      targetLocale,
+      remainingCount,
+      seenHeadlines,
+      seenUrls
+    );
     return {
-      candidates: [],
-      usage: { input_tokens: 0, output_tokens: 0 },
-      retryCount: 0,
+      candidates: normalizeDiscoveryCandidates([...rssCandidates, ...webFallback.candidates]).slice(
+        0,
+        targetCount
+      ),
+      usage: webFallback.usage,
+      retryCount: webFallback.retryCount,
       provider: discoveryProvider,
     };
+  }
+
+  const webOnly = await fetchDiscoveryCandidatesAnthropic(
+    apiKey,
+    category,
+    targetLocale,
+    targetCount,
+    seenHeadlines,
+    seenUrls
+  );
+  return {
+    ...webOnly,
+    provider: discoveryProvider,
+  };
+}
+
+async function fetchDiscoveryCandidatesAnthropic(
+  apiKey: string,
+  category: Category,
+  targetLocale: string,
+  targetCount: number,
+  seenHeadlines: string[],
+  seenUrls: string[]
+): Promise<Omit<DiscoveryResult, "provider">> {
 
   const avoidHeadlines = seenHeadlines.slice(-30).join("; ");
   const avoidUrls = seenUrls.slice(-60).join(", ");
@@ -950,7 +1012,7 @@ async function fetchDiscoveryCandidates(
   const rawCandidates =
     (Array.isArray(parsed) ? parsed : (parsed as { candidates?: unknown } | null)?.candidates) ?? [];
   const candidates = normalizeDiscoveryCandidates(rawCandidates);
-  return { candidates, usage, retryCount, provider: discoveryProvider };
+  return { candidates, usage, retryCount };
 }
 
 function normalizeDiscoveryCandidates(raw: unknown): DiscoveryCandidate[] {

@@ -87,6 +87,8 @@ const FEED_FETCH_TIMEOUT_MS = 90_000;
 const SENTINEL_PREFETCH_PX = 900;
 const MIN_LOAD_GAP_MS = 650;
 const REACHED_END_COOLDOWN_MS = 20_000;
+const FORCE_INGEST_RETRY_DELAY_MS = 1_200;
+const FORCE_INGEST_CLIENT_COOLDOWN_MS = 8_000;
 const FEED_CACHE_TTL_MS = 35_000;
 const FEED_STALE_TTL_MS = 120_000;
 const DEFAULT_GAP_MIN_PX = 180;
@@ -262,6 +264,8 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   const preferredWeatherLocationRef = useRef<string | null>(null);
   const feedCacheRef = useRef<Map<string, FeedCacheEntry>>(new Map());
   const feedInFlightRef = useRef<Map<string, Promise<FeedApiResponse>>>(new Map());
+  const forceIngestInFlightRef = useRef<Promise<void> | null>(null);
+  const forceIngestLockUntilRef = useRef(0);
 
   const fillerEnabled = readTruthyFlag(
     process.env.NEXT_PUBLIC_FEED_GAP_FILL_ENABLED,
@@ -1074,6 +1078,69 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     ensureSingletonFeedCached,
   ]); // stable refs + config
 
+  const triggerForceIngestOnRetry = useCallback(async () => {
+    if (activeSearchQueryRef.current.trim().length >= 2) return;
+    if (forceIngestInFlightRef.current) {
+      await forceIngestInFlightRef.current;
+      return;
+    }
+    if (Date.now() < forceIngestLockUntilRef.current) return;
+
+    const category = activeCategoryRef.current;
+    const sectionIndex = Math.max(sectionCountRef.current, 0);
+
+    const requestPromise = (async () => {
+      try {
+        const response = await fetch("/api/feed/force-ingest", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            sectionIndex,
+            ...(category ? { category } : {}),
+          }),
+        });
+
+        let retryAfterSec = 0;
+        const body = (await response.json().catch(() => null)) as
+          | { retryAfterSec?: number; reason?: string }
+          | null;
+        if (typeof body?.retryAfterSec === "number" && Number.isFinite(body.retryAfterSec))
+          retryAfterSec = Math.max(0, Math.floor(body.retryAfterSec));
+        const retryAfterHeader = Number.parseInt(response.headers.get("Retry-After") || "", 10);
+        if (Number.isFinite(retryAfterHeader))
+          retryAfterSec = Math.max(retryAfterSec, Math.max(0, retryAfterHeader));
+
+        if (response.status === 429 || retryAfterSec > 0) {
+          const cooldownMs = Math.max(
+            FORCE_INGEST_CLIENT_COOLDOWN_MS,
+            retryAfterSec * 1000
+          );
+          forceIngestLockUntilRef.current = Date.now() + cooldownMs;
+          return;
+        }
+
+        if (response.ok) {
+          await new Promise<void>((resolve) => {
+            window.setTimeout(() => resolve(), FORCE_INGEST_RETRY_DELAY_MS);
+          });
+          return;
+        }
+
+        if (body?.reason === "provider_not_rss_mode" || body?.reason === "dev_light_disabled") {
+          forceIngestLockUntilRef.current = Date.now() + FORCE_INGEST_CLIENT_COOLDOWN_MS;
+        }
+      } catch {
+        // Best-effort only; feed retry still proceeds through loadMore.
+      }
+    })();
+
+    forceIngestInFlightRef.current = requestPromise.finally(() => {
+      forceIngestInFlightRef.current = null;
+    });
+    await forceIngestInFlightRef.current;
+  }, []);
+
   const resetSectionsAndLoadMore = useCallback(
     (overrideCategory?: Category | null) => {
       setSections([]);
@@ -1875,10 +1942,13 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
               }
               pendingLoadRef.current = true;
               lastLoadStartAtRef.current = 0;
-              requestAnimationFrame(() => {
-                if (loadingRef.current) return;
-                void loadMore();
-              });
+              void (async () => {
+                await triggerForceIngestOnRetry();
+                requestAnimationFrame(() => {
+                  if (loadingRef.current) return;
+                  void loadMore();
+                });
+              })();
             }}
           />
         )}

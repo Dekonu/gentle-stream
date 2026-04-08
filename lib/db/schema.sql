@@ -257,6 +257,33 @@ CREATE TABLE IF NOT EXISTS user_daily_todos (
 CREATE INDEX IF NOT EXISTS idx_user_daily_todos_user_day
   ON user_daily_todos (user_id, local_day, sort_order);
 
+-- ─── RSS feed registry (admin-managed ingest sources) ────────────────────────
+CREATE TABLE IF NOT EXISTS rss_feeds (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  feed_url TEXT NOT NULL,
+  publisher TEXT NOT NULL DEFAULT '',
+  label TEXT NOT NULL DEFAULT '',
+  category_hint TEXT NOT NULL DEFAULT '',
+  locale_hint TEXT NOT NULL DEFAULT 'global',
+  is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  tone_risk_score SMALLINT NOT NULL DEFAULT 2
+    CHECK (tone_risk_score >= 0 AND tone_risk_score <= 10),
+  last_fetched_at TIMESTAMPTZ,
+  last_success_at TIMESTAMPTZ,
+  last_error TEXT,
+  consecutive_failures INT NOT NULL DEFAULT 0
+    CHECK (consecutive_failures >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rss_feeds_feed_url_lower_unique
+  ON rss_feeds (LOWER(feed_url));
+
+CREATE INDEX IF NOT EXISTS idx_rss_feeds_enabled_locale_category
+  ON rss_feeds (is_enabled, locale_hint, category_hint)
+  WHERE is_enabled = TRUE;
+
 -- ─── Distributed API rate limiting ────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS rate_limit_windows (
   policy_id TEXT NOT NULL,
@@ -338,6 +365,11 @@ CREATE TRIGGER set_updated_at_on_creator_profiles
 DROP TRIGGER IF EXISTS set_updated_at_on_article_submissions ON article_submissions;
 CREATE TRIGGER set_updated_at_on_article_submissions
   BEFORE UPDATE ON article_submissions
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS set_updated_at_on_rss_feeds ON rss_feeds;
+CREATE TRIGGER set_updated_at_on_rss_feeds
+  BEFORE UPDATE ON rss_feeds
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ─── Cleanup (TTL disabled) ────────────────────────────────────────────────────
