@@ -64,6 +64,25 @@ function isMissingUserSeenArticlesTable(errorMessage: string): boolean {
   );
 }
 
+function isMissingArticleForeignKey(errorMessage: string): boolean {
+  return (
+    errorMessage.includes("user_seen_articles_article_id_fkey") ||
+    (errorMessage.includes("foreign key constraint") &&
+      errorMessage.includes("article_id"))
+  );
+}
+
+async function filterExistingArticleIds(articleIds: string[]): Promise<string[]> {
+  const uniqueIds = Array.from(new Set(articleIds.filter(Boolean)));
+  if (uniqueIds.length === 0) return [];
+  const { data, error } = await db
+    .from("articles")
+    .select("id")
+    .in("id", uniqueIds);
+  if (error) throw new Error(`filterExistingArticleIds: ${error.message}`);
+  return (data ?? []).map((row) => String((row as { id: string }).id));
+}
+
 function normalizeEnabledGameTypes(input: unknown): GameType[] {
   if (!Array.isArray(input)) return [...DEFAULT_ENABLED_GAME_TYPES];
   const allowed = new Set<string>([
@@ -183,6 +202,11 @@ export interface AuthorDisplayFields {
   username: string | null;
 }
 
+export interface LocaleDemandRow {
+  locale: string;
+  weight: number;
+}
+
 /** Batch read avatar + @username for bylines (creator articles). */
 export async function getAuthorDisplayByUserIds(
   userIds: string[]
@@ -204,6 +228,31 @@ export async function getAuthorDisplayByUserIds(
     });
   }
   return map;
+}
+
+export async function getPreferredLocaleDemand(limit = 8): Promise<LocaleDemandRow[]> {
+  const { data, error } = await db
+    .from("user_profiles")
+    .select("preferred_locales");
+  if (error) throw new Error(`getPreferredLocaleDemand: ${error.message}`);
+
+  const scoreByLocale = new Map<string, number>();
+  for (const row of data ?? []) {
+    const locales = ((row as { preferred_locales?: string[] | null }).preferred_locales ?? [])
+      .map((locale) => locale.trim())
+      .filter(Boolean);
+    if (locales.length === 0) continue;
+    const perLocaleWeight = 1 / locales.length;
+    for (const locale of locales) {
+      scoreByLocale.set(locale, (scoreByLocale.get(locale) ?? 0) + perLocaleWeight);
+    }
+  }
+
+  const sorted = Array.from(scoreByLocale.entries())
+    .map(([locale, weight]) => ({ locale, weight: Number(weight.toFixed(4)) }))
+    .sort((a, b) => b.weight - a.weight);
+  if (sorted.length === 0) return [{ locale: "global", weight: 1 }];
+  return sorted.slice(0, Math.max(1, Math.trunc(limit)));
 }
 
 /** Read-only profile lookup (no insert). Used for public creator pages. */
@@ -228,13 +277,16 @@ export async function markArticlesSeen(
 ): Promise<void> {
   if (articleIds.length === 0) return;
 
+  const existingArticleIds = await filterExistingArticleIds(articleIds);
+  if (existingArticleIds.length === 0) return;
+
   const seenAtIso = new Date().toISOString();
   const source = metadata?.source?.trim() || "feed";
   const sectionIndex =
     typeof metadata?.sectionIndex === "number" && Number.isFinite(metadata.sectionIndex)
       ? Math.trunc(metadata.sectionIndex)
       : null;
-  const seenRows = Array.from(new Set(articleIds)).map((articleId) => ({
+  let seenRows = Array.from(new Set(existingArticleIds)).map((articleId) => ({
     user_id: userId,
     article_id: articleId,
     seen_at: seenAtIso,
@@ -252,6 +304,25 @@ export async function markArticlesSeen(
           "[markArticlesSeen] user_seen_articles unavailable; falling back to profile array: %s",
           seenError.message
         );
+      } else if (isMissingArticleForeignKey(seenError.message)) {
+        const retryIds = await filterExistingArticleIds(
+          seenRows.map((row) => row.article_id)
+        );
+        if (retryIds.length > 0) {
+          seenRows = retryIds.map((articleId) => ({
+            user_id: userId,
+            article_id: articleId,
+            seen_at: seenAtIso,
+            source,
+            section_index: sectionIndex,
+          }));
+          const { error: retryError } = await db
+            .from("user_seen_articles")
+            .upsert(seenRows, { onConflict: "user_id,article_id" });
+          if (retryError && !isMissingArticleForeignKey(retryError.message)) {
+            throw new Error(`markArticlesSeen user_seen_articles: ${retryError.message}`);
+          }
+        }
       } else {
         throw new Error(`markArticlesSeen user_seen_articles: ${seenError.message}`);
       }
@@ -260,7 +331,7 @@ export async function markArticlesSeen(
 
   // Legacy compatibility window: continue updating profile array while dual-write is enabled.
   const profile = await getOrCreateUserProfile(userId);
-  const updated = [...profile.seenArticleIds, ...articleIds];
+  const updated = [...profile.seenArticleIds, ...existingArticleIds];
   // Cap at 500 — beyond this, articles will have expired anyway
   const capped = updated.slice(-500);
 

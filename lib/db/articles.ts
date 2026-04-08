@@ -76,6 +76,7 @@ interface ArticleRow {
   pull_quote: string;
   image_prompt: string;
   fetched_at: string;
+  source_published_at?: string | null;
   expires_at: string;
   tags: string[];
   sentiment: string;
@@ -99,6 +100,32 @@ interface ArticleRow {
   recipe_prep_time_minutes?: number | null;
   recipe_cook_time_minutes?: number | null;
   recipe_images?: string[] | null;
+}
+
+function isLikelyTestFixtureRow(row: ArticleRow): boolean {
+  const headline = (row.headline ?? "").toLowerCase();
+  const byline = (row.byline ?? "").toLowerCase();
+  const location = (row.location ?? "").toLowerCase();
+  const subheadline = (row.subheadline ?? "").toLowerCase();
+
+  if (
+    headline.includes("test_dedup") ||
+    headline.includes("test_url_dedup") ||
+    headline.includes("test_eng_db") ||
+    headline.includes("test_reco_e2e")
+  ) {
+    return true;
+  }
+
+  return (
+    byline.includes("test runner") &&
+    location.includes("testland") &&
+    subheadline.includes("test subheadline")
+  );
+}
+
+function filterTestFixtureRows(rows: ArticleRow[]): ArticleRow[] {
+  return rows.filter((row) => !isLikelyTestFixtureRow(row));
 }
 
 function isGenericCreatorByline(byline: string): boolean {
@@ -178,6 +205,8 @@ export function rowToArticle(row: ArticleRow): StoredArticle {
     pullQuote: row.pull_quote,
     imagePrompt: row.image_prompt,
     fetchedAt: row.fetched_at,
+    ingestedAt: row.fetched_at,
+    sourcePublishedAt: row.source_published_at ?? null,
     expiresAt: row.expires_at,
     tags: row.tags ?? [],
     sentiment: (row.sentiment ?? "uplifting") as StoredArticle["sentiment"],
@@ -439,6 +468,7 @@ export async function insertArticles(
     pull_quote: a.pullQuote,
     image_prompt: a.imagePrompt,
     fetched_at: now.toISOString(),
+    source_published_at: a.sourcePublishedAt ?? null,
     // Keep a far-future expiry so legacy schema constraints remain valid while
     // article TTL cleanup is disabled.
     expires_at: NON_EXPIRING_EXPIRES_AT,
@@ -599,7 +629,8 @@ export async function getArticlesForFeed(
         throw new Error(`getArticlesForFeed rpc: ${errorMessage}`);
       }
     } else {
-      return hydrateCreatorAuthorDisplay((data as ArticleRow[]).map(rowToArticle));
+      const safeRows = filterTestFixtureRows(data as ArticleRow[]);
+      return hydrateCreatorAuthorDisplay(safeRows.map(rowToArticle));
     }
   }
 
@@ -625,7 +656,8 @@ export async function getArticlesForFeed(
 
   const { data, error } = await query;
   if (error) throw new Error(`getArticlesForFeed: ${error.message}`);
-  return hydrateCreatorAuthorDisplay((data as ArticleRow[]).map(rowToArticle));
+  const safeRows = filterTestFixtureRows(data as ArticleRow[]);
+  return hydrateCreatorAuthorDisplay(safeRows.map(rowToArticle));
 }
 
 /**
@@ -659,7 +691,8 @@ export async function getUntaggedArticlesForFeed(
         throw new Error(`getUntaggedArticlesForFeed rpc: ${errorMessage}`);
       }
     } else {
-      return hydrateCreatorAuthorDisplay((data as ArticleRow[]).map(rowToArticle));
+      const safeRows = filterTestFixtureRows(data as ArticleRow[]);
+      return hydrateCreatorAuthorDisplay(safeRows.map(rowToArticle));
     }
   }
 
@@ -685,7 +718,8 @@ export async function getUntaggedArticlesForFeed(
 
   const { data, error } = await query;
   if (error) throw new Error(`getUntaggedArticlesForFeed: ${error.message}`);
-  return hydrateCreatorAuthorDisplay((data as ArticleRow[]).map(rowToArticle));
+  const safeRows = filterTestFixtureRows(data as ArticleRow[]);
+  return hydrateCreatorAuthorDisplay(safeRows.map(rowToArticle));
 }
 
 /**
@@ -713,7 +747,8 @@ export async function listRecentTaggedInCategory(params: {
 
   const { data, error } = await query;
   if (error) throw new Error(`listRecentTaggedInCategory: ${error.message}`);
-  return (data ?? []).map((row) => {
+  const safeRows = filterTestFixtureRows((data ?? []) as ArticleRow[]);
+  return safeRows.map((row) => {
     const r = row as { id: string; headline: string; category: string };
     return {
       id: r.id,
@@ -757,7 +792,8 @@ export async function getRandomAvailableArticles(
 
   const { data, error } = await query;
   if (error) throw new Error(`getRandomAvailableArticles: ${error.message}`);
-  const rows = await hydrateCreatorAuthorDisplay((data as ArticleRow[]).map(rowToArticle));
+  const safeRows = filterTestFixtureRows(data as ArticleRow[]);
+  const rows = await hydrateCreatorAuthorDisplay(safeRows.map(rowToArticle));
   shuffleInPlace(rows);
   return rows.slice(0, limit);
 }
@@ -781,7 +817,8 @@ export async function getRandomArticlesResurfacing(
   const { data, error } = await query;
 
   if (error) throw new Error(`getRandomArticlesResurfacing: ${error.message}`);
-  const rows = await hydrateCreatorAuthorDisplay((data as ArticleRow[]).map(rowToArticle));
+  const safeRows = filterTestFixtureRows(data as ArticleRow[]);
+  const rows = await hydrateCreatorAuthorDisplay(safeRows.map(rowToArticle));
   shuffleInPlace(rows);
   return rows.slice(0, limit);
 }

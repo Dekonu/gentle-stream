@@ -5,6 +5,7 @@ import { getSessionUserId } from "@/lib/api/sessionUser";
 import type { ArticleEngagementBatchRequest } from "@/lib/engagement/types";
 import {
   ARTICLE_ENGAGEMENT_MAX_EVENTS_PER_REQUEST,
+  type NormalizedEngagementRow,
   parseEngagementBatch,
 } from "@/lib/engagement/contract";
 import {
@@ -15,6 +16,20 @@ import {
 import { hasTrustedOrigin } from "@/lib/security/origin";
 import { parseJsonBody } from "@/lib/validation/http";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
+
+async function filterRowsByExistingArticles(
+  rows: NormalizedEngagementRow[]
+): Promise<NormalizedEngagementRow[]> {
+  const articleIds = Array.from(new Set(rows.map((row) => row.article_id)));
+  if (articleIds.length === 0) return [];
+  const { data, error } = await db
+    .from("articles")
+    .select("id")
+    .in("id", articleIds);
+  if (error) throw new Error(`filterRowsByExistingArticles: ${error.message}`);
+  const existingIds = new Set((data ?? []).map((row) => String((row as { id: string }).id)));
+  return rows.filter((row) => existingIds.has(row.article_id));
+}
 
 /**
  * Engagement tracking is now rolled out to 100% of authenticated users.
@@ -71,7 +86,16 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const { error } = await db.from("article_engagement_events").insert(parsed.rows);
+  const validRows = await filterRowsByExistingArticles(parsed.rows);
+  if (validRows.length === 0) {
+    return NextResponse.json({
+      ok: true,
+      accepted: 0,
+      droppedMissingArticleCount: parsed.rows.length,
+    });
+  }
+
+  const { error } = await db.from("article_engagement_events").insert(validRows);
   if (error) {
     return apiErrorResponse({
       request,
@@ -81,6 +105,10 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  return NextResponse.json({ ok: true, accepted: parsed.rows.length });
+  return NextResponse.json({
+    ok: true,
+    accepted: validRows.length,
+    droppedMissingArticleCount: parsed.rows.length - validRows.length,
+  });
 }
 

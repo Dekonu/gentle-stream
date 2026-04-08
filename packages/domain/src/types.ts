@@ -11,6 +11,7 @@ export interface RawArticle {
   body: string;
   pullQuote: string;
   imagePrompt: string;
+  sourcePublishedAt?: string | null; // original source publish timestamp (if known)
   sourceUrls: string[]; // normalized URLs extracted from web search result blocks
 }
 
@@ -20,6 +21,8 @@ export interface StoredArticle extends Omit<RawArticle, "category"> {
   category: ArticleStorageCategory;
   id: string;
   fetchedAt: string; // ISO timestamp
+  ingestedAt?: string; // alias of fetchedAt for explicit UI labeling
+  sourcePublishedAt?: string | null;
   expiresAt: string; // ISO timestamp (fetchedAt + 7 days)
   source?: ArticleSource;
   contentKind?: ArticleContentKind;
@@ -147,6 +150,23 @@ export interface SavedArticleListItem {
   summary: string | null;
   savedAt: string;
   isRead: boolean;
+}
+
+export interface RssFeedRecord {
+  id: string;
+  feedUrl: string;
+  publisher: string;
+  label: string;
+  categoryHint: string;
+  localeHint: string;
+  isEnabled: boolean;
+  toneRiskScore: number;
+  lastFetchedAt: string | null;
+  lastSuccessAt: string | null;
+  lastError: string | null;
+  consecutiveFailures: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 /** Per difficulty bucket within a game type (easy / medium / hard). */

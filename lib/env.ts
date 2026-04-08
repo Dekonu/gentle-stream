@@ -52,6 +52,12 @@ const envSchema = z.object({
   /** Max time to poll for batch completion (default 1h). */
   INGEST_BATCH_MAX_WAIT_MS: optionalNumberString,
   INGEST_BATCH_POLL_MS: optionalNumberString,
+  INGEST_BATCH_SYNC_FALLBACK_LIMIT: optionalNumberString,
+  INGEST_AUTO_LOCALE: optionalTrimmedString,
+  INGEST_DISCOVERY_PROVIDER: optionalTrimmedString,
+  RSS_FEED_AUTO_DISABLE_FAILURES: optionalNumberString,
+  RSS_DISCOVERY_MAX_FEEDS: optionalNumberString,
+  RSS_DISCOVERY_ITEMS_PER_FEED: optionalNumberString,
   FEED_SEEN_TABLE_READS_ENABLED: optionalBooleanString,
   TURNSTILE_ENABLED: optionalBooleanString,
   NEXT_PUBLIC_TURNSTILE_ENABLED: optionalBooleanString,
@@ -71,6 +77,7 @@ const envSchema = z.object({
   SPOTIFY_MODULE_DEFAULT_MOODS: optionalTrimmedString,
   RECIPE_IMPORT_ALLOWLIST: optionalTrimmedString,
   RECIPE_IMPORT_ENABLE_CLAUDE_FALLBACK: optionalBooleanString,
+  CRON_GAMES_LLM_ENABLED: optionalBooleanString,
   RATE_LIMIT_DISABLED: optionalBooleanString,
   RATE_LIMIT_USE_MEMORY: optionalBooleanString,
 });
