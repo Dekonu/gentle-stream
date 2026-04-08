@@ -64,6 +64,25 @@ function isMissingUserSeenArticlesTable(errorMessage: string): boolean {
   );
 }
 
+function isMissingArticleForeignKey(errorMessage: string): boolean {
+  return (
+    errorMessage.includes("user_seen_articles_article_id_fkey") ||
+    (errorMessage.includes("foreign key constraint") &&
+      errorMessage.includes("article_id"))
+  );
+}
+
+async function filterExistingArticleIds(articleIds: string[]): Promise<string[]> {
+  const uniqueIds = Array.from(new Set(articleIds.filter(Boolean)));
+  if (uniqueIds.length === 0) return [];
+  const { data, error } = await db
+    .from("articles")
+    .select("id")
+    .in("id", uniqueIds);
+  if (error) throw new Error(`filterExistingArticleIds: ${error.message}`);
+  return (data ?? []).map((row) => String((row as { id: string }).id));
+}
+
 function normalizeEnabledGameTypes(input: unknown): GameType[] {
   if (!Array.isArray(input)) return [...DEFAULT_ENABLED_GAME_TYPES];
   const allowed = new Set<string>([
@@ -258,13 +277,16 @@ export async function markArticlesSeen(
 ): Promise<void> {
   if (articleIds.length === 0) return;
 
+  const existingArticleIds = await filterExistingArticleIds(articleIds);
+  if (existingArticleIds.length === 0) return;
+
   const seenAtIso = new Date().toISOString();
   const source = metadata?.source?.trim() || "feed";
   const sectionIndex =
     typeof metadata?.sectionIndex === "number" && Number.isFinite(metadata.sectionIndex)
       ? Math.trunc(metadata.sectionIndex)
       : null;
-  const seenRows = Array.from(new Set(articleIds)).map((articleId) => ({
+  let seenRows = Array.from(new Set(existingArticleIds)).map((articleId) => ({
     user_id: userId,
     article_id: articleId,
     seen_at: seenAtIso,
@@ -282,6 +304,25 @@ export async function markArticlesSeen(
           "[markArticlesSeen] user_seen_articles unavailable; falling back to profile array: %s",
           seenError.message
         );
+      } else if (isMissingArticleForeignKey(seenError.message)) {
+        const retryIds = await filterExistingArticleIds(
+          seenRows.map((row) => row.article_id)
+        );
+        if (retryIds.length > 0) {
+          seenRows = retryIds.map((articleId) => ({
+            user_id: userId,
+            article_id: articleId,
+            seen_at: seenAtIso,
+            source,
+            section_index: sectionIndex,
+          }));
+          const { error: retryError } = await db
+            .from("user_seen_articles")
+            .upsert(seenRows, { onConflict: "user_id,article_id" });
+          if (retryError && !isMissingArticleForeignKey(retryError.message)) {
+            throw new Error(`markArticlesSeen user_seen_articles: ${retryError.message}`);
+          }
+        }
       } else {
         throw new Error(`markArticlesSeen user_seen_articles: ${seenError.message}`);
       }
@@ -290,7 +331,7 @@ export async function markArticlesSeen(
 
   // Legacy compatibility window: continue updating profile array while dual-write is enabled.
   const profile = await getOrCreateUserProfile(userId);
-  const updated = [...profile.seenArticleIds, ...articleIds];
+  const updated = [...profile.seenArticleIds, ...existingArticleIds];
   // Cap at 500 — beyond this, articles will have expired anyway
   const capped = updated.slice(-500);
 
