@@ -198,6 +198,11 @@ See `.env.example` for documented variables. At minimum for a full local run:
 
 Configure **Auth providers** and **redirect URLs** in the Supabase dashboard to match your local or deployed origin.
 
+- Add every origin you actually use (for example `http://localhost:3000`, LAN IP, production URL).
+- Use `/**` patterns for callback paths (for example `http://localhost:3000/**`), not just `/*`.
+- Set Supabase **Site URL** to your canonical production domain to avoid fallback confusion.
+- Keep `NEXT_PUBLIC_AUTH_REDIRECT_ORIGIN` aligned with allowed redirect origins when you need a fixed override.
+
 ### 4. Article pool (optional but needed for a rich feed)
 
 ```bash

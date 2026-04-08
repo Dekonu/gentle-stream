@@ -15,6 +15,11 @@ Phone MFA challenge codes are delivered by your configured phone provider.
 
 - Configure SMS/WhatsApp provider settings in Supabase Auth.
 - Verify sender IDs / templates if your provider requires them.
+- For Twilio Messaging Service status visibility, set **Status Callback URL** to:
+  - Production: `https://<your-domain>/api/webhooks/twilio/status`
+  - Optional tokenized variant: `https://<your-domain>/api/webhooks/twilio/status?token=<TWILIO_WEBHOOK_TOKEN>`
+- This endpoint logs Twilio delivery states (`queued`, `sent`, `delivered`, `undelivered`, `failed`) to server logs so you can diagnose why OTPs are not reaching devices.
+- Recommended security: set `TWILIO_AUTH_TOKEN` so the callback validates `X-Twilio-Signature`.
 
 ## 3) Confirm auth templates and limits
 

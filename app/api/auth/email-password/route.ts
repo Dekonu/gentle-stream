@@ -17,6 +17,7 @@ import {
   SESSION_START_COOKIE,
   sessionStartCookieOptions,
 } from "@/lib/auth/session-policy";
+import { CREATOR_LOGIN_ENABLED } from "@/lib/feature-flags/regulatory";
 
 const emailPasswordBodySchema = z
   .object({
@@ -100,12 +101,35 @@ export async function POST(request: NextRequest) {
       message: "Invalid email address.",
     });
   }
+
+  if (audience === "creator" && !CREATOR_LOGIN_ENABLED) {
+    return apiErrorResponse({
+      request,
+      status: 503,
+      code: API_ERROR_CODES.INVALID_REQUEST,
+      message:
+        "Creator login is a work in progress and is temporarily disabled pending approval from the appropriate regulatory agencies.",
+    });
+  }
   if (!redirectTo || !isAllowedRedirectTo(request, redirectTo)) {
+    const allowed = Array.from(allowedAuthOrigins(request));
+    const providedOrigin = (() => {
+      try {
+        return new URL(redirectTo).origin;
+      } catch {
+        return null;
+      }
+    })();
+    console.warn("[auth-email-password] rejected redirectTo origin", {
+      redirectTo,
+      providedOrigin,
+      allowedOrigins: allowed,
+    });
     return apiErrorResponse({
       request,
       status: 400,
       code: API_ERROR_CODES.VALIDATION,
-      message: "Invalid auth redirect URL.",
+      message: "Invalid auth redirect URL. Check Supabase Redirect URLs and auth origin env.",
     });
   }
 
@@ -181,7 +205,8 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({
       ok: true,
-      requiresEmailVerification: true,
+      requiresEmailVerification: false,
+      verificationEmailSent: true,
     });
   }
 
@@ -217,19 +242,18 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const emailConfirmedAt =
-    (user as { email_confirmed_at?: string | null }).email_confirmed_at ?? null;
-  if (!emailConfirmedAt) {
-    await supabase.auth.signOut();
-    return apiErrorResponse({
-      request,
-      status: 403,
-      code: API_ERROR_CODES.FORBIDDEN,
-      message: "Please verify your email address before signing in.",
-    });
-  }
-
   if (audience === "creator") {
+    const emailConfirmedAt =
+      (user as { email_confirmed_at?: string | null }).email_confirmed_at ?? null;
+    if (!emailConfirmedAt) {
+      await supabase.auth.signOut();
+      return apiErrorResponse({
+        request,
+        status: 403,
+        code: API_ERROR_CODES.FORBIDDEN,
+        message: "Creator login requires a verified email address.",
+      });
+    }
     const phoneConfirmedAt =
       (user as { phone_confirmed_at?: string | null }).phone_confirmed_at ?? null;
     if (!user.phone || !phoneConfirmedAt) {
