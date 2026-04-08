@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Script from "next/script";
 import type { Provider } from "@supabase/supabase-js";
 import { AppLogo } from "@/components/brand/AppLogo";
@@ -20,6 +20,26 @@ function safeNextPath(raw: string | null): string {
  *
  * In the browser we always use `window.location.origin` so the address bar wins.
  */
+interface CloudflareTurnstileApi {
+  render: (
+    container: HTMLElement | string,
+    options: {
+      sitekey: string;
+      theme?: "light" | "dark" | "auto";
+      callback?: (token: string) => void;
+      "expired-callback"?: () => void;
+      "error-callback"?: () => void;
+    }
+  ) => string;
+  reset: (widgetId: string) => void;
+  remove: (widgetId: string) => void;
+}
+
+function getTurnstileApi(): CloudflareTurnstileApi | undefined {
+  if (typeof window === "undefined") return undefined;
+  return (window as unknown as { turnstile?: CloudflareTurnstileApi }).turnstile;
+}
+
 function resolveAuthRedirectBase(serverHint: string): string {
   if (typeof window !== "undefined") {
     const origin = window.location?.origin ?? "";
@@ -76,9 +96,74 @@ export function LoginForm({
   const turnstileEnabled =
     process.env.NEXT_PUBLIC_TURNSTILE_ENABLED === "1" ||
     process.env.NEXT_PUBLIC_TURNSTILE_ENABLED === "true";
+  const needsTurnstileChallenge = turnstileEnabled && Boolean(turnstileSiteKey);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileScriptReady, setTurnstileScriptReady] = useState(false);
+  const turnstileContainerRef = useRef<HTMLDivElement | null>(null);
+  const turnstileWidgetIdRef = useRef<string | null>(null);
   const [showCreatorOnboardingNotice, setShowCreatorOnboardingNotice] = useState(false);
   const isCreatorLogin = audience === "creator";
   const isCreatorLoginDisabled = isCreatorLogin && !CREATOR_LOGIN_ENABLED;
+
+  useEffect(() => {
+    if (getTurnstileApi()) setTurnstileScriptReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!needsTurnstileChallenge || requiresEmailVerification) {
+      setTurnstileToken(null);
+      return;
+    }
+    if (!turnstileScriptReady || !turnstileContainerRef.current) return;
+
+    const container = turnstileContainerRef.current;
+    const api = getTurnstileApi();
+    if (!api) return;
+
+    container.innerHTML = "";
+    const widgetId = api.render(container, {
+      sitekey: turnstileSiteKey,
+      theme: "light",
+      callback: (token: string) => {
+        setTurnstileToken(token.trim() ? token.trim() : null);
+      },
+      "expired-callback": () => setTurnstileToken(null),
+      "error-callback": () => setTurnstileToken(null),
+    });
+    turnstileWidgetIdRef.current = widgetId;
+
+    return () => {
+      const id = turnstileWidgetIdRef.current;
+      turnstileWidgetIdRef.current = null;
+      setTurnstileToken(null);
+      if (id) {
+        try {
+          api.remove(id);
+        } catch {
+          /* ignore */
+        }
+      }
+      container.innerHTML = "";
+    };
+  }, [
+    needsTurnstileChallenge,
+    requiresEmailVerification,
+    turnstileScriptReady,
+    turnstileSiteKey,
+  ]);
+
+  function resetTurnstileWidget() {
+    const id = turnstileWidgetIdRef.current;
+    const api = getTurnstileApi();
+    if (id && api) {
+      try {
+        api.reset(id);
+      } catch {
+        /* ignore */
+      }
+    }
+    setTurnstileToken(null);
+  }
 
   /**
    * Do not call signOut before OAuth: signOut removes the PKCE code_verifier from
@@ -133,6 +218,16 @@ export function LoginForm({
       return;
     }
 
+    if (needsTurnstileChallenge) {
+      const fd = new FormData(e.currentTarget);
+      const token =
+        (fd.get("cf-turnstile-response") as string | null)?.trim() ?? "";
+      if (!token) {
+        setMessage("Please complete the security verification below.");
+        return;
+      }
+    }
+
     setEmailBusy(true);
     try {
       const base = resolveAuthRedirectBase(authRedirectBaseFromServer);
@@ -162,6 +257,7 @@ export function LoginForm({
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         setMessage(body.error ?? "Could not continue with email/password.");
+        resetTurnstileWidget();
         return;
       }
       const body = (await res.json().catch(() => ({}))) as {
@@ -444,7 +540,10 @@ export function LoginForm({
             </p>
             <button
               type="button"
-              onClick={() => setRequiresEmailVerification(false)}
+              onClick={() => {
+                setRequiresEmailVerification(false);
+                setEmailMode("sign_in");
+              }}
               style={{
                 width: "100%",
                 padding: "0.56rem 1rem",
@@ -651,9 +750,38 @@ export function LoginForm({
                   : "Use the password linked to your account."}
             </p>
 
+            {needsTurnstileChallenge ? (
+              <>
+                <Script
+                  src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+                  async
+                  defer
+                  onLoad={() => setTurnstileScriptReady(true)}
+                />
+                <p
+                  style={{
+                    margin: "0 0 0.5rem",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    fontSize: "0.72rem",
+                    color: "#666",
+                    lineHeight: 1.45,
+                  }}
+                >
+                  Complete the security check below before signing in.
+                </p>
+                <div
+                  ref={turnstileContainerRef}
+                  style={{ marginBottom: "0.85rem", minHeight: "70px" }}
+                  aria-live="polite"
+                />
+              </>
+            ) : null}
+
             <button
               type="submit"
-              disabled={emailBusy}
+              disabled={
+                emailBusy || (needsTurnstileChallenge && !turnstileToken)
+              }
               style={{
                 width: "100%",
                 padding: "0.6rem 1rem",
@@ -664,7 +792,16 @@ export function LoginForm({
                 fontSize: "0.78rem",
                 letterSpacing: "0.06em",
                 textTransform: "uppercase",
-                cursor: emailBusy ? "wait" : "pointer",
+                cursor:
+                  emailBusy
+                    ? "wait"
+                    : needsTurnstileChallenge && !turnstileToken
+                      ? "not-allowed"
+                      : "pointer",
+                opacity:
+                  needsTurnstileChallenge && !turnstileToken && !emailBusy
+                    ? 0.55
+                    : 1,
               }}
             >
               {emailBusy
@@ -675,22 +812,6 @@ export function LoginForm({
                     ? "Create account"
                     : "Sign in with email"}
             </button>
-
-            {turnstileEnabled && turnstileSiteKey ? (
-              <>
-                <Script
-                  src="https://challenges.cloudflare.com/turnstile/v0/api.js"
-                  async
-                  defer
-                />
-                <div
-                  className="cf-turnstile"
-                  data-sitekey={turnstileSiteKey}
-                  data-theme="light"
-                  style={{ marginTop: "0.85rem" }}
-                />
-              </>
-            ) : null}
           </form>
         )}
 
