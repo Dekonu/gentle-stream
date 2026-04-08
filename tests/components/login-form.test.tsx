@@ -46,7 +46,7 @@ describe("LoginForm", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("submits email sign-in after consent and redirects", async () => {
+  it("submits email sign-in and redirects", async () => {
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ requiresEmailVerification: false }), { status: 200 })
@@ -82,5 +82,51 @@ describe("LoginForm", () => {
     await waitFor(() => {
       expect(assignMock).toHaveBeenCalledWith("/");
     });
+  });
+
+  it("toggles password visibility from hidden to visible", () => {
+    render(<LoginForm />);
+    const passwordInput = screen.getByLabelText("Password") as HTMLInputElement;
+    expect(passwordInput.type).toBe("password");
+    fireEvent.click(screen.getByRole("button", { name: "Show password" }));
+    expect(passwordInput.type).toBe("text");
+    fireEvent.click(screen.getByRole("button", { name: "Hide password" }));
+    expect(passwordInput.type).toBe("password");
+  });
+
+  it("shows sign-up success state with back-to-sign-in action", async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({ requiresEmailVerification: false, verificationEmailSent: true }),
+        { status: 200 }
+      )
+    );
+    vi.stubGlobal(
+      "location",
+      { origin: "http://127.0.0.1:3000", assign: vi.fn() } as unknown as Location
+    );
+
+    render(<LoginForm authRedirectBaseFromServer="http://127.0.0.1:3000" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign up" }));
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "reader@example.com" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "password123" },
+    });
+    fireEvent.change(screen.getByLabelText("Birthdate"), {
+      target: { value: "1990-01-01" },
+    });
+
+    const submitButton = screen.getByRole("button", { name: "Create account" });
+    const form = submitButton.closest("form");
+    if (!form) throw new Error("Expected sign-up form to exist");
+    fireEvent.submit(form);
+
+    expect(await screen.findByText(/Account created\./)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Back to sign in" }));
+    expect(screen.getByRole("button", { name: "Sign in with email" })).toBeInTheDocument();
   });
 });
