@@ -894,13 +894,31 @@ function firstSentence(value: string): string {
   return (match?.[0] ?? value).trim();
 }
 
+function normalizeRssNarrativeText(value: string): string {
+  const blockedLine = /^(share|details|keep exploring|discover more topics|image credit:|editor|contact|related terms)$/i;
+  const cleaned = value
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\t+/g, " ")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .filter((line) => !blockedLine.test(line))
+    .filter((line) => !/^https?:\/\/\S+$/i.test(line))
+    .filter((line) => !/^[-•]{1,2}\s*$/.test(line))
+    .join("\n\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return cleaned;
+}
+
 function buildArticleFromRssCandidate(
   candidate: DiscoveryCandidate,
   category: Category,
   targetLocale: string
 ): RawArticle | null {
-  const summary = candidate.summary?.trim() ?? "";
-  const bodyFromFeed = candidate.body?.trim() ?? "";
+  const summary = normalizeRssNarrativeText(candidate.summary?.trim() ?? "");
+  const bodyFromFeed = normalizeRssNarrativeText(candidate.body?.trim() ?? "");
   const content = bodyFromFeed || summary;
   if (!content) return null;
 

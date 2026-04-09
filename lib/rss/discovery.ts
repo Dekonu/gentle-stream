@@ -63,7 +63,13 @@ function cleanXmlHtml(value: string): string {
     .replace(/<\/li>/gi, "\n")
     .replace(/<li[^>]*>/gi, "- ");
   const withoutTags = withBreaks.replace(/<[^>]+>/g, " ");
-  return decodeXmlEntities(withoutTags).replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  return decodeXmlEntities(withoutTags)
+    .replace(/[ \t]+\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function extractTag(block: string, tagName: string): string | null {

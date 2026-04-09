@@ -157,6 +157,44 @@ function HeartFilledIcon() {
   );
 }
 
+function DownloadIcon() {
+  return (
+    <svg
+      width={18}
+      height={18}
+      viewBox="0 0 24 24"
+      aria-hidden
+      style={{ flexShrink: 0 }}
+    >
+      <path
+        d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.6}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <polyline
+        points="7 10 12 15 17 10"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.6}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <line
+        x1="12"
+        y1="15"
+        x2="12"
+        y2="3"
+        stroke="currentColor"
+        strokeWidth={1.6}
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 const iconActionStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
@@ -861,6 +899,69 @@ export default function ArticleCard({
     [articleId, isRecipeCard, recipeRating, recipeRatingBusy]
   );
 
+  const downloadRecipe = useCallback(() => {
+    if (!isRecipeCard) return;
+    const ingredients =
+      "recipeIngredients" in article && Array.isArray(article.recipeIngredients)
+        ? article.recipeIngredients
+        : [];
+    const instructions =
+      "recipeInstructions" in article && Array.isArray(article.recipeInstructions)
+        ? article.recipeInstructions
+        : [];
+    const servings =
+      "recipeServings" in article && article.recipeServings != null
+        ? article.recipeServings
+        : null;
+    const prep =
+      "recipePrepTimeMinutes" in article &&
+      article.recipePrepTimeMinutes != null
+        ? article.recipePrepTimeMinutes
+        : null;
+    const cook =
+      "recipeCookTimeMinutes" in article &&
+      article.recipeCookTimeMinutes != null
+        ? article.recipeCookTimeMinutes
+        : null;
+
+    const metaParts = [
+      servings != null ? `Serves ${servings}` : null,
+      prep != null ? `Prep ${prep} min` : null,
+      cook != null ? `Cook ${cook} min` : null,
+    ].filter(Boolean);
+
+    const markdown = [
+      `# ${article.headline}`,
+      article.subheadline?.trim() ? `\n_${article.subheadline.trim()}_` : "",
+      metaParts.length > 0 ? `\n${metaParts.join(" · ")}` : "",
+      ingredients.length > 0
+        ? `\n\n## Ingredients\n${ingredients.map((ing) => `- ${ing}`).join("\n")}`
+        : "",
+      instructions.length > 0
+        ? `\n\n## Instructions\n${instructions
+            .map((step, idx) => `${idx + 1}. ${step}`)
+            .join("\n")}`
+        : "",
+      primarySourceHref ? `\n\nSource: ${primarySourceHref}` : "",
+    ].join("");
+
+    const blob = new Blob([markdown], {
+      type: "text/markdown;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const safeName = (article.headline || "recipe")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${safeName || "recipe"}.md`;
+    anchor.rel = "noopener";
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }, [article, isRecipeCard, primarySourceHref]);
+
   const headlineStyle = {
     fontFamily: "'Playfair Display', Georgia, serif",
     fontSize: headlineSizePx,
@@ -1186,6 +1287,21 @@ export default function ArticleCard({
               byline={article.byline}
               body={article.body ?? ""}
             />
+          ) : null}
+          {isRecipeCard ? (
+            <button
+              className="gs-interactive gs-focus-ring"
+              type="button"
+              onClick={downloadRecipe}
+              aria-label="Download recipe"
+              title="Download recipe"
+              style={{
+                ...iconActionStyle,
+                color: "#1a472a",
+              }}
+            >
+              <DownloadIcon />
+            </button>
           ) : null}
           {saveMsg && (
             <span

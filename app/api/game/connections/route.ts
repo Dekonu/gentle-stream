@@ -112,6 +112,27 @@ export async function GET(request: NextRequest) {
         const puzzle = ensureConnectionsIdentity(row.payload as ConnectionsPuzzle);
         return NextResponse.json({ ...puzzle, fromPool: true });
       }
+
+      // If we only ran out because of local excludes, fall back to any pool row
+      // (better than a hard 500 and better UX than a long live-generation wait).
+      if (excludeSignatures.length > 0) {
+        const fallbackRow = await getGameFromPool("connections", undefined, {
+          randomTieBreak: true,
+          excludeSignatures,
+          allowExcludedFallback: true,
+        });
+        if (fallbackRow) {
+          void markGameUsed(fallbackRow.id);
+          const puzzle = ensureConnectionsIdentity(
+            fallbackRow.payload as ConnectionsPuzzle
+          );
+          return NextResponse.json({
+            ...puzzle,
+            fromPool: true,
+            reusedExcluded: true,
+          });
+        }
+      }
     } catch (e) {
       console.warn("[/api/game/connections] Pool fetch failed:", e);
     }
@@ -159,11 +180,15 @@ export async function GET(request: NextRequest) {
     const inserted = await runConnectionsIngest(promptTheme);
 
     if (inserted === 0) {
+      const status = excludeSignatures.length > 0 ? 409 : 500;
       return apiErrorResponse({
         request,
-        status: 500,
-        code: API_ERROR_CODES.INTERNAL,
-        message: "Generation failed — please try again",
+        status,
+        code: status === 409 ? API_ERROR_CODES.NOT_FOUND : API_ERROR_CODES.INTERNAL,
+        message:
+          status === 409
+            ? "No unseen Connections puzzle available right now."
+            : "Generation failed — please try again",
       });
     }
 
@@ -204,6 +229,14 @@ export async function GET(request: NextRequest) {
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Generation failed";
+    if (excludeSignatures.length > 0) {
+      return apiErrorResponse({
+        request,
+        status: 409,
+        code: API_ERROR_CODES.NOT_FOUND,
+        message: "No unseen Connections puzzle available right now.",
+      });
+    }
     return apiErrorResponse({
       request,
       status: 500,
