@@ -42,9 +42,14 @@ export const maxDuration = 300;
 const DEFAULT_RUNTIME_BUDGET_MS = 240_000;
 const DEFAULT_MAX_EXPANSIONS_PER_RUN = 20;
 /**
- * Manual rollout switch:
- * - "anthropic_web_search" for baseline checks
- * - "rss_seeded_primary" for RSS-first rollout
+ * Default when `INGEST_DISCOVERY_PROVIDER` is unset. Override via env:
+ * - `rss_seeded_primary` — RSS first, Anthropic web search fills the gap
+ * - `rss_seed_only` — RSS only
+ * - `anthropic_web_search` — legacy web-search discovery
+ *
+ * Ingest runs on **tagged article stock per category** (and catalog freshness), not on
+ * “user has seen everything.” If you expect new articles but see none, check: Vercel
+ * cron hitting `/api/cron/scheduler`, `rss_feeds` health, API keys, and dedup — not feed scroll state.
  */
 const MANUAL_DISCOVERY_PROVIDER: IngestDiscoveryProvider = "rss_seeded_primary";
 
@@ -75,7 +80,8 @@ function resolveIngestPipeline(category: Category): "legacy" | "overhaul" {
 }
 
 function resolveDiscoveryProviderForManualRollout(): IngestDiscoveryProvider {
-  return resolveIngestDiscoveryProvider(MANUAL_DISCOVERY_PROVIDER);
+  const fromEnv = process.env.INGEST_DISCOVERY_PROVIDER?.trim();
+  return resolveIngestDiscoveryProvider(fromEnv || MANUAL_DISCOVERY_PROVIDER);
 }
 
 export async function GET(request: NextRequest) {

@@ -9,12 +9,15 @@ interface SpotifyMoodTileProps {
 }
 
 export default function SpotifyMoodTile({ data, reason }: SpotifyMoodTileProps) {
-  const [vote, setVote] = useState<"up" | "down" | null>(null);
+  const [liked, setLiked] = useState(false);
   const [pending, setPending] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
 
   async function sendVote(next: "up" | "down") {
-    if (pending || vote) return;
+    if (pending) return;
+    const previousLiked = liked;
+    const nextLiked = next === "up";
+    setLiked(nextLiked);
     setPending(true);
     setHint(null);
     try {
@@ -24,17 +27,46 @@ export default function SpotifyMoodTile({ data, reason }: SpotifyMoodTileProps) 
         body: JSON.stringify({ mood: data.mood, vote: next }),
       });
       if (res.status === 401) {
+        setLiked(previousLiked);
         setHint("Sign in to save mood preferences.");
         return;
       }
       if (!res.ok) {
+        setLiked(previousLiked);
         setHint("Could not save. Try again later.");
         return;
       }
-      setVote(next);
     } finally {
       setPending(false);
     }
+  }
+
+  function HeartOutlineIcon() {
+    return (
+      <svg width={18} height={18} viewBox="0 0 24 24" aria-hidden style={{ flexShrink: 0 }}>
+        <path
+          d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.2}
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+
+  function HeartFilledIcon() {
+    return (
+      <svg width={18} height={18} viewBox="0 0 24 24" aria-hidden style={{ flexShrink: 0 }}>
+        <path
+          d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
+          fill="currentColor"
+          stroke="currentColor"
+          strokeWidth={1}
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
   }
   const reasonLabel =
     reason === "singleton"
@@ -168,47 +200,30 @@ export default function SpotifyMoodTile({ data, reason }: SpotifyMoodTileProps) 
             color: "#665d4f",
           }}
         >
-          This mood:
+          Mood preference:
         </span>
         <button
           type="button"
-          disabled={pending || Boolean(vote)}
-          onClick={() => void sendVote("up")}
-          aria-label="More like this mood"
-          aria-pressed={vote === "up"}
+          disabled={pending}
+          onClick={() => void sendVote(liked ? "down" : "up")}
+          aria-label={liked ? "Remove mood like" : "Like this mood"}
+          aria-pressed={liked}
           style={{
-            fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
-            fontSize: "0.75rem",
-            padding: "0.2rem 0.45rem",
-            borderRadius: "4px",
-            border: "1px solid var(--gs-border)",
-            background:
-              vote === "up" ? "rgba(26, 71, 42, 0.12)" : "var(--gs-surface-soft)",
-            cursor: pending || vote ? "default" : "pointer",
-            opacity: vote && vote !== "up" ? 0.45 : 1,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            minWidth: "2.25rem",
+            minHeight: "2.25rem",
+            padding: "0.25rem",
+            borderRadius: "var(--gs-radius-xs)",
+            border: "1px solid color-mix(in srgb, var(--gs-border) 65%, transparent)",
+            color: liked ? "#8b2942" : "#1a1a1a",
+            background: "transparent",
+            cursor: pending ? "wait" : "pointer",
+            opacity: pending ? 0.6 : 1,
           }}
         >
-          👍 More
-        </button>
-        <button
-          type="button"
-          disabled={pending || Boolean(vote)}
-          onClick={() => void sendVote("down")}
-          aria-label="Less of this mood"
-          aria-pressed={vote === "down"}
-          style={{
-            fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
-            fontSize: "0.75rem",
-            padding: "0.2rem 0.45rem",
-            borderRadius: "4px",
-            border: "1px solid var(--gs-border)",
-            background:
-              vote === "down" ? "rgba(120, 60, 40, 0.1)" : "var(--gs-surface-soft)",
-            cursor: pending || vote ? "default" : "pointer",
-            opacity: vote && vote !== "down" ? 0.45 : 1,
-          }}
-        >
-          👎 Less
+          {liked ? <HeartFilledIcon /> : <HeartOutlineIcon />}
         </button>
         {hint ? (
           <span
@@ -221,7 +236,7 @@ export default function SpotifyMoodTile({ data, reason }: SpotifyMoodTileProps) 
             {hint}
           </span>
         ) : null}
-        {vote ? (
+        {liked ? (
           <span
             style={{
               fontFamily: "'IBM Plex Sans', system-ui, sans-serif",

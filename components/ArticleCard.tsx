@@ -52,6 +52,31 @@ function formatDateLabel(value: string | null | undefined): string | null {
   });
 }
 
+function formatDateTimeDetail(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms)) return null;
+  return new Date(ms).toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
+function InfoCircleIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" aria-hidden style={{ flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path
+        d="M12 10.5v5M12 8.2v.05"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 function BookmarkOutlineIcon() {
   return (
     <svg
@@ -146,6 +171,9 @@ const iconActionStyle: CSSProperties = {
   borderRadius: "var(--gs-radius-xs)",
 };
 
+/** Hover intent before showing date details (typical tooltip delay; ~1s if you prefer a longer linger, set 1000). */
+const DATE_INFO_HOVER_MS = 500;
+
 interface ArticleCardProps {
   article: Article;
   layout?: LayoutVariant;
@@ -192,6 +220,9 @@ export default function ArticleCard({
   const [recipeRatingLoaded, setRecipeRatingLoaded] = useState(false);
   const [recipeRatingBusy, setRecipeRatingBusy] = useState(false);
   const [recipeRating, setRecipeRating] = useState<number | null>(null);
+  const [dateInfoOpen, setDateInfoOpen] = useState(false);
+  const dateInfoWrapRef = useRef<HTMLDivElement>(null);
+  const dateInfoHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const impressionLoggedRef = useRef(false);
   const openLoggedRef = useRef(false);
   const read30LoggedRef = useRef(false);
@@ -295,10 +326,6 @@ export default function ArticleCard({
   const sourceUrls = uniqueSourceUrls(article.sourceUrls);
   const primarySourceHref =
     sourceUrls[0] ? toClickableSourceUrl(sourceUrls[0]) : "";
-  const isIngestedNews =
-    "source" in article &&
-    article.source === "ingest" &&
-    (!("contentKind" in article) || article.contentKind === "news");
   const publishedLabel = formatDateLabel(
     "sourcePublishedAt" in article ? article.sourcePublishedAt ?? null : null
   );
@@ -308,6 +335,21 @@ export default function ArticleCard({
       : "fetchedAt" in article
         ? article.fetchedAt ?? null
         : null
+  );
+
+  const isCreator = "source" in article && article.source === "creator";
+  const streamLabel = formatDateLabel(
+    "fetchedAt" in article && article.fetchedAt ? article.fetchedAt : null
+  );
+  const visibleDateline =
+    isCreator && streamLabel
+      ? `Posted ${streamLabel}`
+      : publishedLabel ?? streamLabel ?? null;
+  const streamDetail = formatDateTimeDetail(
+    "fetchedAt" in article && article.fetchedAt ? article.fetchedAt : null
+  );
+  const publishedDetail = formatDateTimeDetail(
+    "sourcePublishedAt" in article ? article.sourcePublishedAt ?? null : null
   );
 
   const canSave = "id" in article && Boolean(article.id);
@@ -358,6 +400,33 @@ export default function ArticleCard({
   const markClickThrough = useCallback(() => {
     emitEngagement("click_through", 1);
   }, [emitEngagement]);
+
+  const clearDateInfoHoverTimer = useCallback(() => {
+    if (dateInfoHoverTimerRef.current != null) {
+      clearTimeout(dateInfoHoverTimerRef.current);
+      dateInfoHoverTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleDateInfoOpen = useCallback(() => {
+    clearDateInfoHoverTimer();
+    const ms =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? 0
+        : DATE_INFO_HOVER_MS;
+    dateInfoHoverTimerRef.current = setTimeout(() => {
+      dateInfoHoverTimerRef.current = null;
+      setDateInfoOpen(true);
+    }, ms);
+  }, [clearDateInfoHoverTimer]);
+
+  const closeDateInfo = useCallback(() => {
+    clearDateInfoHoverTimer();
+    setDateInfoOpen(false);
+  }, [clearDateInfoHoverTimer]);
+
+  useEffect(() => () => clearDateInfoHoverTimer(), [clearDateInfoHoverTimer]);
 
   useEffect(() => {
     impressionLoggedRef.current = false;
@@ -815,7 +884,12 @@ export default function ArticleCard({
       className="gs-card-lift"
       style={{
         borderRight: !isHero ? "1px solid var(--gs-border)" : "none",
-        padding: isHero ? "1.5rem 1.6rem 1.2rem" : "1rem 1.2rem 1rem",
+        borderLeft: isWide ? `3px solid ${accentColor}` : undefined,
+        padding: isHero
+          ? "1.5rem 1.6rem 1.2rem"
+          : isWide
+            ? "1.1rem 1.35rem 1.05rem"
+            : "1rem 1.2rem 1rem",
         display: "flex",
         flexDirection: "column",
         gap: "0.45rem",
@@ -826,6 +900,130 @@ export default function ArticleCard({
       }}
     >
       <div ref={contentWrapRef} style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
+      {articleId && visibleDateline ? (
+        <div
+          ref={dateInfoWrapRef}
+          onPointerEnter={scheduleDateInfoOpen}
+          onPointerLeave={closeDateInfo}
+          style={{
+            position: "relative",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "0.5rem",
+            flexWrap: "wrap",
+          }}
+        >
+          <span
+            style={{
+              fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+              fontSize: "0.72rem",
+              fontWeight: 600,
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              color: "var(--gs-muted)",
+            }}
+          >
+            {visibleDateline}
+          </span>
+          <button
+            type="button"
+            className="gs-interactive gs-focus-ring"
+            aria-expanded={dateInfoOpen}
+            aria-describedby={
+              dateInfoOpen ? `article-date-info-${articleId}` : undefined
+            }
+            aria-label="Original publication and ingest details. Hover this row for a moment, or focus this button."
+            onFocus={() => {
+              clearDateInfoHoverTimer();
+              setDateInfoOpen(true);
+            }}
+            onBlur={closeDateInfo}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "1.65rem",
+              height: "1.65rem",
+              borderRadius: "var(--gs-radius-pill)",
+              border: "1px solid var(--gs-border)",
+              background: "var(--gs-surface-soft)",
+              color: "var(--gs-muted)",
+              cursor: "help",
+            }}
+          >
+            <InfoCircleIcon />
+          </button>
+          {dateInfoOpen ? (
+            <div
+              id={`article-date-info-${articleId}`}
+              role="tooltip"
+              style={{
+                position: "absolute",
+                zIndex: 40,
+                top: "100%",
+                right: 0,
+                marginTop: "0.35rem",
+                width: "min(300px, calc(100vw - 2rem))",
+                padding: "0.75rem 0.85rem",
+                borderRadius: "var(--gs-radius-sm)",
+                border: "1px solid var(--gs-border-strong)",
+                background: "var(--gs-surface-elevated)",
+                boxShadow: "var(--gs-shadow-popover)",
+                fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+                fontSize: "0.72rem",
+                lineHeight: 1.45,
+                color: "var(--gs-text)",
+                textAlign: "left",
+              }}
+            >
+              {isCreator ? (
+                <>
+                  <strong style={{ display: "block", marginBottom: "0.35rem" }}>
+                    On Gentle Stream
+                  </strong>
+                  {streamDetail ?? visibleDateline}
+                </>
+              ) : isRecipeCard ? (
+                <>
+                  <strong style={{ display: "block", marginBottom: "0.35rem" }}>
+                    Recipe timeline
+                  </strong>
+                  {publishedDetail ? (
+                    <span style={{ display: "block", marginBottom: "0.35rem" }}>
+                      Original date (when provided): {publishedDetail}
+                    </span>
+                  ) : null}
+                  <span style={{ display: "block" }}>
+                    Added to your stream: {streamDetail ?? "—"}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <strong style={{ display: "block", marginBottom: "0.35rem" }}>
+                    Original publication
+                  </strong>
+                  <span style={{ display: "block", marginBottom: "0.45rem" }}>
+                    {publishedDetail
+                      ? publishedDetail
+                      : "Not supplied by the source (common when dates are missing from RSS or search results)."}
+                  </span>
+                  <strong style={{ display: "block", marginBottom: "0.35rem" }}>
+                    Added to Gentle Stream
+                  </strong>
+                  <span style={{ display: "block", marginBottom: "0.45rem" }}>
+                    {streamDetail ?? "—"}
+                  </span>
+                  <span style={{ display: "block", color: "var(--gs-muted)", fontSize: "0.68rem" }}>
+                    Stories are discovered from RSS feeds (when configured) and from web search, then
+                    edited for reading here.
+                  </span>
+                </>
+              )}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {!isRecipeCard ? (
         <div
           style={{
@@ -927,19 +1125,6 @@ export default function ArticleCard({
         />
         {article.location && <span>&middot; {article.location}</span>}
       </div>
-      {isIngestedNews && (publishedLabel || ingestedLabel) ? (
-        <div
-          style={{
-            fontSize: "0.6rem",
-            fontFamily: "Georgia, serif",
-            color: "#777",
-            letterSpacing: "0.04em",
-          }}
-        >
-          {publishedLabel ? `Published ${publishedLabel}` : "Published date unavailable"}
-          {ingestedLabel ? ` · Ingested ${ingestedLabel}` : ""}
-        </div>
-      ) : null}
 
       {(canSave || articleId) && (
         <div

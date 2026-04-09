@@ -84,9 +84,11 @@ function shouldBeGame(sectionIndex: number, gameRatio: number): boolean {
 }
 
 const FEED_FETCH_TIMEOUT_MS = 90_000;
-const SENTINEL_PREFETCH_PX = 900;
-const MIN_LOAD_GAP_MS = 650;
-const REACHED_END_COOLDOWN_MS = 20_000;
+/** Load the next section before the user reaches the bottom (viewport extension below fold). */
+const SENTINEL_PREFETCH_PX = 1600;
+/** Short gap between sequential /prefetch loads so the stream feels continuous. */
+const MIN_LOAD_GAP_MS = 380;
+const REACHED_END_COOLDOWN_MS = 10_000;
 const FORCE_INGEST_RETRY_DELAY_MS = 1_200;
 const FORCE_INGEST_CLIENT_COOLDOWN_MS = 8_000;
 const FEED_CACHE_TTL_MS = 35_000;
