@@ -442,11 +442,20 @@ export async function insertArticles(
 
   // ── Layer 2: URL overlap check (per-candidate) ────────────────────────────
   const novel: typeof candidates = [];
+  /** Fingerprints already queued in this `insertArticles` call (dedupe batch internals). */
+  const seenFpInBatch = new Set<string>();
 
   for (const candidate of candidates) {
     if (existingFps.has(candidate.fp)) {
       console.log(
         `[insertArticles] Headline fingerprint match — skipping: "${candidate.article.headline}"`
+      );
+      continue;
+    }
+
+    if (seenFpInBatch.has(candidate.fp)) {
+      console.log(
+        `[insertArticles] Batch duplicate fingerprint — skipping: "${candidate.article.headline}"`
       );
       continue;
     }
@@ -459,6 +468,7 @@ export async function insertArticles(
       continue;
     }
 
+    seenFpInBatch.add(candidate.fp);
     novel.push(candidate);
   }
 
