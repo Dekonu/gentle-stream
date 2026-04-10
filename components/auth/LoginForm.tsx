@@ -538,41 +538,6 @@ export function LoginForm({
             : `Continue with ${providerLabel("facebook")}`}
         </button>
 
-        <button
-          type="button"
-          onClick={() => void continueAsGuest()}
-          disabled={
-            guestBusy || (needsTurnstileChallenge && !turnstileToken)
-          }
-          style={{
-            display: isCreatorLogin ? "none" : "block",
-            width: "100%",
-            boxSizing: "border-box",
-            marginBottom: "1.25rem",
-            textAlign: "center",
-            padding: "0.58rem 1rem",
-            border: "1px solid #b7b2a8",
-            background: "#f5f1e8",
-            color: "#3d3b35",
-            fontFamily: "'Playfair Display', Georgia, serif",
-            fontSize: "0.78rem",
-            letterSpacing: "0.05em",
-            textTransform: "uppercase",
-            cursor:
-              guestBusy
-                ? "wait"
-                : needsTurnstileChallenge && !turnstileToken
-                  ? "not-allowed"
-                  : "pointer",
-            opacity:
-              needsTurnstileChallenge && !turnstileToken && !guestBusy
-                ? 0.55
-                : 1,
-          }}
-        >
-          {guestBusy ? "Verifying…" : "Continue as guest"}
-        </button>
-
         <div
           style={{
             display: isCreatorLogin ? "none" : "flex",
@@ -824,17 +789,19 @@ export function LoginForm({
                   defer
                   onLoad={() => setTurnstileScriptReady(true)}
                 />
-                <p
-                  style={{
-                    margin: "0 0 0.5rem",
-                    fontFamily: "'IM Fell English', Georgia, serif",
-                    fontSize: "0.72rem",
-                    color: LOGIN_TEXT_MUTED,
-                    lineHeight: 1.45,
-                  }}
-                >
-                  Complete the security check below before signing in.
-                </p>
+                {!turnstileToken ? (
+                  <p
+                    style={{
+                      margin: "0 0 0.5rem",
+                      fontFamily: "'IM Fell English', Georgia, serif",
+                      fontSize: "0.72rem",
+                      color: LOGIN_TEXT_MUTED,
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    Complete the security check below before signing in.
+                  </p>
+                ) : null}
                 <div
                   ref={turnstileContainerRef}
                   style={{ marginBottom: "0.85rem", minHeight: "70px" }}
@@ -894,6 +861,69 @@ export function LoginForm({
             {message}
           </p>
         )}
+
+        <div
+          style={{
+            display: isCreatorLogin ? "none" : "block",
+            margin: "1rem 0 0",
+            textAlign: "center",
+          }}
+        >
+          {needsTurnstileChallenge && !turnstileToken ? (
+            <p
+              style={{
+                margin: "0 0 0.45rem",
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontSize: "0.72rem",
+                color: LOGIN_TEXT_MUTED,
+              }}
+            >
+              Complete the security check above to unlock guest browsing.
+            </p>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void continueAsGuest()}
+            disabled={
+              guestBusy || (needsTurnstileChallenge && !turnstileToken)
+            }
+            title={
+              needsTurnstileChallenge && !turnstileToken
+                ? "Complete the security check above first."
+                : "Continue as guest"
+            }
+            aria-label={
+              needsTurnstileChallenge && !turnstileToken
+                ? "Continue as guest is disabled until security check is complete"
+                : "Continue as guest"
+            }
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
+              textAlign: "center",
+              padding: "0.58rem 1rem",
+              border: "1px solid #b7b2a8",
+              background: "#f5f1e8",
+              color: "#3d3b35",
+              fontFamily: "'Playfair Display', Georgia, serif",
+              fontSize: "0.78rem",
+              letterSpacing: "0.05em",
+              textTransform: "uppercase",
+              cursor:
+                guestBusy
+                  ? "wait"
+                  : needsTurnstileChallenge && !turnstileToken
+                    ? "not-allowed"
+                    : "pointer",
+              opacity:
+                needsTurnstileChallenge && !turnstileToken && !guestBusy
+                  ? 0.55
+                  : 1,
+            }}
+          >
+            {guestBusy ? "Verifying…" : "Continue as guest"}
+          </button>
+        </div>
 
         <div
           style={{
