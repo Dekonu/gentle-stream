@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Script from "next/script";
-import Link from "next/link";
 import type { Provider } from "@supabase/supabase-js";
 import { AppLogo } from "@/components/brand/AppLogo";
 import { createClient } from "@/lib/supabase/client";
@@ -95,6 +94,7 @@ export function LoginForm({
   const [oauthBusy, setOauthBusy] = useState(false);
   const [oauthProvider, setOauthProvider] = useState<Provider | null>(null);
   const [emailBusy, setEmailBusy] = useState(false);
+  const [guestBusy, setGuestBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim() ?? "";
   const turnstileEnabled =
@@ -276,6 +276,33 @@ export function LoginForm({
       window.location.assign(nextPath);
     } finally {
       setEmailBusy(false);
+    }
+  }
+
+  async function continueAsGuest() {
+    setMessage(null);
+    if (needsTurnstileChallenge && !turnstileToken) {
+      setMessage("Please complete the security verification below.");
+      return;
+    }
+    setGuestBusy(true);
+    try {
+      const res = await fetch("/api/auth/guest-access", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          turnstileToken: turnstileToken ?? "",
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setMessage(body.error ?? "Could not unlock guest browsing.");
+        resetTurnstileWidget();
+        return;
+      }
+      window.location.assign("/");
+    } finally {
+      setGuestBusy(false);
     }
   }
 
@@ -510,28 +537,6 @@ export function LoginForm({
             ? "Redirecting…"
             : `Continue with ${providerLabel("facebook")}`}
         </button>
-
-        <Link
-          href="/?guest=1"
-          style={{
-            display: isCreatorLogin ? "none" : "block",
-            width: "100%",
-            boxSizing: "border-box",
-            marginBottom: "1.25rem",
-            textAlign: "center",
-            padding: "0.58rem 1rem",
-            border: "1px solid #b7b2a8",
-            background: "#f5f1e8",
-            color: "#3d3b35",
-            fontFamily: "'Playfair Display', Georgia, serif",
-            fontSize: "0.78rem",
-            letterSpacing: "0.05em",
-            textTransform: "uppercase",
-            textDecoration: "none",
-          }}
-        >
-          Continue as guest
-        </Link>
 
         <div
           style={{
@@ -784,17 +789,19 @@ export function LoginForm({
                   defer
                   onLoad={() => setTurnstileScriptReady(true)}
                 />
-                <p
-                  style={{
-                    margin: "0 0 0.5rem",
-                    fontFamily: "'IM Fell English', Georgia, serif",
-                    fontSize: "0.72rem",
-                    color: LOGIN_TEXT_MUTED,
-                    lineHeight: 1.45,
-                  }}
-                >
-                  Complete the security check below before signing in.
-                </p>
+                {!turnstileToken ? (
+                  <p
+                    style={{
+                      margin: "0 0 0.5rem",
+                      fontFamily: "'IM Fell English', Georgia, serif",
+                      fontSize: "0.72rem",
+                      color: LOGIN_TEXT_MUTED,
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    Complete the security check below before signing in.
+                  </p>
+                ) : null}
                 <div
                   ref={turnstileContainerRef}
                   style={{ marginBottom: "0.85rem", minHeight: "70px" }}
@@ -854,6 +861,69 @@ export function LoginForm({
             {message}
           </p>
         )}
+
+        <div
+          style={{
+            display: isCreatorLogin ? "none" : "block",
+            margin: "1rem 0 0",
+            textAlign: "center",
+          }}
+        >
+          {needsTurnstileChallenge && !turnstileToken ? (
+            <p
+              style={{
+                margin: "0 0 0.45rem",
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontSize: "0.72rem",
+                color: LOGIN_TEXT_MUTED,
+              }}
+            >
+              Complete the security check above to unlock guest browsing.
+            </p>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void continueAsGuest()}
+            disabled={
+              guestBusy || (needsTurnstileChallenge && !turnstileToken)
+            }
+            title={
+              needsTurnstileChallenge && !turnstileToken
+                ? "Complete the security check above first."
+                : "Continue as guest"
+            }
+            aria-label={
+              needsTurnstileChallenge && !turnstileToken
+                ? "Continue as guest is disabled until security check is complete"
+                : "Continue as guest"
+            }
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
+              textAlign: "center",
+              padding: "0.58rem 1rem",
+              border: "1px solid #b7b2a8",
+              background: "#f5f1e8",
+              color: "#3d3b35",
+              fontFamily: "'Playfair Display', Georgia, serif",
+              fontSize: "0.78rem",
+              letterSpacing: "0.05em",
+              textTransform: "uppercase",
+              cursor:
+                guestBusy
+                  ? "wait"
+                  : needsTurnstileChallenge && !turnstileToken
+                    ? "not-allowed"
+                    : "pointer",
+              opacity:
+                needsTurnstileChallenge && !turnstileToken && !guestBusy
+                  ? 0.55
+                  : 1,
+            }}
+          >
+            {guestBusy ? "Verifying…" : "Continue as guest"}
+          </button>
+        </div>
 
         <div
           style={{

@@ -5,6 +5,7 @@ import {
 } from "@/lib/db/rssDiscoveryState";
 import { normaliseUrl } from "@/lib/db/articles";
 import { captureMessage } from "@/lib/observability";
+import { decodeXmlEntities } from "@/lib/rss/xml-entities";
 
 export interface RssDiscoveryCandidate {
   headline: string;
@@ -41,21 +42,14 @@ const DEFAULT_FEED_POOL_LIMIT = 100;
 const DEFAULT_ITEMS_PER_FEED = 8;
 
 function cleanXmlText(value: string): string {
-  return value
+  return decodeXmlEntities(
+    value
     .replace(/^<!\[CDATA\[/, "")
     .replace(/\]\]>$/, "")
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
-    .trim();
-}
-
-function decodeXmlEntities(value: string): string {
-  return value
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, "&");
+    .trim()
+  );
 }
 
 function cleanXmlHtml(value: string): string {
