@@ -27,6 +27,7 @@ import {
   CATEGORIES,
   FRESHNESS_INGEST_HOURS,
   INGEST_BATCH_SIZE,
+  STALENESS_REFILL_COUNT,
   STOCK_TARGET,
   STOCK_THRESHOLD,
   STOCK_TOP_UP_MAX_PER_RUN,
@@ -151,6 +152,14 @@ export async function GET(request: NextRequest) {
     process.env.CRON_INGEST_MAX_EXPANSIONS_PER_RUN,
     DEFAULT_MAX_EXPANSIONS_PER_RUN
   );
+  const stalenessHours = readPositiveInt(
+    process.env.INGEST_STALENESS_HOURS,
+    FRESHNESS_INGEST_HOURS
+  );
+  const stalenessRefillCount = readPositiveInt(
+    process.env.INGEST_STALENESS_REFILL_COUNT,
+    STALENESS_REFILL_COUNT
+  );
   const runtimeBudgetMs = readPositiveInt(
     process.env.CRON_INGEST_RUNTIME_BUDGET_MS,
     DEFAULT_RUNTIME_BUDGET_MS
@@ -197,7 +206,7 @@ export async function GET(request: NextRequest) {
       const freshnessStale =
         newestFetchedAt == null ||
         nowMs - Date.parse(newestFetchedAt) >
-          FRESHNESS_INGEST_HOURS * 60 * 60 * 1000;
+          stalenessHours * 60 * 60 * 1000;
 
       let ingestCount = 0;
       let reason: "threshold" | "freshness" | "none" = "none";
@@ -206,7 +215,7 @@ export async function GET(request: NextRequest) {
         ingestCount = Math.min(STOCK_TOP_UP_MAX_PER_RUN, deficitToTarget);
         reason = "threshold";
       } else if (freshnessStale) {
-        ingestCount = 2;
+        ingestCount = Math.min(STOCK_TOP_UP_MAX_PER_RUN, Math.max(1, stalenessRefillCount));
         reason = "freshness";
       }
 
@@ -250,7 +259,7 @@ export async function GET(request: NextRequest) {
       console.log(
         reason === "threshold"
           ? `[Scheduler] "${cat}" has ${available} articles (threshold: ${STOCK_THRESHOLD}, target: ${STOCK_TARGET}) — ingesting ${cappedIngestCount}`
-          : `[Scheduler] "${cat}" stock is healthy (${available}) but stale (>${FRESHNESS_INGEST_HOURS}h) — ingesting freshness refill (${cappedIngestCount})`
+          : `[Scheduler] "${cat}" stock is healthy (${available}) but stale (>${stalenessHours}h) — ingesting freshness refill (${cappedIngestCount})`
       );
 
       const categoryStartedAt = Date.now();
@@ -464,6 +473,8 @@ export async function GET(request: NextRequest) {
     },
     budget: {
       runtimeMs: runtimeBudgetMs,
+      stalenessHours,
+      stalenessRefillCount,
       stoppedByRuntimeBudget,
       stoppedByExpansionBudget,
       remainingExpansionBudget,

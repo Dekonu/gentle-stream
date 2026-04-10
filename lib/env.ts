@@ -57,10 +57,13 @@ const envSchema = z.object({
   INGEST_DISCOVERY_PROVIDER: optionalTrimmedString,
   /** Rewrite discovered stories with LLM expansion. Defaults false when unset. */
   INGEST_REWRITE_ENABLED: optionalBooleanString,
+  INGEST_STALENESS_HOURS: optionalNumberString,
+  INGEST_STALENESS_REFILL_COUNT: optionalNumberString,
   RSS_FEED_AUTO_DISABLE_FAILURES: optionalNumberString,
   RSS_DISCOVERY_MAX_FEEDS: optionalNumberString,
   RSS_DISCOVERY_ITEMS_PER_FEED: optionalNumberString,
   FEED_SEEN_TABLE_READS_ENABLED: optionalBooleanString,
+  FEED_INCLUDE_USER_SUBMITTED: optionalBooleanString,
   TURNSTILE_ENABLED: optionalBooleanString,
   NEXT_PUBLIC_TURNSTILE_ENABLED: optionalBooleanString,
   TURNSTILE_SECRET_KEY: optionalTrimmedString,

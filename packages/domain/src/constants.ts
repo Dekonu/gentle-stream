@@ -49,6 +49,9 @@ export const STOCK_TOP_UP_MAX_PER_RUN = 18;
 /** If latest tagged article is older than this, ingest a freshness refill. */
 export const FRESHNESS_INGEST_HOURS = 3;
 
+/** Default number of articles to ingest when only staleness triggers refill. */
+export const STALENESS_REFILL_COUNT = 2;
+
 // ─── Default user profile ─────────────────────────────────────────────────────
 
 /** Equal weights across all categories — used for anonymous / new users */

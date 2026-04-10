@@ -11,12 +11,14 @@ import {
 import { getEnv } from "@/lib/env";
 import {
   buildClaudeWebSearchMessageParams,
+  CLAUDE_WEB_SEARCH_MODEL,
   createMessageBatch,
   fetchMessageBatchResultsJsonl,
   parseMessageBatchJsonlLine,
   pollMessageBatchUntilEnded,
 } from "@/lib/anthropic/messageBatch";
 import { captureException, captureMessage, startSpan } from "@/lib/observability";
+import { logLlmProviderCall } from "@/lib/db/llmProviderCalls";
 import { checkUpliftPolicy } from "@/lib/agents/upliftPolicyFilter";
 import { discoverCandidatesFromRss } from "@/lib/rss/discovery";
 import {
@@ -261,10 +263,7 @@ async function runOverhaulIngest(
     const accepted: DiscoveryCandidate[] = [];
     for (const candidate of discovery.candidates) {
       if (accepted.length >= expansionsRemaining) break;
-      const candidateHasRssContent = Boolean(
-        (candidate.body && candidate.body.trim().length > 0) ||
-        (candidate.summary && candidate.summary.trim().length > 0)
-      );
+      const candidateHasRssContent = hasRssNarrativeContent(candidate);
       const shouldUseRssNativePolicyPhase =
         !rewriteEnabled &&
         candidateHasRssContent &&
@@ -290,6 +289,14 @@ async function runOverhaulIngest(
       if (precheck.isDuplicate) {
         precheckRejectedCount += 1;
         skippedCount += 1;
+        logIngestCandidateSkip({
+          category,
+          phase: "discovery_precheck",
+          reason: precheck.reason ?? "duplicate",
+          candidate,
+          conflictId: precheck.conflict?.id,
+          conflictCategory: precheck.conflict?.category,
+        });
         if (precheck.conflict) {
           console.log(
             '[IngestAgent:overhaul] Precheck duplicate (%s) candidate="%s" conflict_id=%s conflict_cat=%s fetched_at=%s matched_url=%s',
@@ -316,6 +323,28 @@ async function runOverhaulIngest(
       }
       continue;
     }
+
+    const ensureCandidateStillNovel = async (candidate: DiscoveryCandidate): Promise<boolean> => {
+      const precheck = await precheckIngestCandidate({
+        headline: candidate.headline,
+        category,
+        sourceUrls: [candidate.sourceUrl],
+      });
+      if (!precheck.isDuplicate) return true;
+      precheckRejectedCount += 1;
+      skippedCount += 1;
+      logIngestCandidateSkip({
+        category,
+        phase: "discovery_precheck",
+        reason: precheck.reason ?? "duplicate",
+        candidate,
+        conflictId: precheck.conflict?.id,
+        conflictCategory: precheck.conflict?.category,
+      });
+      seenHeadlines.push(candidate.headline);
+      seenUrls.push(...precheck.normalizedUrls);
+      return false;
+    };
 
     const processExpansionResult = async (expanded: FetchResult) => {
       const policyCheck = checkUpliftPolicy({
@@ -355,6 +384,19 @@ async function runOverhaulIngest(
       const rssArticle =
         rewriteEnabled ? null : buildArticleFromRssCandidate(candidate, category, targetLocale);
       if (!rssArticle) {
+        if (discoveryProvider === "rss_seed_only" && !rewriteEnabled) {
+          skippedCount += 1;
+          logIngestCandidateSkip({
+            category,
+            phase: "rewrite_gate",
+            reason: hasRssNarrativeContent(candidate)
+              ? "rss_seed_only_rss_native_build_failed"
+              : "rss_seed_only_missing_rss_content",
+            candidate,
+          });
+          continue;
+        }
+        if (!(await ensureCandidateStillNovel(candidate))) continue;
         acceptedForRewrite.push(candidate);
         continue;
       }
@@ -763,6 +805,10 @@ async function fetchOneArticle(
     apiKey,
     prompt,
     maxTokens: 1024,
+    callKind: "legacy_fetch_article",
+    category,
+    agent: "ingest",
+    route: "lib/agents/ingestAgent",
   });
   const usage = readClaudeUsage(data, { input_tokens: 1500, output_tokens: 500 });
   const stopReason = typeof data.stop_reason === "string" ? data.stop_reason : "";
@@ -892,6 +938,36 @@ function trimToLength(value: string, limit: number): string {
 function firstSentence(value: string): string {
   const match = value.match(/^[^.!?]+[.!?]?/);
   return (match?.[0] ?? value).trim();
+}
+
+function hasRssNarrativeContent(candidate: DiscoveryCandidate): boolean {
+  return Boolean(
+    (candidate.body && candidate.body.trim().length > 0) ||
+      (candidate.summary && candidate.summary.trim().length > 0)
+  );
+}
+
+function logIngestCandidateSkip(input: {
+  category: Category;
+  phase: "discovery_precheck" | "rewrite_gate";
+  reason: string;
+  candidate: DiscoveryCandidate;
+  conflictId?: string;
+  conflictCategory?: string;
+}): void {
+  captureMessage({
+    level: "info",
+    message: "agent.ingest.candidate_skipped",
+    context: {
+      category: input.category,
+      phase: input.phase,
+      reason: input.reason,
+      candidateHeadline: input.candidate.headline.slice(0, 120),
+      candidateSourceUrl: normaliseUrl(input.candidate.sourceUrl).slice(0, 240),
+      conflictId: input.conflictId,
+      conflictCategory: input.conflictCategory,
+    },
+  });
 }
 
 function normalizeRssNarrativeText(value: string): string {
@@ -1135,6 +1211,10 @@ async function fetchDiscoveryCandidatesAnthropic(
     apiKey,
     prompt,
     maxTokens: 1400,
+    callKind: "discovery_web_search",
+    category,
+    agent: "ingest",
+    route: "lib/agents/ingestAgent",
   });
   const usage = readClaudeUsage(data, { input_tokens: 1200, output_tokens: 400 });
   const blocks = readContentBlocks(data);
@@ -1349,6 +1429,11 @@ async function fetchExpandedArticle(
     apiKey,
     prompt,
     maxTokens: 1200,
+    callKind: "expansion_web_search",
+    category,
+    agent: "ingest",
+    route: "lib/agents/ingestAgent",
+    correlationId: normaliseUrl(candidate.sourceUrl).slice(0, 240),
   });
   return expansionFromClaudeData(data, candidate, category, retryCount);
 }
@@ -1357,6 +1442,11 @@ interface ClaudeRequestInput {
   apiKey: string;
   prompt: string;
   maxTokens: number;
+  callKind: string;
+  route: string;
+  agent: string;
+  category?: string;
+  correlationId?: string;
 }
 
 async function callClaudeWithWebSearch(input: ClaudeRequestInput): Promise<{
@@ -1364,34 +1454,102 @@ async function callClaudeWithWebSearch(input: ClaudeRequestInput): Promise<{
   retryCount: number;
 }> {
   const maxAttempts = 3;
+  const startedAt = Date.now();
   for (let attempt = 0; attempt <= maxAttempts; attempt++) {
-    const response = await fetch(ANTHROPIC_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": input.apiKey,
-        "anthropic-version": "2023-06-01",
-        "anthropic-beta": "web-search-2025-03-05",
-      },
-      body: JSON.stringify(
-        buildClaudeWebSearchMessageParams({
-          prompt: input.prompt,
-          maxTokens: input.maxTokens,
-        })
-      ),
-    });
+    try {
+      const response = await fetch(ANTHROPIC_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": input.apiKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-beta": "web-search-2025-03-05",
+        },
+        body: JSON.stringify(
+          buildClaudeWebSearchMessageParams({
+            prompt: input.prompt,
+            maxTokens: input.maxTokens,
+          })
+        ),
+      });
 
-    if ((response.status === 429 || response.status === 529) && attempt < maxAttempts) {
-      const waitMs = Math.min(10_000, 2_000 * Math.pow(2, attempt));
-      await new Promise((resolve) => setTimeout(resolve, waitMs));
-      continue;
+      if ((response.status === 429 || response.status === 529) && attempt < maxAttempts) {
+        const waitMs = Math.min(10_000, 2_000 * Math.pow(2, attempt));
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        continue;
+      }
+      if (!response.ok) {
+        const err = await response.text();
+        await logLlmProviderCall({
+          provider: "anthropic",
+          callKind: input.callKind,
+          route: input.route,
+          agent: input.agent,
+          category: input.category ?? null,
+          model: CLAUDE_WEB_SEARCH_MODEL,
+          durationMs: Date.now() - startedAt,
+          httpStatus: response.status,
+          success: false,
+          errorCode: `http_${response.status}`,
+          errorMessage: err.slice(0, 500),
+          correlationId: input.correlationId ?? null,
+          metadata: {
+            retryCount: attempt,
+            maxTokens: input.maxTokens,
+          },
+        });
+        throw new Error(`Claude API ${response.status}: ${err}`);
+      }
+      const data = (await response.json()) as Record<string, unknown>;
+      const usage = readClaudeUsage(data, { input_tokens: 0, output_tokens: 0 });
+      await logLlmProviderCall({
+        provider: "anthropic",
+        callKind: input.callKind,
+        route: input.route,
+        agent: input.agent,
+        category: input.category ?? null,
+        model: CLAUDE_WEB_SEARCH_MODEL,
+        inputTokens: usage.input_tokens,
+        outputTokens: usage.output_tokens,
+        durationMs: Date.now() - startedAt,
+        httpStatus: response.status,
+        success: true,
+        correlationId: input.correlationId ?? null,
+        metadata: {
+          retryCount: attempt,
+          maxTokens: input.maxTokens,
+        },
+      });
+      return { data, retryCount: attempt };
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("Claude API ")) {
+        throw error;
+      }
+      if (attempt < maxAttempts) {
+        const waitMs = Math.min(10_000, 1_000 * Math.pow(2, attempt));
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        continue;
+      }
+      const message = error instanceof Error ? error.message : "anthropic_fetch_failed";
+      await logLlmProviderCall({
+        provider: "anthropic",
+        callKind: input.callKind,
+        route: input.route,
+        agent: input.agent,
+        category: input.category ?? null,
+        model: CLAUDE_WEB_SEARCH_MODEL,
+        durationMs: Date.now() - startedAt,
+        success: false,
+        errorCode: "fetch_exception",
+        errorMessage: message.slice(0, 500),
+        correlationId: input.correlationId ?? null,
+        metadata: {
+          retryCount: attempt,
+          maxTokens: input.maxTokens,
+        },
+      });
+      throw error;
     }
-    if (!response.ok) {
-      const err = await response.text();
-      throw new Error(`Claude API ${response.status}: ${err}`);
-    }
-    const data = (await response.json()) as Record<string, unknown>;
-    return { data, retryCount: attempt };
   }
   throw new Error("Claude API exhausted retries");
 }

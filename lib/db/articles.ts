@@ -12,7 +12,18 @@ const isSeenTableReadsEnabled =
   env.FEED_SEEN_TABLE_READS_ENABLED == null
     ? true
     : env.FEED_SEEN_TABLE_READS_ENABLED;
+const isUserSubmittedEnabled = env.FEED_INCLUDE_USER_SUBMITTED ?? true;
 let isFeedSeenRpcAvailable = true;
+
+function normalizeFeedContentKinds(
+  contentKinds?: ArticleContentKind[]
+): ArticleContentKind[] | undefined {
+  const base = contentKinds ? Array.from(new Set(contentKinds)) : undefined;
+  if (isUserSubmittedEnabled) return base;
+  if (!base || base.length === 0) return ["news", "recipe"];
+  const filtered = base.filter((kind) => kind !== "user_article");
+  return filtered.length > 0 ? filtered : ["news", "recipe"];
+}
 
 function isMissingFeedSeenRpc(errorMessage: string): boolean {
   return (
@@ -34,14 +45,15 @@ async function callFeedRpc(input: FeedRpcInput): Promise<{
   data: ArticleRow[] | null;
   errorMessage: string | null;
 }> {
+  const effectiveContentKinds = normalizeFeedContentKinds(input.contentKinds);
   const fullArgs = {
     p_category: input.category,
     p_limit: input.limit,
     p_user_id: input.userId,
     p_tagged: input.tagged,
     p_content_kinds:
-      input.contentKinds && input.contentKinds.length > 0
-        ? input.contentKinds
+      effectiveContentKinds && effectiveContentKinds.length > 0
+        ? effectiveContentKinds
         : null,
     p_exclude_ids: input.excludeIds,
   };
@@ -126,6 +138,11 @@ function isLikelyTestFixtureRow(row: ArticleRow): boolean {
 
 function filterTestFixtureRows(rows: ArticleRow[]): ArticleRow[] {
   return rows.filter((row) => !isLikelyTestFixtureRow(row));
+}
+
+function filterDisabledFeedContentKinds(rows: ArticleRow[]): ArticleRow[] {
+  if (isUserSubmittedEnabled) return rows;
+  return rows.filter((row) => (row.content_kind ?? "news") !== "user_article");
 }
 
 function isGenericCreatorByline(byline: string): boolean {
@@ -609,13 +626,14 @@ export async function getArticlesForFeed(
   contentKinds?: ArticleContentKind[],
   userId?: string
 ): Promise<StoredArticle[]> {
+  const effectiveContentKinds = normalizeFeedContentKinds(contentKinds);
   if (userId && isSeenTableReadsEnabled && isFeedSeenRpcAvailable) {
     const { data, errorMessage } = await callFeedRpc({
       category,
       limit,
       userId,
       tagged: true,
-      contentKinds,
+      contentKinds: effectiveContentKinds,
       excludeIds,
     });
     if (errorMessage) {
@@ -629,7 +647,9 @@ export async function getArticlesForFeed(
         throw new Error(`getArticlesForFeed rpc: ${errorMessage}`);
       }
     } else {
-      const safeRows = filterTestFixtureRows(data as ArticleRow[]);
+      const safeRows = filterDisabledFeedContentKinds(
+        filterTestFixtureRows(data as ArticleRow[])
+      );
       return hydrateCreatorAuthorDisplay(safeRows.map(rowToArticle));
     }
   }
@@ -650,8 +670,11 @@ export async function getArticlesForFeed(
   if (excludeIds.length > 0) {
     query = query.notIn("id", excludeIds);
   }
-  if (contentKinds && contentKinds.length > 0) {
-    query = query.in("content_kind", contentKinds);
+  if (!isUserSubmittedEnabled) {
+    query = query.neq("content_kind", "user_article");
+  }
+  if (effectiveContentKinds && effectiveContentKinds.length > 0) {
+    query = query.in("content_kind", effectiveContentKinds);
   }
 
   const { data, error } = await query;
@@ -671,13 +694,14 @@ export async function getUntaggedArticlesForFeed(
   contentKinds?: ArticleContentKind[],
   userId?: string
 ): Promise<StoredArticle[]> {
+  const effectiveContentKinds = normalizeFeedContentKinds(contentKinds);
   if (userId && isSeenTableReadsEnabled && isFeedSeenRpcAvailable) {
     const { data, errorMessage } = await callFeedRpc({
       category,
       limit,
       userId,
       tagged: false,
-      contentKinds,
+      contentKinds: effectiveContentKinds,
       excludeIds,
     });
     if (errorMessage) {
@@ -691,7 +715,9 @@ export async function getUntaggedArticlesForFeed(
         throw new Error(`getUntaggedArticlesForFeed rpc: ${errorMessage}`);
       }
     } else {
-      const safeRows = filterTestFixtureRows(data as ArticleRow[]);
+      const safeRows = filterDisabledFeedContentKinds(
+        filterTestFixtureRows(data as ArticleRow[])
+      );
       return hydrateCreatorAuthorDisplay(safeRows.map(rowToArticle));
     }
   }
@@ -712,8 +738,11 @@ export async function getUntaggedArticlesForFeed(
   if (excludeIds.length > 0) {
     query = query.notIn("id", excludeIds);
   }
-  if (contentKinds && contentKinds.length > 0) {
-    query = query.in("content_kind", contentKinds);
+  if (!isUserSubmittedEnabled) {
+    query = query.neq("content_kind", "user_article");
+  }
+  if (effectiveContentKinds && effectiveContentKinds.length > 0) {
+    query = query.in("content_kind", effectiveContentKinds);
   }
 
   const { data, error } = await query;
@@ -743,6 +772,8 @@ export async function listRecentTaggedInCategory(params: {
 
   if (params.category === RECIPE_CATEGORY) {
     query = query.eq("content_kind", "recipe");
+  } else if (!isUserSubmittedEnabled) {
+    query = query.neq("content_kind", "user_article");
   }
 
   const { data, error } = await query;
@@ -776,6 +807,7 @@ export async function getRandomAvailableArticles(
   excludeIds: string[] = [],
   contentKinds?: ArticleContentKind[]
 ): Promise<StoredArticle[]> {
+  const effectiveContentKinds = normalizeFeedContentKinds(contentKinds);
   const cap = Math.min(150, Math.max(40, limit * 12));
   let query = db
     .from("articles")
@@ -786,8 +818,11 @@ export async function getRandomAvailableArticles(
   if (excludeIds.length > 0) {
     query = query.notIn("id", excludeIds);
   }
-  if (contentKinds && contentKinds.length > 0) {
-    query = query.in("content_kind", contentKinds);
+  if (!isUserSubmittedEnabled) {
+    query = query.neq("content_kind", "user_article");
+  }
+  if (effectiveContentKinds && effectiveContentKinds.length > 0) {
+    query = query.in("content_kind", effectiveContentKinds);
   }
 
   const { data, error } = await query;
@@ -805,14 +840,18 @@ export async function getRandomArticlesResurfacing(
   limit: number,
   contentKinds?: ArticleContentKind[]
 ): Promise<StoredArticle[]> {
+  const effectiveContentKinds = normalizeFeedContentKinds(contentKinds);
   const cap = Math.min(150, Math.max(40, limit * 12));
   let query = db
     .from("articles")
     .select("*")
     .is("deleted_at", null)
     .limit(cap);
-  if (contentKinds && contentKinds.length > 0) {
-    query = query.in("content_kind", contentKinds);
+  if (!isUserSubmittedEnabled) {
+    query = query.neq("content_kind", "user_article");
+  }
+  if (effectiveContentKinds && effectiveContentKinds.length > 0) {
+    query = query.in("content_kind", effectiveContentKinds);
   }
   const { data, error } = await query;
 

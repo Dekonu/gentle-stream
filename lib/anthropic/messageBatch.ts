@@ -3,6 +3,7 @@
  * @see https://docs.anthropic.com/en/docs/build-with-claude/message-batches
  */
 
+import { logLlmProviderCall } from "@/lib/db/llmProviderCalls";
 const BATCHES_BASE = "https://api.anthropic.com/v1/messages/batches";
 
 export const CLAUDE_WEB_SEARCH_MODEL = "claude-sonnet-4-20250514";
@@ -34,17 +35,48 @@ export async function createMessageBatch(
   apiKey: string,
   requests: { custom_id: string; params: Record<string, unknown> }[]
 ): Promise<{ id: string }> {
+  const startedAt = Date.now();
+  let httpStatus: number | null = null;
   const res = await fetch(BATCHES_BASE, {
     method: "POST",
     headers: anthropicHeaders(apiKey, { "anthropic-beta": ANTHROPIC_WEB_SEARCH_BETA }),
     body: JSON.stringify({ requests }),
   });
+  httpStatus = res.status;
   const text = await res.text();
   if (!res.ok) {
+    await logLlmProviderCall({
+      provider: "anthropic",
+      callKind: "message_batch_create",
+      route: "lib/anthropic/messageBatch",
+      agent: "ingest",
+      model: CLAUDE_WEB_SEARCH_MODEL,
+      durationMs: Date.now() - startedAt,
+      httpStatus,
+      success: false,
+      errorCode: `http_${res.status}`,
+      errorMessage: text.slice(0, 500),
+      metadata: {
+        requestCount: requests.length,
+      },
+    });
     throw new Error(`Message batch create ${res.status}: ${text.slice(0, 800)}`);
   }
   const data = JSON.parse(text) as { id?: string };
   if (!data.id) throw new Error("Message batch create: missing id");
+  await logLlmProviderCall({
+    provider: "anthropic",
+    callKind: "message_batch_create",
+    route: "lib/anthropic/messageBatch",
+    agent: "ingest",
+    model: CLAUDE_WEB_SEARCH_MODEL,
+    durationMs: Date.now() - startedAt,
+    httpStatus,
+    success: true,
+    metadata: {
+      requestCount: requests.length,
+    },
+  });
   return { id: data.id };
 }
 
@@ -58,14 +90,43 @@ export async function retrieveMessageBatch(
   apiKey: string,
   batchId: string
 ): Promise<MessageBatchStatus> {
+  const startedAt = Date.now();
+  let httpStatus: number | null = null;
   const res = await fetch(`${BATCHES_BASE}/${encodeURIComponent(batchId)}`, {
     headers: anthropicHeaders(apiKey),
   });
+  httpStatus = res.status;
   const text = await res.text();
   if (!res.ok) {
+    await logLlmProviderCall({
+      provider: "anthropic",
+      callKind: "message_batch_get",
+      route: "lib/anthropic/messageBatch",
+      agent: "ingest",
+      durationMs: Date.now() - startedAt,
+      httpStatus,
+      success: false,
+      errorCode: `http_${res.status}`,
+      errorMessage: text.slice(0, 500),
+      correlationId: batchId,
+    });
     throw new Error(`Message batch get ${res.status}: ${text.slice(0, 800)}`);
   }
-  return JSON.parse(text) as MessageBatchStatus;
+  const out = JSON.parse(text) as MessageBatchStatus;
+  await logLlmProviderCall({
+    provider: "anthropic",
+    callKind: "message_batch_get",
+    route: "lib/anthropic/messageBatch",
+    agent: "ingest",
+    durationMs: Date.now() - startedAt,
+    httpStatus,
+    success: true,
+    correlationId: batchId,
+    metadata: {
+      ended: out.processing_status === "ended",
+    },
+  });
+  return out;
 }
 
 export async function pollMessageBatchUntilEnded(
@@ -90,17 +151,46 @@ export async function fetchMessageBatchResultsJsonl(
   apiKey: string,
   batchId: string
 ): Promise<string[]> {
+  const startedAt = Date.now();
+  let httpStatus: number | null = null;
   const res = await fetch(
     `${BATCHES_BASE}/${encodeURIComponent(batchId)}/results`,
     {
       headers: anthropicHeaders(apiKey),
     }
   );
+  httpStatus = res.status;
   const text = await res.text();
   if (!res.ok) {
+    await logLlmProviderCall({
+      provider: "anthropic",
+      callKind: "message_batch_results",
+      route: "lib/anthropic/messageBatch",
+      agent: "ingest",
+      durationMs: Date.now() - startedAt,
+      httpStatus,
+      success: false,
+      errorCode: `http_${res.status}`,
+      errorMessage: text.slice(0, 500),
+      correlationId: batchId,
+    });
     throw new Error(`Message batch results ${res.status}: ${text.slice(0, 800)}`);
   }
-  return text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  await logLlmProviderCall({
+    provider: "anthropic",
+    callKind: "message_batch_results",
+    route: "lib/anthropic/messageBatch",
+    agent: "ingest",
+    durationMs: Date.now() - startedAt,
+    httpStatus,
+    success: true,
+    correlationId: batchId,
+    metadata: {
+      lineCount: lines.length,
+    },
+  });
+  return lines;
 }
 
 export interface ParsedBatchLine {
