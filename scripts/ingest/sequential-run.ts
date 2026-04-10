@@ -17,6 +17,8 @@ import { getEnv } from "../../lib/env";
 import { resolveIngestDiscoveryProvider } from "../../lib/agents/ingestDiscoveryProvider";
 
 const COUNTDOWN_SEC = 8;
+const DEFAULT_RSS_ITEMS_PER_FEED = 8;
+const DEFAULT_RSS_ITEMS_PER_FEED_MAX = 24;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -34,9 +36,20 @@ async function main() {
 
   const ingestAgent = await import("../../lib/agents/ingestAgent");
   const taggerAgent = await import("../../lib/agents/taggerAgent");
+  const articlesDb = await import("../../lib/db/articles");
 
   const env = getEnv();
   const discoveryProvider = resolveIngestDiscoveryProvider(env.INGEST_DISCOVERY_PROVIDER);
+  const baseRssItemsPerFeed = Math.max(
+    1,
+    Number(process.env.RSS_DISCOVERY_ITEMS_PER_FEED ?? DEFAULT_RSS_ITEMS_PER_FEED)
+  );
+  const maxRssItemsPerFeed = Math.max(
+    baseRssItemsPerFeed,
+    Number(
+      process.env.RSS_DISCOVERY_ITEMS_PER_FEED_MAX ?? DEFAULT_RSS_ITEMS_PER_FEED_MAX
+    )
+  );
 
   let shouldStop = false;
   function onSigInt() {
@@ -102,6 +115,54 @@ async function main() {
           console.warn(`[sequential-ingest] Tag outcome: ${tagOutcome} for ${article.id}`);
         } else {
           console.log(`[${iteration}] Tagged (${tagOutcome}).`);
+        }
+        const tagged = await articlesDb.getArticleById(article.id);
+        const moderationStatus = tagged?.moderationStatus ?? "approved";
+        if (moderationStatus === "flagged" || moderationStatus === "rejected") {
+          console.warn(
+            `[${iteration}] Moderation=${moderationStatus}. Retrying "${cat}" with deeper RSS XML slices.`
+          );
+          let depth = baseRssItemsPerFeed;
+          let approvedFound = false;
+          while (!shouldStop && depth <= maxRssItemsPerFeed) {
+            process.env.RSS_DISCOVERY_ITEMS_PER_FEED = String(depth);
+            console.log(
+              `[${iteration}] Retry depth RSS_DISCOVERY_ITEMS_PER_FEED=${depth} for "${cat}"…`
+            );
+            const retryResult = await ingestAgent.runIngestAgent(cat, 1, { discoveryProvider });
+            if (retryResult.inserted.length === 0) {
+              depth += 2;
+              continue;
+            }
+            for (const retryArticle of retryResult.inserted) {
+              const retryTag = await taggerAgent.tagArticleById(retryArticle.id);
+              if (retryTag === "credits_exhausted") {
+                console.error("[sequential-ingest] Credits exhausted during moderation retry.");
+                shouldStop = true;
+                break;
+              }
+              const retryTagged = await articlesDb.getArticleById(retryArticle.id);
+              const retryStatus = retryTagged?.moderationStatus ?? "approved";
+              if (retryStatus === "approved") {
+                approvedFound = true;
+                console.log(
+                  `[${iteration}] Found approved replacement at depth=${depth}: "${retryArticle.headline.slice(
+                    0,
+                    72
+                  )}…"`
+                );
+                break;
+              }
+            }
+            if (approvedFound || shouldStop) break;
+            depth += 2;
+          }
+          process.env.RSS_DISCOVERY_ITEMS_PER_FEED = String(baseRssItemsPerFeed);
+          if (!approvedFound) {
+            console.warn(
+              `[${iteration}] No approved replacement found for "${cat}" up to max depth ${maxRssItemsPerFeed}.`
+            );
+          }
         }
       }
     } catch (e) {

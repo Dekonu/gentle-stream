@@ -63,6 +63,7 @@ const envSchema = z.object({
   RSS_DISCOVERY_MAX_FEEDS: optionalNumberString,
   RSS_DISCOVERY_FEED_POOL_LIMIT: optionalNumberString,
   RSS_DISCOVERY_ITEMS_PER_FEED: optionalNumberString,
+  RSS_DISCOVERY_ITEMS_PER_FEED_MAX: optionalNumberString,
   FEED_SEEN_TABLE_READS_ENABLED: optionalBooleanString,
   FEED_INCLUDE_USER_SUBMITTED: optionalBooleanString,
   TURNSTILE_ENABLED: optionalBooleanString,

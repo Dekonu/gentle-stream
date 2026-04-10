@@ -37,6 +37,16 @@ CREATE TABLE IF NOT EXISTS articles (
   -- Feed mechanics
   used_count      INT     NOT NULL DEFAULT 0,
   tagged          BOOLEAN NOT NULL DEFAULT FALSE,
+  moderation_status TEXT  NOT NULL DEFAULT 'approved'
+                    CHECK (moderation_status IN ('pending', 'approved', 'flagged', 'rejected')),
+  moderation_reason TEXT,
+  moderation_confidence FLOAT,
+  moderation_labels JSONB NOT NULL DEFAULT '{}'::jsonb,
+  moderated_at TIMESTAMPTZ,
+  moderated_by_user_id TEXT,
+  deleted_at TIMESTAMPTZ,
+  deleted_by_user_id TEXT,
+  delete_reason TEXT,
 
   -- Source metadata
   source          TEXT    NOT NULL DEFAULT 'ingest'
@@ -68,6 +78,12 @@ CREATE INDEX IF NOT EXISTS idx_articles_source_tagged
 
 CREATE INDEX IF NOT EXISTS idx_articles_content_kind_category_tagged
   ON articles (content_kind, category, tagged);
+
+CREATE INDEX IF NOT EXISTS idx_articles_moderation_status
+  ON articles (moderation_status);
+
+CREATE INDEX IF NOT EXISTS idx_articles_feed_visibility
+  ON articles (category, moderation_status, tagged, deleted_at);
 
 -- ─── User profiles ────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS user_profiles (

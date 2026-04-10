@@ -1,7 +1,7 @@
 import { db } from "./client";
 import { getCreatorPenNamesByUserIds } from "./creator";
 import { getAuthorDisplayByUserIds } from "./users";
-import type { ArticleContentKind, StoredArticle } from "../types";
+import type { ArticleContentKind, ArticleModerationStatus, StoredArticle } from "../types";
 import { RECIPE_CATEGORY, type ArticleStorageCategory, type Category } from "../constants";
 import { v4 as uuidv4 } from "uuid";
 import { getEnv } from "@/lib/env";
@@ -14,6 +14,7 @@ const isSeenTableReadsEnabled =
     : env.FEED_SEEN_TABLE_READS_ENABLED;
 const isUserSubmittedEnabled = env.FEED_INCLUDE_USER_SUBMITTED ?? true;
 let isFeedSeenRpcAvailable = true;
+let isModerationColumnsAvailable = true;
 
 function normalizeFeedContentKinds(
   contentKinds?: ArticleContentKind[]
@@ -29,6 +30,15 @@ function isMissingFeedSeenRpc(errorMessage: string): boolean {
   return (
     errorMessage.includes("Could not find the function public.get_feed_articles_for_user") ||
     errorMessage.includes("schema cache")
+  );
+}
+
+function isMissingModerationColumn(errorMessage: string): boolean {
+  return (
+    errorMessage.includes("moderation_status") ||
+    errorMessage.includes("moderation_reason") ||
+    errorMessage.includes("moderated_at") ||
+    errorMessage.includes("moderation_labels")
   );
 }
 
@@ -98,6 +108,12 @@ interface ArticleRow {
   quality_score: number;
   used_count: number;
   tagged: boolean;
+  moderation_status?: string | null;
+  moderation_reason?: string | null;
+  moderation_confidence?: number | null;
+  moderation_labels?: Record<string, unknown> | null;
+  moderated_at?: string | null;
+  moderated_by_user_id?: string | null;
   fingerprint: string;
   source_urls: string[];
   source?: string;
@@ -143,6 +159,10 @@ function filterTestFixtureRows(rows: ArticleRow[]): ArticleRow[] {
 function filterDisabledFeedContentKinds(rows: ArticleRow[]): ArticleRow[] {
   if (isUserSubmittedEnabled) return rows;
   return rows.filter((row) => (row.content_kind ?? "news") !== "user_article");
+}
+
+function filterApprovedModerationRows(rows: ArticleRow[]): ArticleRow[] {
+  return rows.filter((row) => toModerationStatus(row.moderation_status) === "approved");
 }
 
 function isGenericCreatorByline(byline: string): boolean {
@@ -233,6 +253,12 @@ export function rowToArticle(row: ArticleRow): StoredArticle {
     qualityScore: row.quality_score ?? 0.5,
     usedCount: row.used_count ?? 0,
     tagged: row.tagged ?? false,
+    moderationStatus: toModerationStatus(row.moderation_status),
+    moderationReason: row.moderation_reason ?? null,
+    moderationConfidence: row.moderation_confidence ?? null,
+    moderationLabels: row.moderation_labels ?? {},
+    moderatedAt: row.moderated_at ?? null,
+    moderatedByUserId: row.moderated_by_user_id ?? null,
     sourceUrls: row.source_urls ?? [],
     source: row.source === "creator" ? "creator" : "ingest",
     contentKind,
@@ -247,6 +273,11 @@ export function rowToArticle(row: ArticleRow): StoredArticle {
     recipeCookTimeMinutes: row.recipe_cook_time_minutes ?? null,
     recipeImages: row.recipe_images ?? [],
   };
+}
+
+function toModerationStatus(raw: string | null | undefined): ArticleModerationStatus {
+  if (raw === "pending" || raw === "flagged" || raw === "rejected") return raw;
+  return "approved";
 }
 
 function normaliseTag(input: string): string {
@@ -507,6 +538,16 @@ export async function insertArticles(
     quality_score: a.qualityScore ?? 0.5,
     used_count: 0,
     tagged: false,
+    ...(isModerationColumnsAvailable
+      ? {
+          moderation_status: "pending",
+          moderation_reason: null,
+          moderation_confidence: null,
+          moderation_labels: {},
+          moderated_at: null,
+          moderated_by_user_id: null,
+        }
+      : {}),
     fingerprint: fp,
     source_urls: normUrls,
     source: "ingest",
@@ -516,13 +557,33 @@ export async function insertArticles(
     creator_explicit_tags: [],
   }));
 
-  const { data, error } = await db
+  let upsert = await db
     .from("articles")
     .upsert(rows, { onConflict: "fingerprint", ignoreDuplicates: true })
     .select();
 
-  if (error) throw new Error(`insertArticles: ${error.message}`);
-  return (data as ArticleRow[]).map(rowToArticle);
+  if (upsert.error && isModerationColumnsAvailable && isMissingModerationColumn(upsert.error.message)) {
+    isModerationColumnsAvailable = false;
+    const legacyRows = rows.map((row) => {
+      const {
+        moderation_status,
+        moderation_reason,
+        moderation_confidence,
+        moderation_labels,
+        moderated_at,
+        moderated_by_user_id,
+        ...legacy
+      } = row as Record<string, unknown>;
+      return legacy;
+    });
+    upsert = await db
+      .from("articles")
+      .upsert(legacyRows, { onConflict: "fingerprint", ignoreDuplicates: true })
+      .select();
+  }
+
+  if (upsert.error) throw new Error(`insertArticles: ${upsert.error.message}`);
+  return (upsert.data as ArticleRow[]).map(rowToArticle);
 }
 
 export async function precheckIngestCandidate(input: {
@@ -657,8 +718,8 @@ export async function getArticlesForFeed(
         throw new Error(`getArticlesForFeed rpc: ${errorMessage}`);
       }
     } else {
-      const safeRows = filterDisabledFeedContentKinds(
-        filterTestFixtureRows(data as ArticleRow[])
+      const safeRows = filterApprovedModerationRows(
+        filterDisabledFeedContentKinds(filterTestFixtureRows(data as ArticleRow[]))
       );
       return hydrateCreatorAuthorDisplay(safeRows.map(rowToArticle));
     }
@@ -672,6 +733,9 @@ export async function getArticlesForFeed(
     .is("deleted_at", null)
     .order("quality_score", { ascending: false })
     .limit(limit);
+  if (isModerationColumnsAvailable) {
+    query = query.eq("moderation_status", "approved");
+  }
 
   if (category === RECIPE_CATEGORY) {
     query = query.eq("content_kind", "recipe");
@@ -687,9 +751,31 @@ export async function getArticlesForFeed(
     query = query.in("content_kind", effectiveContentKinds);
   }
 
-  const { data, error } = await query;
-  if (error) throw new Error(`getArticlesForFeed: ${error.message}`);
-  const safeRows = filterTestFixtureRows(data as ArticleRow[]);
+  let result = await query;
+  if (
+    result.error &&
+    isModerationColumnsAvailable &&
+    isMissingModerationColumn(result.error.message)
+  ) {
+    isModerationColumnsAvailable = false;
+    let fallbackQuery = db
+      .from("articles")
+      .select("*")
+      .eq("category", category)
+      .eq("tagged", true)
+      .is("deleted_at", null)
+      .order("quality_score", { ascending: false })
+      .limit(limit);
+    if (category === RECIPE_CATEGORY) fallbackQuery = fallbackQuery.eq("content_kind", "recipe");
+    if (excludeIds.length > 0) fallbackQuery = fallbackQuery.notIn("id", excludeIds);
+    if (!isUserSubmittedEnabled) fallbackQuery = fallbackQuery.neq("content_kind", "user_article");
+    if (effectiveContentKinds && effectiveContentKinds.length > 0) {
+      fallbackQuery = fallbackQuery.in("content_kind", effectiveContentKinds);
+    }
+    result = await fallbackQuery;
+  }
+  if (result.error) throw new Error(`getArticlesForFeed: ${result.error.message}`);
+  const safeRows = filterApprovedModerationRows(filterTestFixtureRows(result.data as ArticleRow[]));
   return hydrateCreatorAuthorDisplay(safeRows.map(rowToArticle));
 }
 
@@ -725,8 +811,8 @@ export async function getUntaggedArticlesForFeed(
         throw new Error(`getUntaggedArticlesForFeed rpc: ${errorMessage}`);
       }
     } else {
-      const safeRows = filterDisabledFeedContentKinds(
-        filterTestFixtureRows(data as ArticleRow[])
+      const safeRows = filterApprovedModerationRows(
+        filterDisabledFeedContentKinds(filterTestFixtureRows(data as ArticleRow[]))
       );
       return hydrateCreatorAuthorDisplay(safeRows.map(rowToArticle));
     }
@@ -740,6 +826,9 @@ export async function getUntaggedArticlesForFeed(
     .is("deleted_at", null)
     .order("fetched_at", { ascending: false })
     .limit(limit);
+  if (isModerationColumnsAvailable) {
+    query = query.eq("moderation_status", "approved");
+  }
 
   if (category === RECIPE_CATEGORY) {
     query = query.eq("content_kind", "recipe");
@@ -755,9 +844,31 @@ export async function getUntaggedArticlesForFeed(
     query = query.in("content_kind", effectiveContentKinds);
   }
 
-  const { data, error } = await query;
-  if (error) throw new Error(`getUntaggedArticlesForFeed: ${error.message}`);
-  const safeRows = filterTestFixtureRows(data as ArticleRow[]);
+  let result = await query;
+  if (
+    result.error &&
+    isModerationColumnsAvailable &&
+    isMissingModerationColumn(result.error.message)
+  ) {
+    isModerationColumnsAvailable = false;
+    let fallbackQuery = db
+      .from("articles")
+      .select("*")
+      .eq("category", category)
+      .eq("tagged", false)
+      .is("deleted_at", null)
+      .order("fetched_at", { ascending: false })
+      .limit(limit);
+    if (category === RECIPE_CATEGORY) fallbackQuery = fallbackQuery.eq("content_kind", "recipe");
+    if (excludeIds.length > 0) fallbackQuery = fallbackQuery.notIn("id", excludeIds);
+    if (!isUserSubmittedEnabled) fallbackQuery = fallbackQuery.neq("content_kind", "user_article");
+    if (effectiveContentKinds && effectiveContentKinds.length > 0) {
+      fallbackQuery = fallbackQuery.in("content_kind", effectiveContentKinds);
+    }
+    result = await fallbackQuery;
+  }
+  if (result.error) throw new Error(`getUntaggedArticlesForFeed: ${result.error.message}`);
+  const safeRows = filterApprovedModerationRows(filterTestFixtureRows(result.data as ArticleRow[]));
   return hydrateCreatorAuthorDisplay(safeRows.map(rowToArticle));
 }
 
@@ -779,6 +890,9 @@ export async function listRecentTaggedInCategory(params: {
     .neq("id", params.excludeArticleId)
     .order("fetched_at", { ascending: false })
     .limit(cap);
+  if (isModerationColumnsAvailable) {
+    query = query.eq("moderation_status", "approved");
+  }
 
   if (params.category === RECIPE_CATEGORY) {
     query = query.eq("content_kind", "recipe");
@@ -786,9 +900,33 @@ export async function listRecentTaggedInCategory(params: {
     query = query.neq("content_kind", "user_article");
   }
 
-  const { data, error } = await query;
-  if (error) throw new Error(`listRecentTaggedInCategory: ${error.message}`);
-  const safeRows = filterTestFixtureRows((data ?? []) as ArticleRow[]);
+  let result = await query;
+  if (
+    result.error &&
+    isModerationColumnsAvailable &&
+    isMissingModerationColumn(result.error.message)
+  ) {
+    isModerationColumnsAvailable = false;
+    let fallbackQuery = db
+      .from("articles")
+      .select("id, headline, category")
+      .eq("category", params.category)
+      .eq("tagged", true)
+      .is("deleted_at", null)
+      .neq("id", params.excludeArticleId)
+      .order("fetched_at", { ascending: false })
+      .limit(cap);
+    if (params.category === RECIPE_CATEGORY) {
+      fallbackQuery = fallbackQuery.eq("content_kind", "recipe");
+    } else if (!isUserSubmittedEnabled) {
+      fallbackQuery = fallbackQuery.neq("content_kind", "user_article");
+    }
+    result = await fallbackQuery;
+  }
+  if (result.error) throw new Error(`listRecentTaggedInCategory: ${result.error.message}`);
+  const safeRows = filterApprovedModerationRows(
+    filterTestFixtureRows(((result.data ?? []) as ArticleRow[]))
+  );
   return safeRows.map((row) => {
     const r = row as { id: string; headline: string; category: string };
     return {
@@ -824,6 +962,9 @@ export async function getRandomAvailableArticles(
     .select("*")
     .is("deleted_at", null)
     .limit(cap);
+  if (isModerationColumnsAvailable) {
+    query = query.eq("moderation_status", "approved");
+  }
 
   if (excludeIds.length > 0) {
     query = query.notIn("id", excludeIds);
@@ -835,9 +976,23 @@ export async function getRandomAvailableArticles(
     query = query.in("content_kind", effectiveContentKinds);
   }
 
-  const { data, error } = await query;
-  if (error) throw new Error(`getRandomAvailableArticles: ${error.message}`);
-  const safeRows = filterTestFixtureRows(data as ArticleRow[]);
+  let result = await query;
+  if (
+    result.error &&
+    isModerationColumnsAvailable &&
+    isMissingModerationColumn(result.error.message)
+  ) {
+    isModerationColumnsAvailable = false;
+    let fallbackQuery = db.from("articles").select("*").is("deleted_at", null).limit(cap);
+    if (excludeIds.length > 0) fallbackQuery = fallbackQuery.notIn("id", excludeIds);
+    if (!isUserSubmittedEnabled) fallbackQuery = fallbackQuery.neq("content_kind", "user_article");
+    if (effectiveContentKinds && effectiveContentKinds.length > 0) {
+      fallbackQuery = fallbackQuery.in("content_kind", effectiveContentKinds);
+    }
+    result = await fallbackQuery;
+  }
+  if (result.error) throw new Error(`getRandomAvailableArticles: ${result.error.message}`);
+  const safeRows = filterApprovedModerationRows(filterTestFixtureRows(result.data as ArticleRow[]));
   const rows = await hydrateCreatorAuthorDisplay(safeRows.map(rowToArticle));
   shuffleInPlace(rows);
   return rows.slice(0, limit);
@@ -857,16 +1012,32 @@ export async function getRandomArticlesResurfacing(
     .select("*")
     .is("deleted_at", null)
     .limit(cap);
+  if (isModerationColumnsAvailable) {
+    query = query.eq("moderation_status", "approved");
+  }
   if (!isUserSubmittedEnabled) {
     query = query.neq("content_kind", "user_article");
   }
   if (effectiveContentKinds && effectiveContentKinds.length > 0) {
     query = query.in("content_kind", effectiveContentKinds);
   }
-  const { data, error } = await query;
+  let result = await query;
+  if (
+    result.error &&
+    isModerationColumnsAvailable &&
+    isMissingModerationColumn(result.error.message)
+  ) {
+    isModerationColumnsAvailable = false;
+    let fallbackQuery = db.from("articles").select("*").is("deleted_at", null).limit(cap);
+    if (!isUserSubmittedEnabled) fallbackQuery = fallbackQuery.neq("content_kind", "user_article");
+    if (effectiveContentKinds && effectiveContentKinds.length > 0) {
+      fallbackQuery = fallbackQuery.in("content_kind", effectiveContentKinds);
+    }
+    result = await fallbackQuery;
+  }
 
-  if (error) throw new Error(`getRandomArticlesResurfacing: ${error.message}`);
-  const safeRows = filterTestFixtureRows(data as ArticleRow[]);
+  if (result.error) throw new Error(`getRandomArticlesResurfacing: ${result.error.message}`);
+  const safeRows = filterApprovedModerationRows(filterTestFixtureRows(result.data as ArticleRow[]));
   const rows = await hydrateCreatorAuthorDisplay(safeRows.map(rowToArticle));
   shuffleInPlace(rows);
   return rows.slice(0, limit);
@@ -879,16 +1050,36 @@ export async function getRandomArticlesResurfacing(
 export async function countAvailableByCategory(): Promise<
   Record<string, number>
 > {
-  const { data, error } = await db
+  let countQuery = db
     .from("articles")
     .select("category")
     .eq("tagged", true)
     .is("deleted_at", null);
+  if (isModerationColumnsAvailable) {
+    countQuery = countQuery.eq("moderation_status", "approved");
+  }
+  const { data, error } = await countQuery;
+  let rowsData = data;
+  let rowsError = error;
+  if (
+    rowsError &&
+    isModerationColumnsAvailable &&
+    isMissingModerationColumn(rowsError.message)
+  ) {
+    isModerationColumnsAvailable = false;
+    const fallback = await db
+      .from("articles")
+      .select("category")
+      .eq("tagged", true)
+      .is("deleted_at", null);
+    rowsData = fallback.data;
+    rowsError = fallback.error;
+  }
 
-  if (error) throw new Error(`countAvailableByCategory: ${error.message}`);
+  if (rowsError) throw new Error(`countAvailableByCategory: ${rowsError.message}`);
 
   const counts: Record<string, number> = {};
-  for (const row of data ?? []) {
+  for (const row of rowsData ?? []) {
     counts[row.category] = (counts[row.category] ?? 0) + 1;
   }
   return counts;
@@ -902,19 +1093,39 @@ export async function countAvailableByCategory(): Promise<
 export async function getAvailableStockSnapshotByCategory(): Promise<
   Record<string, { count: number; newestFetchedAt: string | null }>
 > {
-  const { data, error } = await db
+  let snapshotQuery = db
     .from("articles")
     .select("category,fetched_at")
     .eq("tagged", true)
     .is("deleted_at", null);
+  if (isModerationColumnsAvailable) {
+    snapshotQuery = snapshotQuery.eq("moderation_status", "approved");
+  }
+  const { data, error } = await snapshotQuery;
+  let rowsData = data;
+  let rowsError = error;
+  if (
+    rowsError &&
+    isModerationColumnsAvailable &&
+    isMissingModerationColumn(rowsError.message)
+  ) {
+    isModerationColumnsAvailable = false;
+    const fallback = await db
+      .from("articles")
+      .select("category,fetched_at")
+      .eq("tagged", true)
+      .is("deleted_at", null);
+    rowsData = fallback.data;
+    rowsError = fallback.error;
+  }
 
-  if (error) {
-    throw new Error(`getAvailableStockSnapshotByCategory: ${error.message}`);
+  if (rowsError) {
+    throw new Error(`getAvailableStockSnapshotByCategory: ${rowsError.message}`);
   }
 
   const out: Record<string, { count: number; newestFetchedAt: string | null }> =
     {};
-  for (const row of data ?? []) {
+  for (const row of rowsData ?? []) {
     const category = row.category as string;
     const fetchedAt = row.fetched_at as string;
     const prev = out[category];
@@ -963,6 +1174,13 @@ export async function updateArticleTags(
     locale: string;
     readingTimeSecs: number;
     qualityScore: number;
+    moderation?: {
+      status: Exclude<ArticleModerationStatus, "pending">;
+      reason: string | null;
+      confidence: number | null;
+      labels: Record<string, unknown>;
+      moderatedByUserId?: string | null;
+    };
   }
 ): Promise<void> {
   const { data: existing, error: fetchError } = await db
@@ -977,20 +1195,51 @@ export async function updateArticleTags(
     .filter(Boolean);
   const mergedTags = mergeTags(explicit, enrichment.tags ?? []);
 
-  const { error } = await db
-    .from("articles")
-    .update({
-      tags: mergedTags,
-      sentiment: enrichment.sentiment,
-      emotions: enrichment.emotions,
-      locale: enrichment.locale,
-      reading_time_secs: enrichment.readingTimeSecs,
-      quality_score: enrichment.qualityScore,
-      tagged: true,
-    })
-    .eq("id", id);
+  const moderation = enrichment.moderation ?? {
+    status: "approved" as const,
+    reason: null,
+    confidence: null,
+    labels: {},
+    moderatedByUserId: null,
+  };
+  const nowIso = new Date().toISOString();
+  const isRejected = moderation.status === "rejected";
 
-  if (error) throw new Error(`updateArticleTags: ${error.message}`);
+  const baseUpdate = {
+    tags: mergedTags,
+    sentiment: enrichment.sentiment,
+    emotions: enrichment.emotions,
+    locale: enrichment.locale,
+    reading_time_secs: enrichment.readingTimeSecs,
+    quality_score: enrichment.qualityScore,
+    tagged: true,
+  };
+  const fullUpdate = {
+    ...baseUpdate,
+    moderation_status: moderation.status,
+    moderation_reason: moderation.reason,
+    moderation_confidence: moderation.confidence,
+    moderation_labels: moderation.labels ?? {},
+    moderated_at: nowIso,
+    moderated_by_user_id:
+      moderation.moderatedByUserId ?? (isRejected ? "agent:tagger" : null),
+    deleted_at: isRejected ? nowIso : null,
+    deleted_by_user_id:
+      isRejected ? moderation.moderatedByUserId ?? "agent:tagger" : null,
+    delete_reason: isRejected ? moderation.reason ?? "policy_rejected" : null,
+  };
+
+  let updateResult = await db.from("articles").update(fullUpdate).eq("id", id);
+  if (
+    updateResult.error &&
+    isModerationColumnsAvailable &&
+    isMissingModerationColumn(updateResult.error.message)
+  ) {
+    isModerationColumnsAvailable = false;
+    updateResult = await db.from("articles").update(baseUpdate).eq("id", id);
+  }
+
+  if (updateResult.error) throw new Error(`updateArticleTags: ${updateResult.error.message}`);
 }
 
 /**
