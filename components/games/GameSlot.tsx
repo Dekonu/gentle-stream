@@ -114,6 +114,17 @@ function rememberRenderedSignature(gameType: GameType, token?: string): void {
   renderedPuzzleSignaturesByType.set(gameType, next);
 }
 
+function getPuzzleToken(puzzle: PuzzleWithUniqueness | null | undefined): string | undefined {
+  if (!puzzle) return undefined;
+  const signature =
+    typeof puzzle.uniquenessSignature === "string"
+      ? puzzle.uniquenessSignature.trim()
+      : "";
+  if (signature) return signature;
+  const puzzleId = typeof puzzle.puzzleId === "string" ? puzzle.puzzleId.trim() : "";
+  return puzzleId || undefined;
+}
+
 function puzzleEndpoint(
   gameType: GameType,
   diff: Difficulty,
@@ -208,10 +219,7 @@ export default function GameSlot({
         }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as PuzzleWithUniqueness;
-        const token =
-          (typeof data.uniquenessSignature === "string" && data.uniquenessSignature.trim()) ||
-          (typeof data.puzzleId === "string" && data.puzzleId.trim()) ||
-          undefined;
+        const token = getPuzzleToken(data);
         if (hasRenderedSignature(gameType, token) && !allowReplay) {
           // Hard guard: never render the same puzzle twice in the same feed session view.
           const retryExcludes = Array.from(
@@ -225,10 +233,7 @@ export default function GameSlot({
           );
           if (!retryRes.ok) throw new Error(`HTTP ${retryRes.status}`);
           const retryData = (await retryRes.json()) as PuzzleWithUniqueness;
-          const retryToken =
-            (typeof retryData.uniquenessSignature === "string" && retryData.uniquenessSignature.trim()) ||
-            (typeof retryData.puzzleId === "string" && retryData.puzzleId.trim()) ||
-            undefined;
+          const retryToken = getPuzzleToken(retryData);
           if (hasRenderedSignature(gameType, retryToken)) {
             throw new Error("Duplicate puzzle prevented");
           }
@@ -303,18 +308,29 @@ export default function GameSlot({
               const gs = row.game_state as Record<string, unknown>;
               const p = gs.puzzle as AnyPuzzle | undefined;
               if (p) {
-                setPuzzle(p);
-                setCurrentDifficulty(
-                  (row.difficulty as Difficulty) ?? difficulty
-                );
-                if (gameType === "sudoku" && gs.sudoku) {
-                  setSudokuCloud(gs.sudoku as SudokuCloudSlice);
+                const restored = p as PuzzleWithUniqueness;
+                const restoredToken = getPuzzleToken(restored);
+                // Prevent rendering the same in-progress puzzle repeatedly in one feed view.
+                if (restoredToken && !hasRenderedSignature(gameType, restoredToken)) {
+                  setPuzzle(restored);
+                  setCurrentDifficulty(
+                    (row.difficulty as Difficulty) ?? difficulty
+                  );
+                  if (gameType === "sudoku" && gs.sudoku) {
+                    setSudokuCloud(gs.sudoku as SudokuCloudSlice);
+                  }
+                  if (gameType === "word_search" && gs.wordSearch) {
+                    setWordCloud(gs.wordSearch as WordSearchCloudSlice);
+                  }
+                  rememberRenderedSignature(gameType, restoredToken);
+                  writeRecentSignature(
+                    gameType,
+                    restored.uniquenessSignature,
+                    restored.puzzleId
+                  );
+                  setLoading(false);
+                  return;
                 }
-                if (gameType === "word_search" && gs.wordSearch) {
-                  setWordCloud(gs.wordSearch as WordSearchCloudSlice);
-                }
-                setLoading(false);
-                return;
               }
             }
           }
@@ -345,10 +361,7 @@ export default function GameSlot({
         }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as PuzzleWithUniqueness;
-        const token =
-          (typeof data.uniquenessSignature === "string" && data.uniquenessSignature.trim()) ||
-          (typeof data.puzzleId === "string" && data.puzzleId.trim()) ||
-          undefined;
+        const token = getPuzzleToken(data);
         if (hasRenderedSignature(gameType, token)) {
           if (!cancelled) {
             setHasNoUniqueAvailable(true);
@@ -418,7 +431,27 @@ export default function GameSlot({
     );
   }
 
-  if (hasNoUniqueAvailable) return null;
+  if (hasNoUniqueAvailable) {
+    if (embedded) return null;
+    return (
+      <div
+        role="status"
+        style={{
+          borderTop: "1px solid #e8d9a0",
+          borderBottom: "1px solid #e8d9a0",
+          background: "#fcfbf8",
+          padding: "0.6rem 1rem",
+          textAlign: "center",
+          fontFamily: "'IM Fell English', Georgia, serif",
+          fontStyle: "italic",
+          color: "#7a6a30",
+          fontSize: "0.76rem",
+        }}
+      >
+        No fresh {gameType.replace("_", " ")} puzzle is available right now.
+      </div>
+    );
+  }
 
   if (error || !puzzle) {
     return (
