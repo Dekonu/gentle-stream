@@ -95,6 +95,7 @@ interface TokenBudget {
 interface RunIngestAgentOptions {
   pipeline?: "legacy" | "overhaul";
   discoveryProvider?: IngestDiscoveryProvider;
+  ingestRunId?: string;
   /** Rewrite discovered stories with Claude expansion. Defaults false when unset. */
   rewriteEnabled?: boolean;
   maxExpansionCalls?: number;
@@ -138,7 +139,7 @@ export async function runIngestAgent(
   try {
     const result =
       pipeline === "legacy"
-        ? await runLegacyIngest(category, total, targetLocale)
+        ? await runLegacyIngest(category, total, targetLocale, options.ingestRunId ?? null)
         : await runOverhaulIngest(category, total, options);
     span.end({
       category,
@@ -182,6 +183,7 @@ async function runOverhaulIngest(
   const discoveryProvider = options.discoveryProvider
     ? options.discoveryProvider
     : resolveIngestDiscoveryProvider(env.INGEST_DISCOVERY_PROVIDER);
+  const ingestRunId = options.ingestRunId ?? null;
 
   const [seenHeadlines, seenUrls] = await Promise.all([
     getRecentHeadlines(category, 60),
@@ -242,7 +244,8 @@ async function runOverhaulIngest(
         discoveryProvider,
         discoveryTarget,
         seenHeadlines,
-        seenUrls
+        seenUrls,
+        ingestRunId
       );
       retryCount += discovery.retryCount;
       spendTokens(budget, discovery.usage);
@@ -451,6 +454,7 @@ async function runOverhaulIngest(
           budget,
           maxWaitMs: batchMaxWaitMs,
           pollIntervalMs: batchPollMs,
+          ingestRunId,
         });
         for (const row of batchRows) {
           if (allInserted.length >= total || expansionCount >= maxExpansionCalls) break;
@@ -478,7 +482,8 @@ async function runOverhaulIngest(
               targetLocale,
               row.candidate,
               seenHeadlines,
-              seenUrls
+            seenUrls,
+            ingestRunId
             );
             retryCount += expanded.retryCount;
             spendTokens(budget, expanded.usage);
@@ -539,7 +544,8 @@ async function runOverhaulIngest(
               targetLocale,
               candidate,
               seenHeadlines,
-              seenUrls
+              seenUrls,
+              ingestRunId
             );
             retryCount += expanded.retryCount;
             spendTokens(budget, expanded.usage);
@@ -584,7 +590,8 @@ async function runOverhaulIngest(
             targetLocale,
             candidate,
             seenHeadlines,
-            seenUrls
+            seenUrls,
+            ingestRunId
           );
           retryCount += expanded.retryCount;
           spendTokens(budget, expanded.usage);
@@ -640,6 +647,8 @@ async function runOverhaulIngest(
       stoppedEarly,
       candidateCount,
       targetLocale,
+      precheckRejectedCount,
+      duplicateSkipRate,
       policyRejectedCount,
       batchFallbackCount,
       discoveryProvider,
@@ -675,7 +684,8 @@ async function runOverhaulIngest(
 async function runLegacyIngest(
   category: Category,
   total: number,
-  targetLocale: string
+  targetLocale: string,
+  ingestRunId: string | null
 ): Promise<IngestResult> {
   const apiKey = env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
@@ -700,7 +710,14 @@ async function runLegacyIngest(
   for (let i = 0; i < total; i++) {
     attemptedCount += 1;
     try {
-      const result = await fetchOneArticle(apiKey, category, targetLocale, seenHeadlines, seenUrls);
+      const result = await fetchOneArticle(
+        apiKey,
+        category,
+        targetLocale,
+        seenHeadlines,
+        seenUrls,
+        ingestRunId
+      );
       retryCount += result.retryCount;
       inputTokens += result.usage.input_tokens ?? 0;
       outputTokens += result.usage.output_tokens ?? 0;
@@ -786,7 +803,8 @@ async function fetchOneArticle(
   category: string,
   targetLocale: string,
   seenHeadlines: string[],
-  seenUrls: string[]
+  seenUrls: string[],
+  ingestRunId: string | null
 ): Promise<FetchResult> {
   const avoidHeadlines = seenHeadlines.slice(-8).join("; ");
   const avoidUrls = seenUrls.slice(-20).join(", ");
@@ -809,6 +827,7 @@ async function fetchOneArticle(
     category,
     agent: "ingest",
     route: "lib/agents/ingestAgent",
+    ingestRunId,
   });
   const usage = readClaudeUsage(data, { input_tokens: 1500, output_tokens: 500 });
   const stopReason = typeof data.stop_reason === "string" ? data.stop_reason : "";
@@ -1124,7 +1143,8 @@ async function fetchDiscoveryCandidates(
   discoveryProvider: IngestDiscoveryProvider,
   targetCount: number,
   seenHeadlines: string[],
-  seenUrls: string[]
+  seenUrls: string[],
+  ingestRunId: string | null
 ): Promise<DiscoveryResult> {
   if (discoveryProvider === "rss_seed_only" || discoveryProvider === "rss_seeded_primary") {
     const rssCandidates = await discoverCandidatesFromRss({
@@ -1158,7 +1178,8 @@ async function fetchDiscoveryCandidates(
       targetLocale,
       remainingCount,
       seenHeadlines,
-      seenUrls
+      seenUrls,
+      ingestRunId
     );
     return {
       candidates: normalizeDiscoveryCandidates([...rssCandidates, ...webFallback.candidates]).slice(
@@ -1178,7 +1199,8 @@ async function fetchDiscoveryCandidates(
     targetLocale,
     targetCount,
     seenHeadlines,
-    seenUrls
+    seenUrls,
+    ingestRunId
   );
   return {
     ...webOnly,
@@ -1192,7 +1214,8 @@ async function fetchDiscoveryCandidatesAnthropic(
   targetLocale: string,
   targetCount: number,
   seenHeadlines: string[],
-  seenUrls: string[]
+  seenUrls: string[],
+  ingestRunId: string | null
 ): Promise<Omit<DiscoveryResult, "provider">> {
 
   const avoidHeadlines = seenHeadlines.slice(-30).join("; ");
@@ -1215,6 +1238,7 @@ async function fetchDiscoveryCandidatesAnthropic(
     category,
     agent: "ingest",
     route: "lib/agents/ingestAgent",
+    ingestRunId,
   });
   const usage = readClaudeUsage(data, { input_tokens: 1200, output_tokens: 400 });
   const blocks = readContentBlocks(data);
@@ -1347,6 +1371,7 @@ async function expandAcceptedViaMessageBatch(input: {
   budget: TokenBudget;
   maxWaitMs: number;
   pollIntervalMs: number;
+  ingestRunId: string | null;
 }): Promise<BatchExpansionRow[]> {
   const {
     apiKey,
@@ -1358,6 +1383,7 @@ async function expandAcceptedViaMessageBatch(input: {
     budget,
     maxWaitMs,
     pollIntervalMs,
+    ingestRunId,
   } = input;
 
   const requests = accepted.map((candidate, i) => ({
@@ -1368,14 +1394,16 @@ async function expandAcceptedViaMessageBatch(input: {
     }),
   }));
 
-  const { id: batchId } = await createMessageBatch(apiKey, requests);
+  const { id: batchId } = await createMessageBatch(apiKey, requests, {
+    ingestRunId,
+  });
   console.log(
     "[IngestAgent:overhaul] Submitted message batch %s (%s expansions)",
     batchId,
     String(requests.length)
   );
-  await pollMessageBatchUntilEnded(apiKey, batchId, { maxWaitMs, pollIntervalMs });
-  const lines = await fetchMessageBatchResultsJsonl(apiKey, batchId);
+  await pollMessageBatchUntilEnded(apiKey, batchId, { maxWaitMs, pollIntervalMs, ingestRunId });
+  const lines = await fetchMessageBatchResultsJsonl(apiKey, batchId, { ingestRunId });
 
   const byIndex = new Map<number, FetchResult>();
   for (const line of lines) {
@@ -1415,7 +1443,8 @@ async function fetchExpandedArticle(
   targetLocale: string,
   candidate: DiscoveryCandidate,
   seenHeadlines: string[],
-  seenUrls: string[]
+  seenUrls: string[],
+  ingestRunId: string | null
 ): Promise<FetchResult> {
   const prompt = buildExpansionPrompt(
     category,
@@ -1434,6 +1463,7 @@ async function fetchExpandedArticle(
     agent: "ingest",
     route: "lib/agents/ingestAgent",
     correlationId: normaliseUrl(candidate.sourceUrl).slice(0, 240),
+    ingestRunId,
   });
   return expansionFromClaudeData(data, candidate, category, retryCount);
 }
@@ -1447,6 +1477,25 @@ interface ClaudeRequestInput {
   agent: string;
   category?: string;
   correlationId?: string;
+  ingestRunId?: string | null;
+}
+
+function messageLooksLikeCreditExhaustion(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("insufficient credits") ||
+    lower.includes("credit balance") ||
+    lower.includes("credits exhausted") ||
+    lower.includes("quota exceeded") ||
+    lower.includes("billing")
+  );
+}
+
+function classifyAnthropicFailure(status: number, message: string): string {
+  if (status === 429 && messageLooksLikeCreditExhaustion(message)) return "anthropic_credits_exhausted";
+  if (status === 429) return "anthropic_rate_limited";
+  if (status === 529) return "anthropic_overloaded";
+  return `http_${status}`;
 }
 
 async function callClaudeWithWebSearch(input: ClaudeRequestInput): Promise<{
@@ -1480,6 +1529,7 @@ async function callClaudeWithWebSearch(input: ClaudeRequestInput): Promise<{
       }
       if (!response.ok) {
         const err = await response.text();
+        const errorCode = classifyAnthropicFailure(response.status, err);
         await logLlmProviderCall({
           provider: "anthropic",
           callKind: input.callKind,
@@ -1490,14 +1540,28 @@ async function callClaudeWithWebSearch(input: ClaudeRequestInput): Promise<{
           durationMs: Date.now() - startedAt,
           httpStatus: response.status,
           success: false,
-          errorCode: `http_${response.status}`,
+          errorCode,
           errorMessage: err.slice(0, 500),
           correlationId: input.correlationId ?? null,
+          ingestRunId: input.ingestRunId ?? null,
           metadata: {
             retryCount: attempt,
             maxTokens: input.maxTokens,
           },
         });
+        if (errorCode === "anthropic_credits_exhausted") {
+          captureMessage({
+            level: "warning",
+            message: "agent.ingest.anthropic_credits_exhausted",
+            context: {
+              category: input.category ?? "unknown",
+              callKind: input.callKind,
+              route: input.route,
+              ingestRunId: input.ingestRunId ?? undefined,
+            },
+          });
+          throw new Error(`Anthropic credits exhausted (HTTP ${response.status}): ${err}`);
+        }
         throw new Error(`Claude API ${response.status}: ${err}`);
       }
       const data = (await response.json()) as Record<string, unknown>;
@@ -1515,6 +1579,7 @@ async function callClaudeWithWebSearch(input: ClaudeRequestInput): Promise<{
         httpStatus: response.status,
         success: true,
         correlationId: input.correlationId ?? null,
+        ingestRunId: input.ingestRunId ?? null,
         metadata: {
           retryCount: attempt,
           maxTokens: input.maxTokens,
@@ -1543,6 +1608,7 @@ async function callClaudeWithWebSearch(input: ClaudeRequestInput): Promise<{
         errorCode: "fetch_exception",
         errorMessage: message.slice(0, 500),
         correlationId: input.correlationId ?? null,
+        ingestRunId: input.ingestRunId ?? null,
         metadata: {
           retryCount: attempt,
           maxTokens: input.maxTokens,

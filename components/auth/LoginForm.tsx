@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Script from "next/script";
+import Link from "next/link";
 import type { Provider } from "@supabase/supabase-js";
 import { AppLogo } from "@/components/brand/AppLogo";
 import { createClient } from "@/lib/supabase/client";
@@ -507,6 +508,28 @@ export function LoginForm({
             : `Continue with ${providerLabel("facebook")}`}
         </button>
 
+        <Link
+          href="/?guest=1"
+          style={{
+            display: isCreatorLogin ? "none" : "block",
+            width: "100%",
+            boxSizing: "border-box",
+            marginBottom: "1.25rem",
+            textAlign: "center",
+            padding: "0.58rem 1rem",
+            border: "1px solid #b7b2a8",
+            background: "#f5f1e8",
+            color: "#3d3b35",
+            fontFamily: "'Playfair Display', Georgia, serif",
+            fontSize: "0.78rem",
+            letterSpacing: "0.05em",
+            textTransform: "uppercase",
+            textDecoration: "none",
+          }}
+        >
+          Continue as guest
+        </Link>
+
         <div
           style={{
             display: isCreatorLogin ? "none" : "flex",
@@ -912,6 +935,10 @@ export function LoginForm({
             color: "#999",
           }}
         >
+          <a href="/about" style={{ color: "#777", textDecoration: "underline" }}>
+            About
+          </a>
+          {" · "}
           <a href="/privacy" style={{ color: "#777", textDecoration: "underline" }}>
             Privacy
           </a>

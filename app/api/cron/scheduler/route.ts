@@ -40,8 +40,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const DEFAULT_RUNTIME_BUDGET_MS = 240_000;
-const DEFAULT_MAX_EXPANSIONS_PER_RUN = 20;
+const DEFAULT_RUNTIME_BUDGET_MS = 270_000;
+const DEFAULT_MAX_EXPANSIONS_PER_RUN = 60;
 /**
  * Default when `INGEST_DISCOVERY_PROVIDER` is unset. Override via env:
  * - `rss_seeded_primary` — RSS first, Anthropic web search fills the gap
@@ -145,6 +145,7 @@ export async function GET(request: NextRequest) {
   let totalOutputTokens = 0;
   let totalPolicyRejected = 0;
   let totalBatchFallbacks = 0;
+  let totalAnthropicExhausted = 0;
   const discoveryRunsByProvider: Record<string, number> = {};
   const insertedByProvider: Record<string, number> = {};
   let categoriesChecked = 0;
@@ -269,6 +270,7 @@ export async function GET(request: NextRequest) {
         const result = await runIngestAgent(cat as Category, cappedIngestCount, {
           pipeline,
           discoveryProvider,
+          ingestRunId: runId,
           maxExpansionCalls: cappedIngestCount,
           softDeadlineMs: remainingRuntimeMs,
           targetLocale,
@@ -302,6 +304,12 @@ export async function GET(request: NextRequest) {
 
         if (result.errorSummary) {
           errorSummaryParts.push(`${cat}: ${result.errorSummary}`);
+          if (
+            result.errorSummary.toLowerCase().includes("anthropic_credits_exhausted") ||
+            result.errorSummary.toLowerCase().includes("credits exhausted")
+          ) {
+            totalAnthropicExhausted += 1;
+          }
         }
 
         categoryLogs.push({
@@ -428,6 +436,7 @@ export async function GET(request: NextRequest) {
         totalFailed,
         totalPolicyRejected,
         totalBatchFallbacks,
+        totalAnthropicExhausted,
         discoveryRunsByProvider:
           Object.keys(discoveryRunsByProvider).length > 0
             ? JSON.stringify(discoveryRunsByProvider)
@@ -465,6 +474,7 @@ export async function GET(request: NextRequest) {
       precheckRejected: totalPrecheckRejected,
       policyRejected: totalPolicyRejected,
       batchFallbacks: totalBatchFallbacks,
+      anthropicExhaustedRuns: totalAnthropicExhausted,
       discoveryRunsByProvider,
       insertedByProvider,
       expansions: totalExpansions,

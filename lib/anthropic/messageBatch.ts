@@ -33,7 +33,8 @@ function anthropicHeaders(apiKey: string, extra?: Record<string, string>): Heade
 
 export async function createMessageBatch(
   apiKey: string,
-  requests: { custom_id: string; params: Record<string, unknown> }[]
+  requests: { custom_id: string; params: Record<string, unknown> }[],
+  options?: { ingestRunId?: string | null }
 ): Promise<{ id: string }> {
   const startedAt = Date.now();
   let httpStatus: number | null = null;
@@ -56,6 +57,7 @@ export async function createMessageBatch(
       success: false,
       errorCode: `http_${res.status}`,
       errorMessage: text.slice(0, 500),
+      ingestRunId: options?.ingestRunId ?? null,
       metadata: {
         requestCount: requests.length,
       },
@@ -73,6 +75,7 @@ export async function createMessageBatch(
     durationMs: Date.now() - startedAt,
     httpStatus,
     success: true,
+    ingestRunId: options?.ingestRunId ?? null,
     metadata: {
       requestCount: requests.length,
     },
@@ -88,7 +91,8 @@ export interface MessageBatchStatus {
 
 export async function retrieveMessageBatch(
   apiKey: string,
-  batchId: string
+  batchId: string,
+  options?: { ingestRunId?: string | null }
 ): Promise<MessageBatchStatus> {
   const startedAt = Date.now();
   let httpStatus: number | null = null;
@@ -109,6 +113,7 @@ export async function retrieveMessageBatch(
       errorCode: `http_${res.status}`,
       errorMessage: text.slice(0, 500),
       correlationId: batchId,
+      ingestRunId: options?.ingestRunId ?? null,
     });
     throw new Error(`Message batch get ${res.status}: ${text.slice(0, 800)}`);
   }
@@ -122,6 +127,7 @@ export async function retrieveMessageBatch(
     httpStatus,
     success: true,
     correlationId: batchId,
+    ingestRunId: options?.ingestRunId ?? null,
     metadata: {
       ended: out.processing_status === "ended",
     },
@@ -132,11 +138,13 @@ export async function retrieveMessageBatch(
 export async function pollMessageBatchUntilEnded(
   apiKey: string,
   batchId: string,
-  options: { maxWaitMs: number; pollIntervalMs: number }
+  options: { maxWaitMs: number; pollIntervalMs: number; ingestRunId?: string | null }
 ): Promise<void> {
   const deadline = Date.now() + options.maxWaitMs;
   while (Date.now() < deadline) {
-    const batch = await retrieveMessageBatch(apiKey, batchId);
+    const batch = await retrieveMessageBatch(apiKey, batchId, {
+      ingestRunId: options.ingestRunId ?? null,
+    });
     if (batch.processing_status === "ended") return;
     if (batch.processing_status === "canceling") {
       throw new Error("Message batch is canceling");
@@ -149,7 +157,8 @@ export async function pollMessageBatchUntilEnded(
 /** Fetch JSONL via authenticated results endpoint (same content as `results_url`). */
 export async function fetchMessageBatchResultsJsonl(
   apiKey: string,
-  batchId: string
+  batchId: string,
+  options?: { ingestRunId?: string | null }
 ): Promise<string[]> {
   const startedAt = Date.now();
   let httpStatus: number | null = null;
@@ -173,6 +182,7 @@ export async function fetchMessageBatchResultsJsonl(
       errorCode: `http_${res.status}`,
       errorMessage: text.slice(0, 500),
       correlationId: batchId,
+      ingestRunId: options?.ingestRunId ?? null,
     });
     throw new Error(`Message batch results ${res.status}: ${text.slice(0, 800)}`);
   }
@@ -186,6 +196,7 @@ export async function fetchMessageBatchResultsJsonl(
     httpStatus,
     success: true,
     correlationId: batchId,
+    ingestRunId: options?.ingestRunId ?? null,
     metadata: {
       lineCount: lines.length,
     },

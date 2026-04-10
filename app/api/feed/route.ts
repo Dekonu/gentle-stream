@@ -116,6 +116,7 @@ function startColdStartInBackground(input: {
         pipeline: "overhaul",
         discoveryProvider: resolveIngestDiscoveryProvider(env.INGEST_DISCOVERY_PROVIDER),
         rewriteEnabled: env.INGEST_REWRITE_ENABLED ?? false,
+        ingestRunId: runId ?? undefined,
       });
       await runTaggerAgent(Math.min(20, ingestCount + 5));
 

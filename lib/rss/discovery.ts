@@ -1,4 +1,8 @@
 import { listEnabledRssFeeds, recordRssFeedHealth } from "@/lib/db/rssFeeds";
+import {
+  advanceRssDiscoveryCursor,
+  getRssDiscoveryCursorPosition,
+} from "@/lib/db/rssDiscoveryState";
 import { normaliseUrl } from "@/lib/db/articles";
 import { captureMessage } from "@/lib/observability";
 
@@ -32,7 +36,8 @@ interface DiscoverFromRssInput {
 
 const FETCH_TIMEOUT_MS = 8_000;
 const MAX_COMMON_PATH_CHECKS = 6;
-const DEFAULT_MAX_FEEDS = 10;
+const DEFAULT_MAX_FEEDS = 18;
+const DEFAULT_FEED_POOL_LIMIT = 100;
 const DEFAULT_ITEMS_PER_FEED = 8;
 
 function cleanXmlText(value: string): string {
@@ -46,11 +51,11 @@ function cleanXmlText(value: string): string {
 
 function decodeXmlEntities(value: string): string {
   return value
-    .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&");
 }
 
 function cleanXmlHtml(value: string): string {
@@ -223,18 +228,35 @@ function isRecentEnough(isoLike: string | null): boolean {
   return ageMs <= 30 * 24 * 60 * 60 * 1000;
 }
 
+function rotateFeeds<T>(feeds: T[], startIndex: number, count: number): T[] {
+  if (feeds.length === 0 || count <= 0) return [];
+  const normalizedStart =
+    ((Math.trunc(startIndex) % feeds.length) + feeds.length) % feeds.length;
+  const ordered = feeds
+    .slice(normalizedStart)
+    .concat(feeds.slice(0, normalizedStart));
+  return ordered.slice(0, Math.min(count, ordered.length));
+}
+
 export async function discoverCandidatesFromRss(input: DiscoverFromRssInput): Promise<RssDiscoveryCandidate[]> {
   const startedAtMs = Date.now();
-  const maxFeeds = Math.max(1, Math.min(20, Number(process.env.RSS_DISCOVERY_MAX_FEEDS ?? DEFAULT_MAX_FEEDS)));
+  const maxFeeds = Math.max(1, Math.min(100, Number(process.env.RSS_DISCOVERY_MAX_FEEDS ?? DEFAULT_MAX_FEEDS)));
+  const feedPoolLimit = Math.max(
+    maxFeeds,
+    Math.min(500, Number(process.env.RSS_DISCOVERY_FEED_POOL_LIMIT ?? DEFAULT_FEED_POOL_LIMIT))
+  );
   const itemsPerFeed = Math.max(
     1,
-    Math.min(20, Number(process.env.RSS_DISCOVERY_ITEMS_PER_FEED ?? DEFAULT_ITEMS_PER_FEED))
+    Math.min(40, Number(process.env.RSS_DISCOVERY_ITEMS_PER_FEED ?? DEFAULT_ITEMS_PER_FEED))
   );
-  const feeds = await listEnabledRssFeeds({
+  const feedPool = await listEnabledRssFeeds({
     localeHint: input.targetLocale,
     categoryHint: input.categoryHint,
-    limit: maxFeeds,
+    limit: feedPoolLimit,
   });
+  const cursorStart =
+    feedPool.length > 0 ? await getRssDiscoveryCursorPosition() : 0;
+  const feeds = rotateFeeds(feedPool, cursorStart, maxFeeds);
   const seenUrlSet = new Set(input.seenUrls.map((url) => normaliseUrl(url)));
   const seenHeadlineSet = new Set(input.seenHeadlines.map((headline) => headline.trim().toLowerCase()));
   const candidates: RssDiscoveryCandidate[] = [];
@@ -292,6 +314,14 @@ export async function discoverCandidatesFromRss(input: DiscoverFromRssInput): Pr
     }
   }
 
+  const cursorNext =
+    feedPool.length > 0
+      ? await advanceRssDiscoveryCursor({
+          feedPoolSize: feedPool.length,
+          advanceBy: Math.max(1, feedsAttempted),
+        })
+      : 0;
+
   const out = candidates.slice(0, input.targetCount);
   captureMessage({
     level: "info",
@@ -301,8 +331,11 @@ export async function discoverCandidatesFromRss(input: DiscoverFromRssInput): Pr
       categoryHint: input.categoryHint ?? "none",
       targetLocale: input.targetLocale ?? "global",
       targetCount: input.targetCount,
+      feedPoolSize: feedPool.length,
       feedCountSelected: feeds.length,
       feedCountAttempted: feedsAttempted,
+      cursorStart,
+      cursorNext,
       feedItemsParsed: itemsParsed,
       candidateCount: out.length,
       filteredByRecency,
