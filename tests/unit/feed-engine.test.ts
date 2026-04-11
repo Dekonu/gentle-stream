@@ -22,18 +22,18 @@ function makeRawArticle(partial?: Partial<RawArticle>): RawArticle {
 }
 
 describe("feed-engine helpers", () => {
-  it("strips cite tags from feed text fields", () => {
+  it("strips inline html modifier tags from feed text fields", () => {
     const input = makeRawArticle({
-      headline: "Title <cite>ref</cite>",
+      headline: "Title <em>ref</em>",
       subheadline: "Sub <cite data-x='1'>source</cite>",
-      body: "Body <cite>ignore</cite>",
+      body: "Body <strong>ignore</strong> and <a href='https://x'>link</a>",
       pullQuote: "Quote </cite>",
     });
 
     const cleaned = cleanArticleForFeed(input);
     expect(cleaned.headline).toBe("Title ref");
     expect(cleaned.subheadline).toBe("Sub source");
-    expect(cleaned.body).toBe("Body ignore");
+    expect(cleaned.body).toBe("Body ignore and link");
     expect(cleaned.pullQuote).toBe("Quote");
   });
 

@@ -12,11 +12,30 @@
  *   npx tsx scripts/test-dedup.ts
  */
 
+import { randomBytes } from "node:crypto";
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
 let insertArticles: typeof import("../lib/db/articles").insertArticles;
+let buildHeadlineFingerprint: typeof import("../lib/db/articles").buildHeadlineFingerprint;
 let db: typeof import("../lib/db/client").db;
+
+/** Unique per process so parallel CI jobs on a shared DB do not share fingerprints. */
+let runTag = "";
+
+function headline(rest: string): string {
+  return `TEST_DEDUP_${runTag} ${rest}`;
+}
+
+/** Mirrors legacy spacing: extra spaces around words and ends (same fingerprint as `headline(rest)`). */
+function paddedHeadline(rest: string): string {
+  const core = headline(rest);
+  return `  ${core.split(/\s+/).join("  ")}  `;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -59,7 +78,20 @@ async function initDeps() {
     import("../lib/db/client"),
   ]);
   insertArticles = articlesMod.insertArticles;
+  buildHeadlineFingerprint = articlesMod.buildHeadlineFingerprint;
   db = clientMod.db;
+}
+
+/** Ensures the first insert is visible to fingerprint lookups (read replicas / PostgREST lag). */
+async function waitForFingerprintRow(fp: string, maxWaitMs = 15000): Promise<void> {
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    const { data, error } = await db.from("articles").select("id").eq("fingerprint", fp).limit(1);
+    if (error) throw new Error(error.message);
+    if (data && data.length > 0) return;
+    await sleep(200);
+  }
+  throw new Error(`Timed out waiting for fingerprint row: ${fp}`);
 }
 
 async function preCleanup() {
@@ -95,7 +127,7 @@ async function preCleanup() {
 async function testExactDuplicate() {
   console.log("\n── Test 1: Exact duplicate headline ─────────────────────────");
 
-  const article = { ...BASE, headline: "TEST_DEDUP Exact Duplicate Headline" };
+  const article = { ...BASE, headline: headline("Exact Duplicate Headline") };
 
   const first = await insertArticles([article]);
   insertedIds.push(...first.map((a) => a.id));
@@ -119,9 +151,9 @@ async function testExactDuplicate() {
 async function testCasingVariant() {
   console.log("\n── Test 2: Same headline, different casing ───────────────────");
 
-  const lower = { ...BASE, headline: "TEST_DEDUP casing variant headline" };
-  const upper = { ...BASE, headline: "TEST_DEDUP CASING VARIANT HEADLINE" };
-  const mixed = { ...BASE, headline: "TEST_DEDUP Casing Variant Headline" };
+  const lower = { ...BASE, headline: headline("casing variant headline") };
+  const upper = { ...BASE, headline: headline("CASING VARIANT HEADLINE") };
+  const mixed = { ...BASE, headline: headline("Casing Variant Headline") };
 
   const first = await insertArticles([lower]);
   insertedIds.push(...first.map((a) => a.id));
@@ -137,12 +169,15 @@ async function testCasingVariant() {
 async function testWhitespaceVariant() {
   console.log("\n── Test 3: Same headline, extra whitespace ───────────────────");
 
-  const clean = { ...BASE, headline: "TEST_DEDUP whitespace variant headline" };
-  const padded = { ...BASE, headline: "  TEST_DEDUP  whitespace  variant  headline  " };
+  const clean = { ...BASE, headline: headline("whitespace variant headline") };
+  const padded = { ...BASE, headline: paddedHeadline("whitespace variant headline") };
 
   const first = await insertArticles([clean]);
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "Clean headline inserted");
+
+  const fp = buildHeadlineFingerprint(clean.headline, clean.category);
+  await waitForFingerprintRow(fp);
 
   const second = await insertArticles([padded]);
   assert(second.length === 0, "Padded variant blocked (fingerprint collapses whitespace)");
@@ -151,8 +186,8 @@ async function testWhitespaceVariant() {
 async function testDifferentCategory() {
   console.log("\n── Test 4: Same headline, different category (should insert) ─");
 
-  const ed  = { ...BASE, headline: "TEST_DEDUP cross-category headline", category: "Education" as const };
-  const sci = { ...BASE, headline: "TEST_DEDUP cross-category headline", category: "Science & Discovery" as const };
+  const ed  = { ...BASE, headline: headline("cross-category headline"), category: "Education" as const };
+  const sci = { ...BASE, headline: headline("cross-category headline"), category: "Science & Discovery" as const };
 
   const first = await insertArticles([ed]);
   insertedIds.push(...first.map((a) => a.id));
@@ -166,8 +201,8 @@ async function testDifferentCategory() {
 async function testBatchDedup() {
   console.log("\n── Test 5: Batch insert with internal duplicate ──────────────");
 
-  const a = { ...BASE, headline: "TEST_DEDUP batch article alpha" };
-  const b = { ...BASE, headline: "TEST_DEDUP batch article beta" };
+  const a = { ...BASE, headline: headline("batch article alpha") };
+  const b = { ...BASE, headline: headline("batch article beta") };
 
   // Send a, b, and a duplicate of a in the same batch
   const result = await insertArticles([a, b, a]);
@@ -202,6 +237,8 @@ async function main() {
 
   try {
     await initDeps();
+    runTag = process.env.GITHUB_RUN_ID ?? randomBytes(6).toString("hex");
+    console.log(`\n  Run tag: ${runTag} (isolates fingerprints from other jobs)\n`);
     await preCleanup();
     await testExactDuplicate();
     await testCasingVariant();

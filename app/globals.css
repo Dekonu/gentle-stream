@@ -250,6 +250,26 @@ body {
   outline-offset: 2px;
 }
 
+.gs-read-more-btn:hover {
+  background: var(--gs-surface-elevated) !important;
+  border-color: var(--gs-accent) !important;
+}
+
+.gs-read-more-btn:focus-visible {
+  border-color: var(--gs-accent) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--gs-accent) 32%, transparent);
+}
+
+.gs-feed-source-link:hover {
+  color: var(--gs-accent) !important;
+  text-decoration-color: var(--gs-ink-strong) !important;
+}
+
+.gs-feed-source-link:focus-visible {
+  color: var(--gs-accent) !important;
+  text-decoration-color: var(--gs-ink-strong) !important;
+}
+
 @keyframes gsSoftPulse {
   0%,
   100% {
@@ -289,7 +309,7 @@ body {
 
 /* Shared Markdown body styles */
 .article-markdown {
-  color: #1f1f1f;
+  color: var(--gs-text);
   line-height: 1.68;
   overflow-wrap: anywhere;
 }
@@ -312,7 +332,7 @@ body {
 .article-markdown h4 {
   font-family: "Playfair Display", Georgia, serif;
   line-height: 1.24;
-  color: #141414;
+  color: var(--gs-ink-strong);
   margin: 1rem 0 0.55rem;
 }
 
@@ -331,8 +351,8 @@ body {
 .article-markdown blockquote {
   margin: 0.95rem 0;
   padding: 0.55rem 0 0.55rem 0.8rem;
-  border-left: 3px solid #b8af9d;
-  color: #3c3c3c;
+  border-left: 3px solid var(--gs-border-strong);
+  color: var(--gs-muted);
   font-style: italic;
 }
 
@@ -348,26 +368,26 @@ body {
 
 .article-markdown hr {
   border: 0;
-  border-top: 1px solid #ccc5b7;
+  border-top: 1px solid var(--gs-border);
   margin: 1.15rem 0;
 }
 
 .article-markdown a {
-  color: #1a472a;
+  color: var(--gs-accent);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
 .article-markdown code {
-  background: #efe9de;
+  background: color-mix(in srgb, var(--gs-surface-soft) 86%, var(--gs-border));
   border-radius: 3px;
   padding: 0.1rem 0.2rem;
   font-size: 0.92em;
 }
 
 .article-markdown pre {
-  background: #efe9de;
-  border: 1px solid #d8cfbf;
+  background: color-mix(in srgb, var(--gs-surface-soft) 86%, var(--gs-border));
+  border: 1px solid var(--gs-border);
   border-radius: 6px;
   padding: 0.7rem;
   margin: 0 0 0.95rem;
@@ -389,6 +409,17 @@ body {
 .article-markdown--reader {
   font-size: 1.03rem;
   text-align: justify;
+}
+
+/* RSS reader-modal preview (all layouts): match ArticleBodyMarkdown reader body */
+.gs-rss-reader-excerpt.article-font--classic {
+  font-size: 1.03rem;
+  line-height: 1.68;
+  text-align: justify;
+  hyphens: auto;
+  -webkit-hyphens: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
 }
 
 .article-markdown--admin {

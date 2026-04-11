@@ -39,50 +39,14 @@ import { DEFAULT_GAME_RATIO } from "@/lib/constants";
 import { feedGamePickForOrdinal } from "@/lib/games/feedPick";
 import type { GameType } from "@/lib/games/types";
 import { chooseNewspaperLayout } from "@/lib/feed/newspaperLayout";
+import { articleUniqKey, cleanArticleForFeed, shouldBeGame } from "@gentle-stream/feed-engine";
 import {
   buildIconFractalModuleData,
   buildGeneratedImageModuleData,
   chooseGapIntervalModuleType,
   chooseInlineModuleType,
 } from "@/lib/feed/modules/policy";
-
-// Strip any <cite ...>...</cite> or bare </cite> tags that leak from Claude
-function stripCiteTags(text: string): string {
-  return text
-    .replace(/<cite[^>]*>/gi, "")
-    .replace(/<\/cite>/gi, "")
-    .trim();
-}
-
-function cleanArticle(article: Article): Article {
-  return {
-    ...article,
-    body: stripCiteTags(article.body ?? ""),
-    pullQuote: stripCiteTags(article.pullQuote ?? ""),
-    subheadline: stripCiteTags(article.subheadline ?? ""),
-    headline: stripCiteTags(article.headline ?? ""),
-    sourceUrls: article.sourceUrls ?? [],
-  };
-}
-
-function articleUniqKey(article: Article): string {
-  if ("id" in article && typeof article.id === "string" && article.id.length > 0) {
-    return `id:${article.id}`;
-  }
-  // Fallback for raw shapes: deterministic enough to avoid visible duplicates.
-  return `raw:${article.category}|${article.headline}|${article.byline}|${article.location}`;
-}
-
-/**
- * Decide whether a given section index should be a game slot.
- * Deterministic: same sectionIndex always produces the same result for a given ratio.
- */
-function shouldBeGame(sectionIndex: number, gameRatio: number): boolean {
-  if (gameRatio <= 0) return false;
-  if (gameRatio >= 1) return true;
-  const period = Math.round(1 / gameRatio);
-  return sectionIndex % period === period - 1;
-}
+import { readPositiveInt, readTruthyFlag } from "@/lib/feed/envFlags";
 
 const FEED_FETCH_TIMEOUT_MS = 90_000;
 /** Load the next section before the user reaches the bottom (viewport extension below fold). */
@@ -169,21 +133,6 @@ function buildEditorialBreatherData(input: {
     href: input.href,
     hrefLabel: input.hrefLabel,
   };
-}
-
-function readTruthyFlag(input: string | undefined, defaultValue: boolean): boolean {
-  if (input == null) return defaultValue;
-  const value = input.trim().toLowerCase();
-  if (value === "1" || value === "true" || value === "yes" || value === "on") return true;
-  if (value === "0" || value === "false" || value === "no" || value === "off") return false;
-  return defaultValue;
-}
-
-function readPositiveInt(input: string | undefined, defaultValue: number): number {
-  if (!input) return defaultValue;
-  const parsed = Number.parseInt(input, 10);
-  if (Number.isNaN(parsed) || parsed <= 0) return defaultValue;
-  return parsed;
 }
 
 export interface NewsFeedProps {
@@ -276,7 +225,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
 
   const fillerEnabled = readTruthyFlag(
     process.env.NEXT_PUBLIC_FEED_GAP_FILL_ENABLED,
-    true
+    false
   );
   const betweenGapMinPx = readPositiveInt(
     process.env.NEXT_PUBLIC_FEED_BETWEEN_GAP_MIN_PX ??
@@ -289,7 +238,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   );
   const inlineModulesEnabled = readTruthyFlag(
     process.env.NEXT_PUBLIC_FEED_INLINE_MODULES_ENABLED,
-    true
+    false
   );
   const fillerInterval = readPositiveInt(
     process.env.NEXT_PUBLIC_FEED_FILLER_INTERVAL,
@@ -301,7 +250,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   );
   const todoModuleEnabled = readTruthyFlag(
     process.env.NEXT_PUBLIC_TODO_MODULE_ENABLED,
-    true
+    false
   );
 
   // Sentinel ref — plain IntersectionObserver (no library dependency on stale state)
@@ -733,7 +682,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
 
       setLiveGenerating(!data.fromCache);
 
-      const cleaned = data.articles.map(cleanArticle);
+      const cleaned = data.articles.map((article) => cleanArticleForFeed(article));
       const uniqueForView = cleaned.filter((article) => {
         const key = articleUniqKey(article);
         if (renderedArticleKeysRef.current.has(key)) return false;
@@ -1718,7 +1667,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
               style={{
                 border: active ? "1.5px solid var(--gs-ink-strong)" : undefined,
                 background: active ? "#d7bb66" : "var(--gs-surface-elevated)",
-                color: "var(--gs-ink-strong)",
+                color: active ? "#2f250b" : "var(--gs-ink-strong)",
                 padding: "0.35rem 0.55rem",
                 fontFamily: "'Playfair Display', Georgia, serif",
                 fontSize: "0.7rem",
@@ -1737,9 +1686,10 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           type="button"
           onClick={openWeatherModal}
           style={{
-            border: "1px solid #93b28a",
-            background: "#e6f2e3",
-            color: "#23402a",
+            border: "1px solid color-mix(in srgb, var(--gs-accent) 52%, var(--gs-border))",
+            background:
+              "color-mix(in srgb, var(--gs-accent) 18%, var(--gs-surface-elevated))",
+            color: "var(--gs-ink-strong)",
             padding: "0.35rem 0.55rem",
             fontFamily: "'Playfair Display', Georgia, serif",
             fontSize: "0.7rem",
@@ -1800,7 +1750,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
               }}
               style={{
                 background: "var(--gs-surface-elevated)",
-                color: "#333",
+                color: "var(--gs-ink-strong)",
                 padding: "0.35rem 0.62rem",
                 fontFamily: "'Playfair Display', Georgia, serif",
                 fontSize: "0.7rem",
@@ -1816,14 +1766,15 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       {liveGenerating && (
         <div
           style={{
-            background: "#fdf6e3",
-            borderBottom: "1px solid #e8d9a0",
+            background:
+              "color-mix(in srgb, var(--gs-accent) 12%, var(--gs-surface-elevated))",
+            borderBottom: "1px solid var(--gs-border)",
             padding: "0.5rem 1.5rem",
             textAlign: "center",
             fontFamily: "'IM Fell English', Georgia, serif",
             fontStyle: "italic",
             fontSize: "0.78rem",
-            color: "#7a6a30",
+            color: "var(--gs-ink-strong)",
             maxWidth: "1200px",
             margin: "0 auto",
           }}
@@ -1849,7 +1800,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
               padding: "6rem 2rem",
               textAlign: "center",
               fontFamily: "'IM Fell English', Georgia, serif",
-              color: "#aaa",
+              color: "var(--gs-muted)",
               fontSize: "1.05rem",
               fontStyle: "italic",
             }}
@@ -1875,6 +1826,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
                   key={`module-${section.index}-spotify`}
                   data={section.data as SpotifyMoodTileData}
                   reason={section.reason}
+                  feedCategory={activeCategoryRef.current ?? undefined}
                 />
               );
             }
@@ -1975,10 +1927,10 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           style={{
             padding: "2rem",
             textAlign: "center",
-            borderTop: "3px double #1a1a1a",
+            borderTop: "3px double var(--gs-ink-strong)",
             fontFamily: "'IM Fell English', Georgia, serif",
             fontSize: "0.73rem",
-            color: "#999",
+            color: "var(--gs-muted)",
             letterSpacing: "0.05em",
           }}
         >
@@ -2082,14 +2034,14 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
                   margin: "0.4rem 0 0",
                   fontFamily: "'IM Fell English', Georgia, serif",
                   fontStyle: "italic",
-                  color: "#888",
+                  color: "var(--gs-muted)",
                   fontSize: "0.82rem",
                 }}
               >
                 Loading weather...
               </p>
             ) : weatherModalError ? (
-              <p style={{ color: "#8b4513", fontSize: "0.78rem", margin: 0 }}>
+              <p style={{ color: "#b07833", fontSize: "0.78rem", margin: 0 }}>
                 {weatherModalError}
               </p>
             ) : weatherModalData ? (

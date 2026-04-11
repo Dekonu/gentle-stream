@@ -318,11 +318,10 @@ export async function getSpotifyMoodTileData(input: {
   market?: string | null;
   /** Per-mood scores from `user_spotify_mood_feedback`; biases automatic mood choice. */
   moodScores?: Record<string, number> | null;
+  skipCache?: boolean;
 }): Promise<SpotifyMoodTileData> {
   const enabledRaw = env.SPOTIFY_MODULE_ENABLED;
-  const isEnabled =
-    enabledRaw === undefined ||
-    enabledRaw === true;
+  const isEnabled = enabledRaw === true;
   const mood = pickMood({
     category: input.category,
     mood: input.mood,
@@ -332,8 +331,10 @@ export async function getSpotifyMoodTileData(input: {
   const market = normalizeMarket(input.market);
   const cacheKey = `${mood}|${genre}|${market}`;
   const now = Date.now();
-  const cached = tileCache.get(cacheKey);
-  if (cached && cached.expiresAt > now) return cached.data;
+  if (!input.skipCache) {
+    const cached = tileCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) return cached.data;
+  }
 
   if (!isEnabled) {
     return getFallbackTile({

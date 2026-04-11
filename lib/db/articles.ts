@@ -956,11 +956,15 @@ export async function getRandomAvailableArticles(
   contentKinds?: ArticleContentKind[]
 ): Promise<StoredArticle[]> {
   const effectiveContentKinds = normalizeFeedContentKinds(contentKinds);
-  const cap = Math.min(150, Math.max(40, limit * 12));
+  const cap = Math.min(400, Math.max(40, limit * 12));
   let query = db
     .from("articles")
     .select("*")
     .is("deleted_at", null)
+    // DESC would otherwise put NULL fetched_at first and crowd out real rows (CI flakes).
+    .not("fetched_at", "is", null)
+    // Prefer recent ingests, then shuffle client-side.
+    .order("fetched_at", { ascending: false })
     .limit(cap);
   if (isModerationColumnsAvailable) {
     query = query.eq("moderation_status", "approved");
@@ -983,7 +987,13 @@ export async function getRandomAvailableArticles(
     isMissingModerationColumn(result.error.message)
   ) {
     isModerationColumnsAvailable = false;
-    let fallbackQuery = db.from("articles").select("*").is("deleted_at", null).limit(cap);
+    let fallbackQuery = db
+      .from("articles")
+      .select("*")
+      .is("deleted_at", null)
+      .not("fetched_at", "is", null)
+      .order("fetched_at", { ascending: false })
+      .limit(cap);
     if (excludeIds.length > 0) fallbackQuery = fallbackQuery.notIn("id", excludeIds);
     if (!isUserSubmittedEnabled) fallbackQuery = fallbackQuery.neq("content_kind", "user_article");
     if (effectiveContentKinds && effectiveContentKinds.length > 0) {
@@ -1006,11 +1016,13 @@ export async function getRandomArticlesResurfacing(
   contentKinds?: ArticleContentKind[]
 ): Promise<StoredArticle[]> {
   const effectiveContentKinds = normalizeFeedContentKinds(contentKinds);
-  const cap = Math.min(150, Math.max(40, limit * 12));
+  const cap = Math.min(400, Math.max(40, limit * 12));
   let query = db
     .from("articles")
     .select("*")
     .is("deleted_at", null)
+    .not("fetched_at", "is", null)
+    .order("fetched_at", { ascending: false })
     .limit(cap);
   if (isModerationColumnsAvailable) {
     query = query.eq("moderation_status", "approved");
@@ -1028,7 +1040,13 @@ export async function getRandomArticlesResurfacing(
     isMissingModerationColumn(result.error.message)
   ) {
     isModerationColumnsAvailable = false;
-    let fallbackQuery = db.from("articles").select("*").is("deleted_at", null).limit(cap);
+    let fallbackQuery = db
+      .from("articles")
+      .select("*")
+      .is("deleted_at", null)
+      .not("fetched_at", "is", null)
+      .order("fetched_at", { ascending: false })
+      .limit(cap);
     if (!isUserSubmittedEnabled) fallbackQuery = fallbackQuery.neq("content_kind", "user_article");
     if (effectiveContentKinds && effectiveContentKinds.length > 0) {
       fallbackQuery = fallbackQuery.in("content_kind", effectiveContentKinds);

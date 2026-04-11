@@ -158,7 +158,7 @@ The newspaper aesthetic is the product: blackletter masthead, rotating section l
 
 ### Prerequisites
 
-- **Node.js 20.x** (matches CI)
+- **Node.js 22+** (CI uses 22; see `.nvmrc`)
 - A [Supabase](https://supabase.com) project
 - An [Anthropic](https://console.anthropic.com) API key (for ingest / tagger)
 
@@ -341,6 +341,13 @@ On **Hobby** plan, verify cron behaviour; external schedulers can hit cron URLs 
 **Partial feed sections** — return what exists in the pool instead of blocking on a long synchronous ingest.
 
 ---
+
+## Release hygiene references
+
+- Env matrix: [`docs/env-matrix.md`](docs/env-matrix.md)
+- Security model summary: [`docs/security-model.md`](docs/security-model.md)
+- Contributor workflow: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- Typography variation proposal: [`docs/article-typography-variation-plan.md`](docs/article-typography-variation-plan.md)
 
 ## License
 

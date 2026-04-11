@@ -26,7 +26,24 @@ import {
 import { CreatorBylineLink } from "@/components/articles/CreatorBylineLink";
 import { trackArticleEngagement } from "@/lib/engagement/client";
 import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
+import { ArticleReaderModal } from "@/components/articles/ArticleReaderModal";
 import { ShareMenu } from "@/components/articles/ShareMenu";
+import {
+  buildRssFeedExcerpt,
+  isRssNarrativeArticle,
+  rssHasExtraContentBeyondExcerpt,
+} from "@/lib/articles/rssFeedPreview";
+import { looksLikelyNonEnglishText } from "@/lib/articles/languageHeuristics";
+import { computeAdaptiveExcerptClamp } from "@/lib/articles/rssExcerptClamp";
+
+interface ArticleTranslationPayload {
+  available: boolean;
+  translated: boolean;
+  detectedSourceLanguage: string | null;
+  headline: string;
+  subheadline: string;
+  body: string;
+}
 
 const HERO_IMG_W = 800;
 const HERO_IMG_H = 450;
@@ -39,6 +56,11 @@ const isScrollDepthTelemetryEnabled =
 
 /** When the hero cell is taller than editorial content (grid stretch), offer Sudoku in the slack. */
 const HERO_VERTICAL_GAP_PX = 280;
+/** Cap lines when row is very tall; keep feed cards scannable (hero rows were ~28 lines). */
+const RSS_EXCERPT_MAX_LINES = 14;
+const RSS_EXCERPT_RESERVED_PX = 18;
+/** Gap between clamped excerpt and Read more (matches grid gap on preview wrap). */
+const RSS_PREVIEW_STACK_GAP_PX = 10.4;
 let userApiAllowed = true;
 
 function formatDateLabel(value: string | null | undefined): string | null {
@@ -204,7 +226,7 @@ const iconActionStyle: CSSProperties = {
   padding: "0.25rem",
   background: "transparent",
   border: "none",
-  color: "#1a1a1a",
+  color: "var(--gs-ink-strong)",
   cursor: "pointer",
   borderRadius: "var(--gs-radius-xs)",
 };
@@ -258,6 +280,11 @@ export default function ArticleCard({
   const [recipeRatingLoaded, setRecipeRatingLoaded] = useState(false);
   const [recipeRatingBusy, setRecipeRatingBusy] = useState(false);
   const [recipeRating, setRecipeRating] = useState<number | null>(null);
+  const [readerOpen, setReaderOpen] = useState(false);
+  const [adaptiveExcerptLineClamp, setAdaptiveExcerptLineClamp] = useState<number | null>(null);
+  const [translatedArticle, setTranslatedArticle] =
+    useState<ArticleTranslationPayload | null>(null);
+  const [showOriginalLanguage, setShowOriginalLanguage] = useState(false);
   const [dateInfoOpen, setDateInfoOpen] = useState(false);
   const dateInfoWrapRef = useRef<HTMLDivElement>(null);
   const dateInfoHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -269,6 +296,10 @@ export default function ArticleCard({
   const scrollMilestonesLoggedRef = useRef<Set<number>>(new Set());
   const visibleSinceRef = useRef<number | null>(null);
   const visibleAccumMsRef = useRef(0);
+  const rssExcerptRef = useRef<HTMLParagraphElement>(null);
+  const rssPreviewWrapRef = useRef<HTMLDivElement>(null);
+  const rssReadMoreWrapRef = useRef<HTMLDivElement>(null);
+  const sourceFooterRef = useRef<HTMLElement>(null);
 
   /** Try AI image from prompt first, then deterministic stock photo, then text fallback */
   const [imageStage, setImageStage] = useState<
@@ -278,6 +309,15 @@ export default function ArticleCard({
   useEffect(() => {
     setImageStage("pollinations");
   }, [article.imagePrompt, articleSeed]);
+
+  useEffect(() => {
+    setReaderOpen(false);
+  }, [articleSeed]);
+
+  useEffect(() => {
+    setTranslatedArticle(null);
+    setShowOriginalLanguage(false);
+  }, [articleSeed]);
 
   useEffect(() => {
     if (!isHero) {
@@ -364,6 +404,91 @@ export default function ArticleCard({
   const sourceUrls = uniqueSourceUrls(article.sourceUrls);
   const primarySourceHref =
     sourceUrls[0] ? toClickableSourceUrl(sourceUrls[0]) : "";
+  const isRssNarrativeFeedCard = isRssNarrativeArticle(article);
+  const translationProbeText = useMemo(
+    () =>
+      [article.headline, article.subheadline ?? "", article.body ?? ""]
+        .join(" ")
+        .slice(0, 2400),
+    [article.body, article.headline, article.subheadline]
+  );
+  const shouldAttemptTranslation =
+    isRssNarrativeFeedCard &&
+    translatedArticle == null &&
+    looksLikelyNonEnglishText(translationProbeText);
+  const translationArticleId =
+    "id" in article && article.id ? article.id : articleSeed;
+
+  useEffect(() => {
+    if (!shouldAttemptTranslation) return;
+    const controller = new AbortController();
+
+    (async () => {
+      try {
+        const response = await fetch("/api/articles/translate", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            articleId: translationArticleId,
+            headline: article.headline,
+            subheadline: article.subheadline ?? "",
+            body: article.body ?? "",
+          }),
+          signal: controller.signal,
+        });
+        if (!response.ok) return;
+        const payload = (await response.json()) as ArticleTranslationPayload;
+        if (!payload.available || !payload.translated) return;
+        setTranslatedArticle(payload);
+      } catch {
+        /* best-effort translation only */
+      }
+    })();
+
+    return () => controller.abort();
+  }, [
+    article.body,
+    article.headline,
+    article.subheadline,
+    shouldAttemptTranslation,
+    translationArticleId,
+  ]);
+
+  const displayHeadline =
+    translatedArticle && !showOriginalLanguage ? translatedArticle.headline : article.headline;
+  const displaySubheadline =
+    translatedArticle && !showOriginalLanguage
+      ? translatedArticle.subheadline
+      : article.subheadline ?? "";
+  const displayBody =
+    translatedArticle && !showOriginalLanguage ? translatedArticle.body : article.body ?? "";
+  const translatedLanguageToggleVisible = translatedArticle != null;
+
+  const previewArticle = useMemo(
+    () => ({
+      ...article,
+      headline: displayHeadline,
+      subheadline: displaySubheadline,
+      body: displayBody,
+    }),
+    [article, displayBody, displayHeadline, displaySubheadline]
+  );
+  /** Excerpt length for feed preview + “read more”; keeps DOM smaller than full article bodies. */
+  const rssExcerptMaxChars = isHero ? 1200 : 900;
+  const rssFeedExcerpt = isRssNarrativeFeedCard
+    ? buildRssFeedExcerpt(previewArticle, rssExcerptMaxChars)
+    : "";
+  const shouldUseReaderModal =
+    isRssNarrativeFeedCard &&
+    rssFeedExcerpt.length > 0 &&
+    rssHasExtraContentBeyondExcerpt(previewArticle, rssExcerptMaxChars);
+  const rssPreviewText =
+    shouldUseReaderModal && !/[.…]\s*$/u.test(rssFeedExcerpt)
+      ? `${rssFeedExcerpt}…`
+      : rssFeedExcerpt;
+  const excerptLineClampBaseline = isHero ? 6 : isWide ? 5 : 5;
+  const excerptLineClamp = adaptiveExcerptLineClamp ?? excerptLineClampBaseline;
   const publishedLabel = formatDateLabel(
     "sourcePublishedAt" in article ? article.sourcePublishedAt ?? null : null
   );
@@ -389,6 +514,81 @@ export default function ArticleCard({
   const publishedDetail = formatDateTimeDetail(
     "sourcePublishedAt" in article ? article.sourcePublishedAt ?? null : null
   );
+
+  useEffect(() => {
+    setAdaptiveExcerptLineClamp(null);
+  }, [articleSeed, isHero, isWide, shouldUseReaderModal, rssPreviewText, showOriginalLanguage]);
+
+  useEffect(() => {
+    if (!shouldUseReaderModal) return;
+    const articleEl = articleRef.current;
+    const previewWrapEl = rssPreviewWrapRef.current;
+    const excerptEl = rssExcerptRef.current;
+    if (!articleEl || !previewWrapEl || !excerptEl) return;
+
+    function measureExcerptClamp() {
+      const articleNode = articleRef.current;
+      const previewNode = rssPreviewWrapRef.current;
+      const excerptNode = rssExcerptRef.current;
+      if (!articleNode || !previewNode || !excerptNode) return;
+
+      const readMoreHeight = rssReadMoreWrapRef.current?.offsetHeight ?? 0;
+      const sourceHeight = sourceFooterRef.current?.offsetHeight ?? 0;
+
+      const wrapH = previewNode.clientHeight;
+      const fromPreviewWrap = Math.max(
+        0,
+        wrapH -
+          readMoreHeight -
+          RSS_PREVIEW_STACK_GAP_PX -
+          RSS_EXCERPT_RESERVED_PX
+      );
+
+      const articleRect = articleNode.getBoundingClientRect();
+      const previewRect = previewNode.getBoundingClientRect();
+      const previewTopOffset = Math.max(0, previewRect.top - articleRect.top);
+      const fromArticleBounds = Math.max(
+        0,
+        articleNode.clientHeight -
+          previewTopOffset -
+          readMoreHeight -
+          RSS_PREVIEW_STACK_GAP_PX -
+          sourceHeight -
+          RSS_EXCERPT_RESERVED_PX
+      );
+
+      const availableHeightPx = Math.max(fromPreviewWrap, fromArticleBounds);
+      const computed = window.getComputedStyle(excerptNode);
+      const lineHeightPx = Number.parseFloat(computed.lineHeight) || 22;
+      const nextClamp = computeAdaptiveExcerptClamp({
+        baselineLines: excerptLineClampBaseline,
+        maxLines: RSS_EXCERPT_MAX_LINES,
+        availableHeightPx,
+        lineHeightPx,
+      });
+      setAdaptiveExcerptLineClamp((current) =>
+        current === nextClamp ? current : nextClamp
+      );
+    }
+
+    const ro = new ResizeObserver(() => {
+      requestAnimationFrame(measureExcerptClamp);
+    });
+    ro.observe(articleEl);
+    ro.observe(previewWrapEl);
+    ro.observe(excerptEl);
+    if (contentWrapRef.current) ro.observe(contentWrapRef.current);
+    if (rssReadMoreWrapRef.current) ro.observe(rssReadMoreWrapRef.current);
+    if (sourceFooterRef.current) ro.observe(sourceFooterRef.current);
+    window.addEventListener("resize", measureExcerptClamp);
+    const rafId = requestAnimationFrame(measureExcerptClamp);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      ro.disconnect();
+      window.removeEventListener("resize", measureExcerptClamp);
+    };
+  }, [excerptLineClampBaseline, shouldUseReaderModal]);
 
   const canSave = "id" in article && Boolean(article.id);
   const articleId = "id" in article && article.id ? article.id : null;
@@ -967,25 +1167,33 @@ export default function ArticleCard({
     fontSize: headlineSizePx,
     fontWeight: 700,
     lineHeight: 1.18,
-    color: "#0d0d0d",
+    color: "var(--gs-text)",
     margin: 0,
     letterSpacing: "-0.01em",
   } as const;
 
   const sourceLinkStyle = {
-    color: accentColor,
+    color: "var(--gs-ink-strong)",
     textDecoration: "underline",
-    textDecorationColor: "rgba(0,0,0,0.25)",
+    textDecorationColor: "var(--gs-accent)",
+    textDecorationThickness: "0.08em",
     textUnderlineOffset: "0.12em",
+    transition:
+      "color var(--gs-motion-fast) var(--gs-ease-standard), text-decoration-color var(--gs-motion-fast) var(--gs-ease-standard)",
   } as const;
+
+  const shouldRenderPullQuote =
+    !shouldUseReaderModal && Boolean(article.pullQuote?.trim());
 
   return (
     <article
       ref={articleRef}
       className="gs-card-lift"
       style={{
-        borderRight: !isHero ? "1px solid var(--gs-border)" : "none",
-        borderLeft: isWide ? `3px solid ${accentColor}` : undefined,
+        borderRight: "none",
+        borderLeft: isWide
+          ? `2px solid color-mix(in srgb, ${accentColor} 68%, var(--gs-border))`
+          : undefined,
         padding: isHero
           ? "1.5rem 1.6rem 1.2rem"
           : isWide
@@ -996,11 +1204,21 @@ export default function ArticleCard({
         gap: "0.45rem",
         animation: `fadeSlideIn 0.5s ease ${index * 0.08}s both`,
         background: "var(--gs-surface)",
-        minHeight: isHero ? "100%" : undefined,
+        flex: 1,
+        minHeight: 0,
         boxSizing: "border-box",
       }}
     >
-      <div ref={contentWrapRef} style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
+      <div
+        ref={contentWrapRef}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: "0.45rem",
+          flex: 1,
+          minHeight: 0,
+        }}
+      >
       {articleId && visibleDateline ? (
         <div
           ref={dateInfoWrapRef}
@@ -1161,35 +1379,35 @@ export default function ArticleCard({
               e.currentTarget.style.color = accentColor;
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.color = "#0d0d0d";
+              e.currentTarget.style.color = "var(--gs-text)";
             }}
             onClick={() => {
               markOpen();
               markClickThrough();
             }}
           >
-            {article.headline}
+            {displayHeadline}
           </a>
         ) : (
-          article.headline
+          displayHeadline
         )}
       </h2>
 
       {/* Subheadline / deck */}
-      {article.subheadline && (
+      {displaySubheadline && (
         <p
           style={{
             fontFamily: "'IM Fell English', Georgia, serif",
             fontStyle: "italic",
             fontSize: isHero ? "1.0rem" : "0.86rem",
-            color: "#444",
+            color: "var(--gs-muted)",
             margin: 0,
             lineHeight: 1.42,
             borderBottom: "1px solid var(--gs-border)",
             paddingBottom: "0.45rem",
           }}
         >
-          {article.subheadline}
+          {displaySubheadline}
         </p>
       )}
 
@@ -1200,7 +1418,7 @@ export default function ArticleCard({
           gap: "0.7rem",
           fontSize: "0.64rem",
           fontFamily: "Georgia, serif",
-          color: "#888",
+          color: "var(--gs-muted)",
           letterSpacing: "0.04em",
         }}
       >
@@ -1226,6 +1444,33 @@ export default function ArticleCard({
         />
         {article.location && <span>&middot; {article.location}</span>}
       </div>
+      {translatedLanguageToggleVisible ? (
+        <button
+          type="button"
+          className="gs-interactive gs-focus-ring"
+          onClick={() => setShowOriginalLanguage((value) => !value)}
+          style={{
+            alignSelf: "flex-start",
+            border: "none",
+            background: "transparent",
+            padding: 0,
+            marginTop: "-0.1rem",
+            fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+            fontSize: "0.68rem",
+            color: "var(--gs-muted)",
+            textDecoration: "underline",
+            textUnderlineOffset: "0.16em",
+            cursor: "pointer",
+          }}
+          aria-label={
+            showOriginalLanguage
+              ? "View this article in English"
+              : "View this article in original language"
+          }
+        >
+          {showOriginalLanguage ? "View in English" : "View in original language"}
+        </button>
+      ) : null}
 
       {(canSave || articleId) && (
         <div
@@ -1255,7 +1500,7 @@ export default function ArticleCard({
                 opacity: saveBusy || !saveStatusLoaded ? 0.5 : 1,
                 cursor:
                   saveBusy || !saveStatusLoaded ? "wait" : "pointer",
-                color: "#1a1a1a",
+                color: "var(--gs-ink-strong)",
               }}
             >
               {saved ? <BookmarkFilledIcon /> : <BookmarkOutlineIcon />}
@@ -1274,7 +1519,7 @@ export default function ArticleCard({
                 opacity: likeBusy || !likeStatusLoaded ? 0.45 : 1,
                 cursor:
                   likeBusy || !likeStatusLoaded ? "wait" : "pointer",
-                color: liked ? "#8b2942" : "#1a1a1a",
+                color: liked ? "#b85e76" : "var(--gs-ink-strong)",
               }}
             >
               {liked ? <HeartFilledIcon /> : <HeartOutlineIcon />}
@@ -1297,7 +1542,7 @@ export default function ArticleCard({
               title="Download recipe"
               style={{
                 ...iconActionStyle,
-                color: "#1a472a",
+                  color: "var(--gs-accent)",
               }}
             >
               <DownloadIcon />
@@ -1313,7 +1558,7 @@ export default function ArticleCard({
                   saveMsg.startsWith("Saved") ||
                   saveMsg.startsWith("Removed")
                     ? "#1a472a"
-                    : "#8b4513",
+                    : "#b07833",
               }}
             >
               {saveMsg}
@@ -1448,7 +1693,7 @@ export default function ArticleCard({
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{ display: "block", width: "100%", height: "100%" }}
-                aria-label={`Open source article: ${article.headline}`}
+                aria-label={`Open source article: ${displayHeadline}`}
               >
                 <img
                   src={heroImageSrc}
@@ -1501,7 +1746,7 @@ export default function ArticleCard({
                 alignItems: "center",
                 justifyContent: "center",
                 fontFamily: "Georgia, serif",
-                color: "#999",
+                color: "var(--gs-muted)",
                 fontSize: "0.73rem",
                 fontStyle: "italic",
                 textAlign: "center",
@@ -1517,9 +1762,17 @@ export default function ArticleCard({
       {/* Body copy */}
       <div
         style={{
-          columns: isRecipeCard ? 1 : isHero ? 2 : 1,
+          columns: isRecipeCard ? 1 : shouldUseReaderModal ? 1 : isHero ? 2 : 1,
           columnGap: "1.5rem",
           columnRule: "1px solid var(--gs-border)",
+          ...(shouldUseReaderModal
+            ? {
+                flex: 1,
+                minHeight: 0,
+                display: "flex",
+                flexDirection: "column",
+              }
+            : {}),
         }}
       >
         {isRecipeCard ? (
@@ -1540,8 +1793,8 @@ export default function ArticleCard({
                       aspectRatio: "3 / 2",
                       objectFit: "cover",
                       borderRadius: 6,
-                      border: "1px solid #ddd",
-                      background: "#fff",
+                      border: "1px solid var(--gs-border)",
+                      background: "var(--gs-surface-elevated)",
                       display: "block",
                     }}
                     onError={(e) => {
@@ -1556,24 +1809,24 @@ export default function ArticleCard({
 
             <div style={{ display: "flex", gap: "0.85rem", flexWrap: "wrap" }}>
               {("recipeServings" in article && article.recipeServings != null) ? (
-                <span style={{ fontFamily: "'Playfair Display', Georgia, serif", color: "#1a472a", fontWeight: 700 }}>
+                <span style={{ fontFamily: "'Playfair Display', Georgia, serif", color: "var(--gs-accent)", fontWeight: 700 }}>
                   Serves {article.recipeServings}
                 </span>
               ) : null}
               {("recipePrepTimeMinutes" in article && article.recipePrepTimeMinutes != null) ? (
-                <span style={{ color: "#555" }}>Prep {article.recipePrepTimeMinutes} min</span>
+                <span style={{ color: "var(--gs-muted)" }}>Prep {article.recipePrepTimeMinutes} min</span>
               ) : null}
               {("recipeCookTimeMinutes" in article && article.recipeCookTimeMinutes != null) ? (
-                <span style={{ color: "#555" }}>Cook {article.recipeCookTimeMinutes} min</span>
+                <span style={{ color: "var(--gs-muted)" }}>Cook {article.recipeCookTimeMinutes} min</span>
               ) : null}
             </div>
 
             {("recipeIngredients" in article && (article.recipeIngredients?.length ?? 0) > 0) ? (
               <div style={{ breakInside: "avoid" }}>
-                <div style={{ fontFamily: "'IM Fell English', Georgia, serif", fontWeight: 700, color: "#333", marginBottom: "0.25rem" }}>
+                <div style={{ fontFamily: "'IM Fell English', Georgia, serif", fontWeight: 700, color: "var(--gs-ink-strong)", marginBottom: "0.25rem" }}>
                   Ingredients
                 </div>
-                <ul style={{ margin: 0, paddingLeft: "1.15rem", color: "#1a1a1a", lineHeight: 1.6 }}>
+                <ul style={{ margin: 0, paddingLeft: "1.15rem", color: "var(--gs-text)", lineHeight: 1.6 }}>
                   {(article.recipeIngredients ?? []).map((ing, i) => (
                     <li key={`${ing}-${i}`}>{ing}</li>
                   ))}
@@ -1583,10 +1836,10 @@ export default function ArticleCard({
 
             {("recipeInstructions" in article && (article.recipeInstructions?.length ?? 0) > 0) ? (
               <div style={{ breakInside: "avoid-column" }}>
-                <div style={{ fontFamily: "'IM Fell English', Georgia, serif", fontWeight: 700, color: "#333", marginBottom: "0.25rem" }}>
+                <div style={{ fontFamily: "'IM Fell English', Georgia, serif", fontWeight: 700, color: "var(--gs-ink-strong)", marginBottom: "0.25rem" }}>
                   Instructions
                 </div>
-                <ol style={{ margin: 0, paddingLeft: "1.15rem", color: "#1a1a1a", lineHeight: 1.6 }}>
+                <ol style={{ margin: 0, paddingLeft: "1.15rem", color: "var(--gs-text)", lineHeight: 1.6 }}>
                   {(article.recipeInstructions ?? []).map((step, i) => (
                     <li key={`${step}-${i}`}>{step}</li>
                   ))}
@@ -1594,9 +1847,68 @@ export default function ArticleCard({
               </div>
             ) : null}
           </div>
+        ) : shouldUseReaderModal ? (
+          <div
+            ref={rssPreviewWrapRef}
+            style={{
+              breakInside: "avoid-column",
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1fr)",
+              gap: "0.65rem",
+              width: "100%",
+              minWidth: 0,
+              flex: 1,
+              minHeight: 0,
+            }}
+          >
+            <p
+              ref={rssExcerptRef}
+              className="article-font--classic gs-rss-reader-excerpt"
+              style={{
+                margin: 0,
+                color: "var(--gs-text)",
+                fontFamily: "Georgia, serif",
+                overflow: "hidden",
+                display: "-webkit-box",
+                WebkitLineClamp: excerptLineClamp,
+                WebkitBoxOrient: "vertical",
+                width: "100%",
+                minWidth: 0,
+                WebkitMaskImage:
+                  "linear-gradient(to bottom, rgba(0,0,0,1) 68%, rgba(0,0,0,0.16) 88%, rgba(0,0,0,0) 100%)",
+                maskImage:
+                  "linear-gradient(to bottom, rgba(0,0,0,1) 68%, rgba(0,0,0,0.16) 88%, rgba(0,0,0,0) 100%)",
+              }}
+            >
+              {rssPreviewText}
+            </p>
+            <div ref={rssReadMoreWrapRef} style={{ breakInside: "avoid-column" }}>
+              <button
+                type="button"
+                className="gs-interactive gs-focus-ring gs-read-more-btn"
+                onClick={() => {
+                  markOpen();
+                  setReaderOpen(true);
+                }}
+                style={{
+                  border: "1px solid var(--gs-border-strong)",
+                  background: "var(--gs-surface-soft)",
+                  color: "var(--gs-ink-strong)",
+                  borderRadius: "var(--gs-radius-pill)",
+                  padding: "0.3rem 0.72rem",
+                  fontFamily: "'IM Fell English', Georgia, serif",
+                  fontSize: "0.78rem",
+                  cursor: "pointer",
+                }}
+                aria-label={`Read full article: ${displayHeadline}`}
+              >
+                Read more
+              </button>
+            </div>
+          </div>
         ) : (
           <ArticleBodyMarkdown
-            markdown={article.body ?? ""}
+            markdown={displayBody}
             variant="feed"
             fontPreset="classic"
             readingTimeSecs={
@@ -1606,7 +1918,7 @@ export default function ArticleCard({
         )}
       </div>
 
-      {article.pullQuote?.trim() ? (
+      {shouldRenderPullQuote ? (
         <blockquote
           style={{
             fontFamily: "'Playfair Display', Georgia, serif",
@@ -1629,23 +1941,25 @@ export default function ArticleCard({
 
       {sourceUrls.length > 0 && (
         <footer
+          ref={sourceFooterRef}
           style={{
-            marginTop: "0.65rem",
+            marginTop: shouldUseReaderModal ? "auto" : "0.65rem",
             paddingTop: "0.55rem",
             borderTop: "1px solid var(--gs-border)",
             fontFamily: "Georgia, serif",
             fontSize: isHero ? "0.72rem" : "0.66rem",
-            color: "#666",
+            color: "var(--gs-muted)",
             lineHeight: 1.5,
           }}
         >
-          <span style={{ fontWeight: 600, color: "#555", marginRight: "0.35rem" }}>
+          <span style={{ fontWeight: 600, color: "var(--gs-ink-strong)", marginRight: "0.35rem" }}>
             {sourceUrls.length === 1 ? "Source" : "Sources"}
           </span>
           {sourceUrls.map((u, i) => (
             <Fragment key={`${u}-${i}`}>
-              {i > 0 && <span style={{ color: "#bbb" }}> · </span>}
+              {i > 0 && <span style={{ color: "var(--gs-border-strong)" }}> · </span>}
               <a
+                className="gs-focus-ring gs-feed-source-link"
                 href={toClickableSourceUrl(u)}
                 target="_blank"
                 rel="noopener noreferrer"
@@ -1663,6 +1977,19 @@ export default function ArticleCard({
       )}
       </div>
 
+      {shouldUseReaderModal ? (
+        <ArticleReaderModal
+          open={readerOpen}
+          onClose={() => setReaderOpen(false)}
+          headline={displayHeadline}
+          byline={article.byline}
+          body={displayBody}
+          readingTimeSecs={
+            "readingTimeSecs" in article ? article.readingTimeSecs : undefined
+          }
+        />
+      ) : null}
+
       {isHero && showHeroGapGame && (
         <div
           style={{
@@ -1676,7 +2003,7 @@ export default function ArticleCard({
               fontFamily: "'IM Fell English', Georgia, serif",
               fontStyle: "italic",
               fontSize: "0.72rem",
-              color: "#999",
+              color: "var(--gs-muted)",
               margin: "0 0 0.35rem",
               letterSpacing: "0.04em",
             }}
