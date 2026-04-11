@@ -456,8 +456,8 @@ export function ProfileMenu({
     disabled: boolean;
     onToggle: () => void;
   }) {
-    const trackOn = "#0ea5a4";
-    const trackOff = "#d1d5db";
+    const trackOn = "var(--gs-accent)";
+    const trackOff = "var(--gs-border-strong)";
     const track = checked ? trackOn : trackOff;
     return (
       <button
@@ -472,8 +472,8 @@ export function ProfileMenu({
           width: "100%",
           textAlign: "left",
           padding: "0.75rem 0.85rem",
-          border: "1px solid #e3dfd5",
-          background: "#fff",
+          border: "1px solid var(--gs-border)",
+          background: "var(--gs-surface-elevated)",
           cursor: disabled ? "not-allowed" : "pointer",
           opacity: disabled ? 0.7 : 1,
         }}
@@ -484,7 +484,7 @@ export function ProfileMenu({
               fontFamily: "'Playfair Display', Georgia, serif",
               fontSize: "0.82rem",
               fontWeight: 700,
-              color: "#1a1a1a",
+              color: "var(--gs-ink-strong)",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
@@ -497,7 +497,7 @@ export function ProfileMenu({
               fontFamily: "'IM Fell English', Georgia, serif",
               fontStyle: "italic",
               fontSize: "0.72rem",
-              color: "#7b7b7b",
+              color: "var(--gs-muted)",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
@@ -527,8 +527,8 @@ export function ProfileMenu({
               width: 26,
               height: 26,
               borderRadius: "50%",
-              background: "#fff",
-              boxShadow: "0 2px 8px rgba(0,0,0,0.18)",
+              background: "var(--gs-surface-elevated)",
+              boxShadow: "var(--gs-shadow-control)",
               transition: "left 180ms ease",
             }}
           />
@@ -683,7 +683,7 @@ export function ProfileMenu({
                 display: "block",
                 borderRadius: "50%",
                 objectFit: "cover",
-                border: "1px solid #ccc",
+                border: "1px solid var(--gs-border)",
                 opacity: avatarPainted ? 1 : 0,
                 transition: "opacity 0.28s ease",
               }}
@@ -695,8 +695,9 @@ export function ProfileMenu({
               width: 36,
               height: 36,
               borderRadius: "50%",
-              background: "linear-gradient(135deg, #4a6741, #2c3d28)",
-              color: "#faf8f3",
+              background:
+                "linear-gradient(135deg, var(--gs-avatar-gradient-start), var(--gs-avatar-gradient-end))",
+              color: "var(--gs-surface)",
               fontFamily: "'Playfair Display', Georgia, serif",
               fontSize: "0.72rem",
               fontWeight: 700,
@@ -734,7 +735,7 @@ export function ProfileMenu({
                   fontFamily: "'Playfair Display', Georgia, serif",
                   fontSize: "0.72rem",
                   fontWeight: 700,
-                  color: "#1a1a1a",
+                  color: "var(--gs-ink-strong)",
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
@@ -747,7 +748,7 @@ export function ProfileMenu({
                 style={{
                   fontFamily: "'IM Fell English', Georgia, serif",
                   fontSize: "0.62rem",
-                  color: "#888",
+                  color: "var(--gs-muted)",
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
@@ -759,7 +760,7 @@ export function ProfileMenu({
             </>
           )}
         </span>
-        <span style={{ color: "#999", fontSize: "0.55rem" }} aria-hidden>
+        <span style={{ color: "var(--gs-muted)", fontSize: "0.55rem" }} aria-hidden>
           ▾
         </span>
       </button>
@@ -788,18 +789,18 @@ export function ProfileMenu({
           }}
         >
           {loadError && (
-            <p style={{ color: "#8b4513", fontSize: "0.78rem" }}>{loadError}</p>
+            <p style={{ color: "var(--gs-warning)", fontSize: "0.78rem" }}>{loadError}</p>
           )}
 
           {creator && (
             <div
               style={{
                 fontSize: "0.72rem",
-                color: "#1a472a",
-                background: "#e8f2ec",
+                color: "var(--gs-accent)",
+                background: "var(--gs-surface-soft)",
                 padding: "0.45rem 0.55rem",
                 marginBottom: "0.75rem",
-                border: "1px solid #b8d4c8",
+                border: "1px solid var(--gs-border)",
                 fontFamily: "'IM Fell English', Georgia, serif",
               }}
             >
@@ -818,7 +819,7 @@ export function ProfileMenu({
                 margin: "0 0 0.45rem",
                 letterSpacing: "0.04em",
                 textTransform: "uppercase",
-                color: "#555",
+                color: "var(--gs-muted)",
               }}
             >
               Account
@@ -831,7 +832,7 @@ export function ProfileMenu({
                 fontFamily: "'Playfair Display', Georgia, serif",
                 fontSize: "0.8rem",
                 fontWeight: 700,
-                color: "#1a472a",
+                color: "var(--gs-accent)",
                 textDecoration: "underline",
                 textUnderlineOffset: "3px",
                 marginBottom: "0.55rem",
@@ -848,7 +849,7 @@ export function ProfileMenu({
                 gap: "0.35rem",
                 fontFamily: "'IM Fell English', Georgia, serif",
                 fontSize: "0.72rem",
-                color: "#555",
+                color: "var(--gs-muted)",
                 lineHeight: 1.45,
               }}
             >
@@ -856,7 +857,7 @@ export function ProfileMenu({
                 <Link
                   href="/about"
                   onClick={() => setOpen(false)}
-                  style={{ color: "#1a472a", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: "2px" }}
+                  style={{ color: "var(--gs-accent)", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: "2px" }}
                 >
                   About
                 </Link>
@@ -865,7 +866,7 @@ export function ProfileMenu({
                 <Link
                   href="/privacy"
                   onClick={() => setOpen(false)}
-                  style={{ color: "#1a472a", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: "2px" }}
+                  style={{ color: "var(--gs-accent)", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: "2px" }}
                 >
                   Privacy
                 </Link>
@@ -874,7 +875,7 @@ export function ProfileMenu({
                 <Link
                   href="/terms"
                   onClick={() => setOpen(false)}
-                  style={{ color: "#1a472a", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: "2px" }}
+                  style={{ color: "var(--gs-accent)", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: "2px" }}
                 >
                   Terms
                 </Link>
@@ -883,7 +884,7 @@ export function ProfileMenu({
                 <Link
                   href="/data-deletion"
                   onClick={() => setOpen(false)}
-                  style={{ color: "#1a472a", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: "2px" }}
+                  style={{ color: "var(--gs-accent)", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: "2px" }}
                 >
                   Data deletion
                 </Link>
@@ -892,7 +893,7 @@ export function ProfileMenu({
                 <Link
                   href="/sms-consent"
                   onClick={() => setOpen(false)}
-                  style={{ color: "#1a472a", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: "2px" }}
+                  style={{ color: "var(--gs-accent)", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: "2px" }}
                 >
                   SMS consent
                 </Link>
@@ -910,7 +911,7 @@ export function ProfileMenu({
                 fontFamily: "'Playfair Display', Georgia, serif",
                 fontSize: "0.8rem",
                 fontWeight: 700,
-                color: "#1a472a",
+                color: "var(--gs-accent)",
                 textDecoration: "underline",
                 textUnderlineOffset: "3px",
                 background: "transparent",
@@ -943,7 +944,7 @@ export function ProfileMenu({
                 border: "none",
                 padding: 0,
                 cursor: "pointer",
-                color: "#1a472a",
+                color: "var(--gs-accent)",
                 fontWeight: 600,
                 textDecoration: "underline",
                 textUnderlineOffset: "2px",
@@ -967,7 +968,7 @@ export function ProfileMenu({
                 border: "none",
                 padding: 0,
                 cursor: "pointer",
-                color: "#1a472a",
+                color: "var(--gs-accent)",
                 fontWeight: 600,
                 textDecoration: "underline",
                 textUnderlineOffset: "2px",
@@ -991,7 +992,7 @@ export function ProfileMenu({
                 border: "none",
                 padding: 0,
                 cursor: "pointer",
-                color: "#1a472a",
+                color: "var(--gs-accent)",
                 fontWeight: 600,
                 textDecoration: "underline",
                 textUnderlineOffset: "2px",
@@ -1012,7 +1013,7 @@ export function ProfileMenu({
                 margin: "0 0 0.45rem",
                 letterSpacing: "0.04em",
                 textTransform: "uppercase",
-                color: "#555",
+                color: "var(--gs-muted)",
               }}
             >
               Creator tools
@@ -1025,7 +1026,7 @@ export function ProfileMenu({
                 fontFamily: "'Playfair Display', Georgia, serif",
                 fontSize: "0.8rem",
                 fontWeight: 700,
-                color: "#1a472a",
+                color: "var(--gs-accent)",
                 textDecoration: "underline",
                 textUnderlineOffset: "3px",
               }}
@@ -1042,7 +1043,7 @@ export function ProfileMenu({
                 margin: "0 0 0.45rem",
                 letterSpacing: "0.04em",
                 textTransform: "uppercase",
-                color: "#555",
+                color: "var(--gs-muted)",
               }}
             >
               Profile
@@ -1055,7 +1056,7 @@ export function ProfileMenu({
                     gap: "0.28rem",
                     fontFamily: "'IM Fell English', Georgia, serif",
                     fontSize: "0.78rem",
-                    color: "#4d4d4d",
+                    color: "var(--gs-text)",
                     marginBottom: "0.55rem",
                   }}
                 >
@@ -1084,8 +1085,8 @@ export function ProfileMenu({
                   title="Edit profile"
                   onClick={() => setEditingProfile(true)}
                   style={{
-                    border: "1px solid #1a1a1a",
-                    background: "#fff",
+                    border: "1px solid var(--gs-border-strong)",
+                    background: "var(--gs-surface-elevated)",
                     width: "2rem",
                     height: "2rem",
                     borderRadius: "999px",
@@ -1105,13 +1106,13 @@ export function ProfileMenu({
                   >
                     <path
                       d="M4 20H8L19 9L15 5L4 16V20Z"
-                      stroke="#1a1a1a"
+                      stroke="var(--gs-ink-strong)"
                       strokeWidth="1.8"
                       strokeLinejoin="round"
                     />
                     <path
                       d="M13.5 6.5L17.5 10.5"
-                      stroke="#1a1a1a"
+                      stroke="var(--gs-ink-strong)"
                       strokeWidth="1.8"
                       strokeLinecap="round"
                     />
@@ -1123,7 +1124,7 @@ export function ProfileMenu({
                 <label
                   style={{
                     fontSize: "0.65rem",
-                    color: "#888",
+                    color: "var(--gs-muted)",
                     display: "block",
                     marginBottom: "0.2rem",
                   }}
@@ -1141,14 +1142,16 @@ export function ProfileMenu({
                     boxSizing: "border-box",
                     marginBottom: "0.45rem",
                     padding: "0.35rem 0.45rem",
-                    border: "1px solid #ccc",
+                    border: "1px solid var(--gs-border)",
                     fontSize: "0.85rem",
+                    background: "var(--gs-surface-elevated)",
+                    color: "var(--gs-text)",
                   }}
                 />
                 <label
                   style={{
                     fontSize: "0.65rem",
-                    color: "#888",
+                    color: "var(--gs-muted)",
                     display: "block",
                     marginBottom: "0.2rem",
                   }}
@@ -1159,7 +1162,7 @@ export function ProfileMenu({
                   <p
                     style={{
                       fontSize: "0.65rem",
-                      color: "#777",
+                      color: "var(--gs-muted)",
                       margin: "0 0 0.35rem",
                       lineHeight: 1.35,
                       fontFamily: "'IM Fell English', Georgia, serif",
@@ -1178,7 +1181,7 @@ export function ProfileMenu({
                   <p
                     style={{
                       fontSize: "0.62rem",
-                      color: "#aaa",
+                      color: "var(--gs-muted)",
                       margin: "0 0 0.35rem",
                       lineHeight: 1.35,
                     }}
@@ -1207,16 +1210,17 @@ export function ProfileMenu({
                     boxSizing: "border-box",
                     marginBottom: "0.45rem",
                     padding: "0.35rem 0.45rem",
-                    border: "1px solid #ccc",
+                    border: "1px solid var(--gs-border)",
                     fontSize: "0.85rem",
-                    background: usernameLocked ? "#f0ede6" : undefined,
+                    background: usernameLocked ? "var(--gs-surface-soft)" : "var(--gs-surface-elevated)",
+                    color: "var(--gs-text)",
                     cursor: usernameLocked ? "not-allowed" : undefined,
                   }}
                 />
                 <label
                   style={{
                     fontSize: "0.65rem",
-                    color: "#888",
+                    color: "var(--gs-muted)",
                     display: "block",
                     marginBottom: "0.2rem",
                   }}
@@ -1242,8 +1246,10 @@ export function ProfileMenu({
                       boxSizing: "border-box",
                       marginBottom: "0.45rem",
                       padding: "0.35rem 0.45rem",
-                      border: "1px solid #ccc",
+                      border: "1px solid var(--gs-border)",
                       fontSize: "0.85rem",
+                      background: "var(--gs-surface-elevated)",
+                      color: "var(--gs-text)",
                     }}
                   />
                 ) : (
@@ -1258,8 +1264,10 @@ export function ProfileMenu({
                       boxSizing: "border-box",
                       marginBottom: "0.45rem",
                       padding: "0.35rem 0.45rem",
-                      border: "1px solid #ccc",
+                      border: "1px solid var(--gs-border)",
                       fontSize: "0.85rem",
+                      background: "var(--gs-surface-elevated)",
+                      color: "var(--gs-text)",
                     }}
                   />
                 )}
@@ -1281,8 +1289,8 @@ export function ProfileMenu({
                       if (ok) setEditingProfile(false);
                     }}
                     style={{
-                      background: "#1a1a1a",
-                      color: "#faf8f3",
+                      background: "var(--gs-ink-strong)",
+                      color: "var(--gs-surface)",
                       border: "none",
                       padding: "0.35rem 0.75rem",
                       fontFamily: "'Playfair Display', Georgia, serif",
@@ -1306,8 +1314,9 @@ export function ProfileMenu({
                       });
                     }}
                     style={{
-                      border: "1px solid #777",
-                      background: "#fff",
+                      border: "1px solid var(--gs-border-strong)",
+                      background: "var(--gs-surface-elevated)",
+                      color: "var(--gs-ink-strong)",
                       padding: "0.35rem 0.65rem",
                       fontFamily: "'Playfair Display', Georgia, serif",
                       fontSize: "0.68rem",
@@ -1329,7 +1338,7 @@ export function ProfileMenu({
                 margin: "0 0 0.45rem",
                 letterSpacing: "0.04em",
                 textTransform: "uppercase",
-                color: "#555",
+                color: "var(--gs-muted)",
               }}
             >
               Appearance
@@ -1342,8 +1351,11 @@ export function ProfileMenu({
               disabled={themeSaving}
               onClick={() => void saveThemePreference()}
               style={{
-                border: "1px solid #1a1a1a",
-                background: themePreference === "dark" ? "#161a21" : "#f6f4ee",
+                border: "1px solid var(--gs-border-strong)",
+                background:
+                  themePreference === "dark"
+                    ? "var(--gs-surface)"
+                    : "var(--gs-surface-soft)",
                 width: "3.2rem",
                 height: "1.85rem",
                 borderRadius: "999px",
@@ -1361,9 +1373,12 @@ export function ProfileMenu({
                   width: "1.48rem",
                   height: "1.48rem",
                   borderRadius: "999px",
-                  background: themePreference === "dark" ? "#0d1117" : "#ffffff",
-                  border: "1px solid #bdb8ad",
-                  boxShadow: "0 2px 7px rgba(0,0,0,0.22)",
+                  background:
+                    themePreference === "dark"
+                      ? "var(--gs-surface-elevated)"
+                      : "var(--gs-surface-elevated)",
+                  border: "1px solid var(--gs-border)",
+                  boxShadow: "var(--gs-shadow-control-strong)",
                   transition: "left 180ms ease",
                 }}
               />
@@ -1373,17 +1388,28 @@ export function ProfileMenu({
                 marginLeft: "0.55rem",
                 fontFamily: "'IM Fell English', Georgia, serif",
                 fontSize: "0.72rem",
-                color: "#666",
+                color: "var(--gs-muted)",
               }}
             >
               {themePreference === "dark" ? "Dark mode" : "Light mode"}
             </span>
+            <p
+              style={{
+                margin: "0.45rem 0 0",
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontSize: "0.7rem",
+                color: "var(--gs-muted)",
+                lineHeight: 1.35,
+              }}
+            >
+              Dark mode is experimental. Contrast updates are in progress and tracked for follow-up fixes.
+            </p>
             <div style={{ marginTop: "0.65rem" }}>
               <div
                 style={{
                   fontFamily: "'IM Fell English', Georgia, serif",
                   fontSize: "0.72rem",
-                  color: "#666",
+                  color: "var(--gs-muted)",
                   marginBottom: "0.3rem",
                 }}
               >
@@ -1392,7 +1418,7 @@ export function ProfileMenu({
               <div
                 style={{
                   display: "inline-flex",
-                  border: "1px solid #c8bea9",
+                  border: "1px solid var(--gs-border)",
                   borderRadius: "999px",
                   overflow: "hidden",
                 }}
@@ -1410,8 +1436,10 @@ export function ProfileMenu({
                       onClick={() => void saveWeatherUnitSystem(unit.id)}
                       style={{
                         border: "none",
-                        background: active ? "#1a1a1a" : "#f5f1e8",
-                        color: active ? "#fff" : "#5d5445",
+                        background: active
+                          ? "var(--gs-ink-strong)"
+                          : "var(--gs-surface-soft)",
+                        color: active ? "var(--gs-surface)" : "var(--gs-text)",
                         fontSize: "0.66rem",
                         padding: "0.22rem 0.5rem",
                         cursor: weatherUnitSaving ? "wait" : "pointer",
@@ -1434,7 +1462,7 @@ export function ProfileMenu({
                 margin: "0 0 0.45rem",
                 letterSpacing: "0.04em",
                 textTransform: "uppercase",
-                color: "#555",
+                color: "var(--gs-muted)",
               }}
             >
               Game stats
@@ -1447,7 +1475,7 @@ export function ProfileMenu({
                 fontFamily: "'Playfair Display', Georgia, serif",
                 fontSize: "0.8rem",
                 fontWeight: 700,
-                color: "#1a472a",
+                color: "var(--gs-accent)",
                 textDecoration: "underline",
                 textUnderlineOffset: "3px",
               }}
@@ -1459,7 +1487,7 @@ export function ProfileMenu({
                 style={{
                   fontFamily: "'IM Fell English', Georgia, serif",
                   fontSize: "0.72rem",
-                  color: "#888",
+                  color: "var(--gs-muted)",
                   margin: "0.35rem 0 0",
                   lineHeight: 1.4,
                 }}
@@ -1471,7 +1499,7 @@ export function ProfileMenu({
               <p
                 style={{
                   fontStyle: "italic",
-                  color: "#aaa",
+                  color: "var(--gs-muted)",
                   fontSize: "0.72rem",
                   margin: "0.35rem 0 0",
                 }}
@@ -1489,7 +1517,7 @@ export function ProfileMenu({
                 margin: "0 0 0.45rem",
                 letterSpacing: "0.04em",
                 textTransform: "uppercase",
-                color: "#555",
+                color: "var(--gs-muted)",
               }}
             >
               Saved articles
@@ -1502,7 +1530,7 @@ export function ProfileMenu({
                 fontFamily: "'Playfair Display', Georgia, serif",
                 fontSize: "0.8rem",
                 fontWeight: 700,
-                color: "#1a472a",
+                color: "var(--gs-accent)",
                 textDecoration: "underline",
                 textUnderlineOffset: "3px",
               }}
@@ -1513,7 +1541,7 @@ export function ProfileMenu({
               style={{
                 fontFamily: "'IM Fell English', Georgia, serif",
                 fontSize: "0.72rem",
-                color: "#888",
+                color: "var(--gs-muted)",
                 margin: "0.35rem 0 0",
                 lineHeight: 1.4,
               }}
@@ -1531,7 +1559,7 @@ export function ProfileMenu({
                   margin: "0 0 0.45rem",
                   letterSpacing: "0.04em",
                   textTransform: "uppercase",
-                  color: "#555",
+                  color: "var(--gs-muted)",
                 }}
               >
                 Admin
@@ -1544,7 +1572,7 @@ export function ProfileMenu({
                   fontFamily: "'Playfair Display', Georgia, serif",
                   fontSize: "0.8rem",
                   fontWeight: 700,
-                  color: "#1a472a",
+                  color: "var(--gs-accent)",
                   textDecoration: "underline",
                   textUnderlineOffset: "3px",
                 }}
@@ -1560,7 +1588,7 @@ export function ProfileMenu({
                     fontFamily: "'Playfair Display', Georgia, serif",
                     fontSize: "0.8rem",
                     fontWeight: 700,
-                    color: "#1a472a",
+                    color: "var(--gs-accent)",
                     textDecoration: "underline",
                     textUnderlineOffset: "3px",
                   }}
@@ -1577,7 +1605,7 @@ export function ProfileMenu({
                     fontFamily: "'Playfair Display', Georgia, serif",
                     fontSize: "0.8rem",
                     fontWeight: 700,
-                    color: "#1a472a",
+                    color: "var(--gs-accent)",
                     textDecoration: "underline",
                     textUnderlineOffset: "3px",
                   }}
@@ -1594,7 +1622,7 @@ export function ProfileMenu({
                     fontFamily: "'Playfair Display', Georgia, serif",
                     fontSize: "0.8rem",
                     fontWeight: 700,
-                    color: "#1a472a",
+                    color: "var(--gs-accent)",
                     textDecoration: "underline",
                     textUnderlineOffset: "3px",
                   }}
@@ -1613,7 +1641,7 @@ export function ProfileMenu({
                 margin: "0 0 0.45rem",
                 letterSpacing: "0.04em",
                 textTransform: "uppercase",
-                color: "#555",
+                color: "var(--gs-muted)",
               }}
             >
               Games in feed
@@ -1621,7 +1649,7 @@ export function ProfileMenu({
             <p
               style={{
                 fontSize: "0.72rem",
-                color: "#777",
+                color: "var(--gs-muted)",
                 margin: "0 0 0.5rem",
                 lineHeight: 1.4,
               }}
@@ -1635,7 +1663,7 @@ export function ProfileMenu({
                   justifyContent: "space-between",
                   fontFamily: "'IM Fell English', Georgia, serif",
                   fontSize: "0.68rem",
-                  color: "#6f6758",
+                  color: "var(--gs-muted)",
                   marginBottom: "0.35rem",
                 }}
               >
@@ -1657,7 +1685,7 @@ export function ProfileMenu({
                 onBlur={commitRatioDraft}
                 style={{
                   width: "100%",
-                  accentColor: "#6419db",
+                  accentColor: "var(--gs-accent)",
                   cursor: saving ? "wait" : "pointer",
                 }}
               />
@@ -1669,7 +1697,7 @@ export function ProfileMenu({
                   gridTemplateColumns: "auto 1fr auto 1fr auto",
                   alignItems: "center",
                   gap: "0.25rem",
-                  color: "#6419db",
+                  color: "var(--gs-accent)",
                 }}
               >
                 <span style={{ width: 9, height: 9, borderRadius: "50%", background: "currentColor" }} />
@@ -1683,7 +1711,7 @@ export function ProfileMenu({
                   marginTop: "0.35rem",
                   fontFamily: "'Playfair Display', Georgia, serif",
                   fontSize: "0.72rem",
-                  color: "#1a1a1a",
+                  color: "var(--gs-ink-strong)",
                 }}
               >
                 Games: {(ratioDraft * 100).toFixed(0)}% · Articles:{" "}
@@ -1693,7 +1721,7 @@ export function ProfileMenu({
           </section>
 
           {saveError && (
-            <p style={{ color: "#8b4513", fontSize: "0.75rem" }}>{saveError}</p>
+            <p style={{ color: "var(--gs-warning)", fontSize: "0.75rem" }}>{saveError}</p>
           )}
         </div>
       )}
@@ -1709,7 +1737,7 @@ export function ProfileMenu({
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(9, 7, 4, 0.46)",
+            background: "var(--gs-backdrop-scrim)",
             zIndex: 9999,
             display: "flex",
             alignItems: "center",
@@ -1745,7 +1773,7 @@ export function ProfileMenu({
                     fontSize: "1rem",
                     fontWeight: 800,
                     letterSpacing: "0.02em",
-                    color: "#1a1a1a",
+                    color: "var(--gs-ink-strong)",
                   }}
                 >
                   Game settings
@@ -1756,7 +1784,7 @@ export function ProfileMenu({
                     fontFamily: "'IM Fell English', Georgia, serif",
                     fontStyle: "italic",
                     fontSize: "0.78rem",
-                    color: "#777",
+                    color: "var(--gs-muted)",
                   }}
                 >
                   Toggle which puzzle types can appear in your stream.
@@ -1814,7 +1842,7 @@ export function ProfileMenu({
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(9, 7, 4, 0.46)",
+            background: "var(--gs-backdrop-scrim)",
             zIndex: 9999,
             display: "flex",
             alignItems: "center",
@@ -1865,7 +1893,7 @@ export function ProfileMenu({
               <p
                 style={{
                   margin: "0.25rem 0 0.75rem",
-                  color: "#8b4513",
+                  color: "var(--gs-warning)",
                   fontSize: "0.74rem",
                 }}
               >
@@ -1880,7 +1908,7 @@ export function ProfileMenu({
                     margin: "0.5rem 0 0",
                     fontFamily: "'IM Fell English', Georgia, serif",
                     fontStyle: "italic",
-                    color: "#888",
+                    color: "var(--gs-muted)",
                     fontSize: "0.8rem",
                   }}
                 >
@@ -1898,7 +1926,7 @@ export function ProfileMenu({
                   style={{
                     margin: "0.5rem 0 0",
                     fontFamily: "'IM Fell English', Georgia, serif",
-                    color: "#888",
+                    color: "var(--gs-muted)",
                     fontSize: "0.8rem",
                   }}
                 >
@@ -1914,7 +1942,7 @@ export function ProfileMenu({
                     margin: "0.5rem 0 0",
                     fontFamily: "'IM Fell English', Georgia, serif",
                     fontStyle: "italic",
-                    color: "#888",
+                    color: "var(--gs-muted)",
                     fontSize: "0.8rem",
                   }}
                 >
@@ -1927,7 +1955,7 @@ export function ProfileMenu({
                   style={{
                     margin: "0.5rem 0 0",
                     fontFamily: "'IM Fell English', Georgia, serif",
-                    color: "#888",
+                    color: "var(--gs-muted)",
                     fontSize: "0.8rem",
                   }}
                 >
@@ -1943,7 +1971,7 @@ export function ProfileMenu({
                     margin: "0.5rem 0 0",
                     fontFamily: "'IM Fell English', Georgia, serif",
                     fontStyle: "italic",
-                    color: "#888",
+                    color: "var(--gs-muted)",
                     fontSize: "0.8rem",
                   }}
                 >
@@ -1956,7 +1984,7 @@ export function ProfileMenu({
                   style={{
                     margin: "0.5rem 0 0",
                     fontFamily: "'IM Fell English', Georgia, serif",
-                    color: "#888",
+                    color: "var(--gs-muted)",
                     fontSize: "0.8rem",
                   }}
                 >

@@ -40,6 +40,15 @@ const ANONYMOUS_USER_ID = "anonymous";
 const COLD_START_DEDUPE_MS = 45_000;
 const env = getEnv();
 
+function makeRequestId(request: NextRequest): string {
+  const fromHeader = request.headers.get("x-request-id")?.trim();
+  if (fromHeader) return fromHeader.slice(0, 64);
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `feed-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 type ColdStartPromiseMap = Map<string, Promise<void>>;
 
 function getColdStartJobs(): ColdStartPromiseMap {
@@ -193,6 +202,8 @@ function startColdStartInBackground(input: {
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
+  const requestId = makeRequestId(request);
+  const startedAtMs = Date.now();
 
   const sessionUserId = process.env.AUTH_DISABLED === "1" ? null : await getSessionUserId();
   const userId =
@@ -242,11 +253,35 @@ export async function GET(request: NextRequest) {
     });
 
     if (result.articles.length >= pageSize) {
+      console.info("[/api/feed][profile]", {
+        requestId,
+        userId: userId === ANONYMOUS_USER_ID ? "anonymous" : userId,
+        sectionIndex,
+        pageSize,
+        category,
+        contentKinds,
+        resultCount: result.articles.length,
+        selectionMode: result.selectionMode,
+        outcome: "db_full_page",
+        durationMs: Date.now() - startedAtMs,
+      });
       return NextResponse.json(result);
     }
 
     // Partial page: serve what we have — do not block the UI on live ingest
     if (result.articles.length > 0) {
+      console.info("[/api/feed][profile]", {
+        requestId,
+        userId: userId === ANONYMOUS_USER_ID ? "anonymous" : userId,
+        sectionIndex,
+        pageSize,
+        category,
+        contentKinds,
+        resultCount: result.articles.length,
+        selectionMode: result.selectionMode,
+        outcome: "db_partial_page",
+        durationMs: Date.now() - startedAtMs,
+      });
       return NextResponse.json(result);
     }
 
@@ -255,11 +290,33 @@ export async function GET(request: NextRequest) {
       console.log(
         `[/api/feed] DEV_LIGHT: skipping live ingest (no rows for "${result.category}")`
       );
+      console.info("[/api/feed][profile]", {
+        requestId,
+        userId: userId === ANONYMOUS_USER_ID ? "anonymous" : userId,
+        sectionIndex,
+        pageSize,
+        category,
+        contentKinds,
+        resultCount: 0,
+        outcome: "dev_light_skip_ingest",
+        durationMs: Date.now() - startedAtMs,
+      });
       return NextResponse.json(result);
     }
 
     const canIngestNews = !contentKinds || contentKinds.includes("news");
     if (!canIngestNews) {
+      console.info("[/api/feed][profile]", {
+        requestId,
+        userId: userId === ANONYMOUS_USER_ID ? "anonymous" : userId,
+        sectionIndex,
+        pageSize,
+        category,
+        contentKinds,
+        resultCount: 0,
+        outcome: "non_news_filter_no_ingest",
+        durationMs: Date.now() - startedAtMs,
+      });
       return NextResponse.json(result);
     }
 
@@ -275,6 +332,18 @@ export async function GET(request: NextRequest) {
       pageSize,
     });
 
+    console.info("[/api/feed][profile]", {
+      requestId,
+      userId: userId === ANONYMOUS_USER_ID ? "anonymous" : userId,
+      sectionIndex,
+      pageSize,
+      category: resolvedCategory,
+      contentKinds,
+      resultCount: 0,
+      outcome: "cold_start_queued",
+      coldStartQueued,
+      durationMs: Date.now() - startedAtMs,
+    });
     return NextResponse.json({
       ...result,
       fromCache: true,
@@ -282,7 +351,18 @@ export async function GET(request: NextRequest) {
       coldStartCategory: resolvedCategory,
     });
   } catch (error: unknown) {
-    console.error("[/api/feed] Error:", error);
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.error("[/api/feed] Error", {
+      requestId,
+      userId: userId === ANONYMOUS_USER_ID ? "anonymous" : userId,
+      category,
+      sectionIndex,
+      pageSize,
+      contentKinds,
+      excludeCount: excludeArticleIds.length,
+      message: err.message,
+      stack: err.stack,
+    });
     return apiErrorResponse({
       request,
       status: 500,

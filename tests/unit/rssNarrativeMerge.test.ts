@@ -19,6 +19,7 @@ describe("normalizeRssNarrativeText", () => {
     const input = [
       "hide caption",
       "toggle caption",
+      "toggle captions",
       "1 min read",
       "Scientists scaled a new process to industrial pilots.",
     ].join("\n");
@@ -29,7 +30,16 @@ describe("normalizeRssNarrativeText", () => {
     );
     expect(normalized).not.toContain("hide caption");
     expect(normalized).not.toContain("toggle caption");
+    expect(normalized).not.toContain("toggle captions");
     expect(normalized).not.toContain("1 min read");
+  });
+
+  it("strips toggle captions embedded in a sentence", () => {
+    const normalized = normalizeRssNarrativeText(
+      "The team published results. toggle captions More data arrived next quarter."
+    );
+    expect(normalized.toLowerCase()).not.toContain("toggle caption");
+    expect(normalized).toMatch(/published results/i);
   });
 
   it("removes short credit-only lines", () => {

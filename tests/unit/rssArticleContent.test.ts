@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   fetchArticlePlainTextFromUrl,
+  normalizeArticleNarrative,
   resolveHttpUrlForFetch,
 } from "@/lib/rss/articleContent";
 
@@ -73,6 +74,7 @@ describe("fetchArticlePlainTextFromUrl", () => {
             <article>
               <p>hide caption</p>
               <p>toggle caption</p>
+              <p>toggle captions</p>
               <p>Hanna Barczyk for NPR</p>
               <p>1 min read</p>
               <p>The project restored mangrove wetlands that protect the coast.</p>
@@ -89,6 +91,7 @@ describe("fetchArticlePlainTextFromUrl", () => {
     );
     expect(extracted).not.toContain("hide caption");
     expect(extracted).not.toContain("toggle caption");
+    expect(extracted).not.toContain("toggle captions");
     expect(extracted).not.toContain("for NPR");
   });
 
@@ -108,5 +111,15 @@ describe("fetchArticlePlainTextFromUrl", () => {
     const extracted = await fetchArticlePlainTextFromUrl("mailto:news@example.com");
     expect(extracted).toBeNull();
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("normalizeArticleNarrative", () => {
+  it("returns empty content when only chrome paragraphs remain in strict mode", () => {
+    const normalized = normalizeArticleNarrative(
+      "Sign in to keep reading\n\nToggle captions\n\nRelated stories",
+      false
+    );
+    expect(normalized).toBe("");
   });
 });

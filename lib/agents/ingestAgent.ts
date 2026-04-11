@@ -26,6 +26,7 @@ import {
   chooseRssNarrativeContent,
   normalizeRssNarrativeText,
 } from "@/lib/rss/rssNarrativeMerge";
+import { assessGatedContent } from "@/lib/articles/gatedContentHeuristics";
 import {
   resolveIngestDiscoveryProvider,
   type IngestDiscoveryProvider,
@@ -369,16 +370,7 @@ async function runOverhaulIngest(
         policyRejectReasons[reason] = (policyRejectReasons[reason] ?? 0) + 1;
         return;
       }
-      const toInsert = {
-        ...expanded.article,
-        category,
-        tags: [],
-        sentiment: "uplifting" as const,
-        emotions: [],
-        locale: targetLocale,
-        readingTimeSecs: estimateReadingTime(expanded.article.body),
-        qualityScore: 0.5,
-      };
+      const toInsert = buildIngestInsertArticle(expanded.article, category, targetLocale);
       const inserted = await insertArticles([toInsert]);
       if (inserted.length > 0) {
         allInserted.push(inserted[0]);
@@ -425,16 +417,7 @@ async function runOverhaulIngest(
       attemptedCount += 1;
       expansionCount += 1;
       try {
-        const toInsert = {
-          ...rssArticle,
-          category,
-          tags: [],
-          sentiment: "uplifting" as const,
-          emotions: [],
-          locale: targetLocale,
-          readingTimeSecs: estimateReadingTime(rssArticle.body),
-          qualityScore: 0.5,
-        };
+        const toInsert = buildIngestInsertArticle(rssArticle, category, targetLocale);
         const inserted = await insertArticles([toInsert]);
         if (inserted.length > 0) {
           allInserted.push(inserted[0]);
@@ -753,16 +736,7 @@ async function runLegacyIngest(
         continue;
       }
 
-      const toInsert = {
-        ...article,
-        category,
-        tags: [],
-        sentiment: "uplifting" as const,
-        emotions: [],
-        locale: targetLocale,
-        readingTimeSecs: estimateReadingTime(article.body),
-        qualityScore: 0.5,
-      };
+      const toInsert = buildIngestInsertArticle(article, category, targetLocale);
       const inserted = await insertArticles([toInsert]);
 
       if (inserted.length > 0) {
@@ -1061,6 +1035,41 @@ function buildArticleFromRssCandidate(
 
 function estimateReadingTime(body: string): number {
   return Math.round((body.split(/\s+/).length / 200) * 60);
+}
+
+function buildIngestInsertArticle(
+  article: RawArticle,
+  category: Category,
+  targetLocale: string
+) {
+  const gated = assessGatedContent({
+    headline: article.headline,
+    subheadline: article.subheadline,
+    body: article.body,
+  });
+
+  return {
+    ...article,
+    category,
+    tags: [],
+    sentiment: "uplifting" as const,
+    emotions: [],
+    locale: targetLocale,
+    readingTimeSecs: estimateReadingTime(article.body),
+    qualityScore: gated.isLikelyGated ? gated.suggestedQualityScore : 0.5,
+    moderationStatus: gated.isLikelyGated ? ("flagged" as const) : ("pending" as const),
+    moderationReason: gated.isLikelyGated
+      ? `Likely gated teaser content (${gated.reasons.join(", ") || "heuristic"})`
+      : null,
+    moderationConfidence: gated.isLikelyGated ? Math.min(0.99, gated.score / 5) : null,
+    moderationLabels: gated.isLikelyGated
+      ? {
+          ingest_gated: true,
+          ingest_gated_score: gated.score,
+          ingest_gated_reasons: gated.reasons,
+        }
+      : {},
+  };
 }
 
 function resolveTargetLocale(inputLocale?: string): string {

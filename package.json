@@ -30,6 +30,7 @@
     "articles:strip-inline-html-tags": "tsx -r dotenv/config scripts/articles-strip-inline-html-tags.ts dotenv_config_path=.env.local",
     "articles:reflow-rss-bodies": "tsx -r dotenv/config scripts/articles-reflow-rss-bodies.ts dotenv_config_path=.env.local",
     "articles:backfill-source-body": "tsx -r dotenv/config scripts/articles-backfill-source-body.ts dotenv_config_path=.env.local",
+    "articles:translate-non-english": "tsx -r dotenv/config scripts/articles-translate-non-english.ts dotenv_config_path=.env.local",
     "articles:remove-test-dedup": "tsx -r dotenv/config scripts/cleanup-test-dedup-articles.ts dotenv_config_path=.env.local",
     "validate:supabase-key": "tsx scripts/validate-supabase-public-key.ts",
     "games:word-pool": "tsx scripts/word-pool-ingest.ts",

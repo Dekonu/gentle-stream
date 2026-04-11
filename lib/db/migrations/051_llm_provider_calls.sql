@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS llm_provider_calls (
   route TEXT,
   agent TEXT,
   category TEXT,
-  model TEXT,
+  model TEXT, 
   input_tokens INT NOT NULL DEFAULT 0,
   output_tokens INT NOT NULL DEFAULT 0,
   duration_ms INT,

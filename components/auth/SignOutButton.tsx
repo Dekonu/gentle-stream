@@ -27,8 +27,8 @@ export function SignOutButton() {
       onClick={() => void signOut()}
       style={{
         background: "transparent",
-        border: "1px solid #999",
-        color: "#555",
+        border: "1px solid var(--gs-border-strong)",
+        color: "var(--gs-ink-strong)",
         fontFamily: "'Playfair Display', Georgia, serif",
         fontSize: "0.62rem",
         letterSpacing: "0.06em",

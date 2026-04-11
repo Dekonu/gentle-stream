@@ -23,7 +23,7 @@ export function CreatorBylineLink({
   byline,
   authorUserId,
   linkToProfile = false,
-  accentColor = "#1a472a",
+  accentColor = "var(--gs-accent-foreground)",
   authorPenName,
   authorAvatarUrl,
   authorUsername,
@@ -38,14 +38,14 @@ export function CreatorBylineLink({
 
   const plain: CSSProperties = {
     fontWeight: 600,
-    color: "#555",
+    color: "var(--gs-muted)",
   };
 
   if (!linkToProfile || !authorUserId) {
     return <span style={plain}>{byline.trim() || pen}</span>;
   }
 
-  const nameColor = accentColor;
+  const nameColor = "var(--gs-accent-foreground)";
 
   return (
     <Link
@@ -68,7 +68,7 @@ export function CreatorBylineLink({
           style={{
             borderRadius: "50%",
             objectFit: "cover",
-            border: "1px solid #d4cfc4",
+            border: "1px solid var(--gs-border)",
             flexShrink: 0,
           }}
         />
@@ -78,8 +78,9 @@ export function CreatorBylineLink({
             width: avatarPx,
             height: avatarPx,
             borderRadius: "50%",
-            background: "linear-gradient(135deg, #4a6741, #2c3d28)",
-            color: "#faf8f3",
+            background:
+              "linear-gradient(135deg, var(--gs-avatar-gradient-start), var(--gs-avatar-gradient-end))",
+            color: "var(--gs-surface)",
             fontFamily: "'Playfair Display', Georgia, serif",
             fontSize: variant === "reader" ? "0.62rem" : "0.55rem",
             fontWeight: 700,
@@ -118,7 +119,7 @@ export function CreatorBylineLink({
             style={{
               fontFamily: "system-ui, -apple-system, sans-serif",
               fontSize: handleSize,
-              color: "#888",
+              color: "var(--gs-muted)",
               lineHeight: 1.2,
             }}
           >

@@ -59,8 +59,8 @@ export function GuestProfileMenu() {
             width: 36,
             height: 36,
             borderRadius: "50%",
-            border: "1px solid #d6d1c8",
-            background: "#f8f5ee",
+            border: "1px solid var(--gs-border)",
+            background: "var(--gs-surface-soft)",
             display: "inline-flex",
             alignItems: "center",
             justifyContent: "center",
@@ -74,7 +74,7 @@ export function GuestProfileMenu() {
             fontFamily: "'Playfair Display', Georgia, serif",
             fontSize: "0.72rem",
             fontWeight: 700,
-            color: "#1a1a1a",
+            color: "var(--gs-ink-strong)",
           }}
         >
           Guest
@@ -104,45 +104,65 @@ export function GuestProfileMenu() {
               margin: "0 0 0.65rem",
               fontFamily: "'IM Fell English', Georgia, serif",
               fontSize: "0.76rem",
-              color: "#666",
+              color: "var(--gs-muted)",
             }}
           >
             You are browsing as a guest.
           </p>
           <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
-            <Link href="/about" onClick={() => setOpen(false)} style={{ color: "#1a472a" }}>
+            <Link href="/about" onClick={() => setOpen(false)} style={{ color: "var(--gs-accent)" }}>
               About
             </Link>
-            <Link href="/privacy" onClick={() => setOpen(false)} style={{ color: "#1a472a" }}>
+            <Link href="/privacy" onClick={() => setOpen(false)} style={{ color: "var(--gs-accent)" }}>
               Privacy
             </Link>
-            <Link href="/terms" onClick={() => setOpen(false)} style={{ color: "#1a472a" }}>
+            <Link href="/terms" onClick={() => setOpen(false)} style={{ color: "var(--gs-accent)" }}>
               Terms
             </Link>
-            <Link href="/data-deletion" onClick={() => setOpen(false)} style={{ color: "#1a472a" }}>
+            <Link href="/data-deletion" onClick={() => setOpen(false)} style={{ color: "var(--gs-accent)" }}>
               Data deletion
             </Link>
           </div>
-          <Link
-            href="/login?next=%2F"
-            onClick={() => setOpen(false)}
-            style={{
-              display: "inline-block",
-              marginTop: "0.8rem",
-              padding: "0.42rem 0.72rem",
-              borderRadius: "999px",
-              border: "1px solid #1a1a1a",
-              background: "#1a1a1a",
-              color: "#faf8f3",
-              textDecoration: "none",
-              fontSize: "0.72rem",
-              fontFamily: "'Playfair Display', Georgia, serif",
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-            }}
-          >
-            Sign up
-          </Link>
+          <div style={{ display: "flex", gap: "0.45rem", marginTop: "0.8rem" }}>
+            <Link
+              href="/login?next=%2F"
+              onClick={() => setOpen(false)}
+              style={{
+                display: "inline-block",
+                padding: "0.42rem 0.72rem",
+                borderRadius: "999px",
+                border: "1px solid var(--gs-border-strong)",
+                background: "var(--gs-surface-elevated)",
+                color: "var(--gs-ink-strong)",
+                textDecoration: "none",
+                fontSize: "0.72rem",
+                fontFamily: "'Playfair Display', Georgia, serif",
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+              }}
+            >
+              Sign in
+            </Link>
+            <Link
+              href="/login?next=%2F"
+              onClick={() => setOpen(false)}
+              style={{
+                display: "inline-block",
+                padding: "0.42rem 0.72rem",
+                borderRadius: "999px",
+                border: "1px solid var(--gs-ink-strong)",
+                background: "var(--gs-ink-strong)",
+                color: "var(--gs-surface)",
+                textDecoration: "none",
+                fontSize: "0.72rem",
+                fontFamily: "'Playfair Display', Georgia, serif",
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+              }}
+            >
+              Sign up
+            </Link>
+          </div>
         </div>
       ) : null}
     </div>

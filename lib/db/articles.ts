@@ -16,6 +16,15 @@ const isUserSubmittedEnabled = env.FEED_INCLUDE_USER_SUBMITTED ?? true;
 let isFeedSeenRpcAvailable = true;
 let isModerationColumnsAvailable = true;
 
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientDbFetchFailure(message: string): boolean {
+  const lower = message.toLowerCase();
+  return lower.includes("fetch failed") || lower.includes("network") || lower.includes("timeout");
+}
+
 function normalizeFeedContentKinds(
   contentKinds?: ArticleContentKind[]
 ): ArticleContentKind[] | undefined {
@@ -129,6 +138,10 @@ interface ArticleRow {
   recipe_cook_time_minutes?: number | null;
   recipe_images?: string[] | null;
 }
+
+/** Full row projection for `rowToArticle` — avoids `select('*')` on hot random/resurface paths. */
+const ARTICLE_FEED_ROW_SELECT =
+  "id,headline,subheadline,byline,location,category,body,pull_quote,image_prompt,fetched_at,source_published_at,expires_at,tags,sentiment,emotions,locale,reading_time_secs,quality_score,used_count,tagged,moderation_status,moderation_reason,moderation_confidence,moderation_labels,moderated_at,moderated_by_user_id,fingerprint,source_urls,source,content_kind,author_user_id,submission_id,creator_explicit_tags,recipe_servings,recipe_ingredients,recipe_instructions,recipe_prep_time_minutes,recipe_cook_time_minutes,recipe_images";
 
 function isLikelyTestFixtureRow(row: ArticleRow): boolean {
   const headline = (row.headline ?? "").toLowerCase();
@@ -540,12 +553,12 @@ export async function insertArticles(
     tagged: false,
     ...(isModerationColumnsAvailable
       ? {
-          moderation_status: "pending",
-          moderation_reason: null,
-          moderation_confidence: null,
-          moderation_labels: {},
-          moderated_at: null,
-          moderated_by_user_id: null,
+          moderation_status: a.moderationStatus ?? "pending",
+          moderation_reason: a.moderationReason ?? null,
+          moderation_confidence: a.moderationConfidence ?? null,
+          moderation_labels: a.moderationLabels ?? {},
+          moderated_at: a.moderatedAt ?? null,
+          moderated_by_user_id: a.moderatedByUserId ?? null,
         }
       : {}),
     fingerprint: fp,
@@ -727,7 +740,7 @@ export async function getArticlesForFeed(
 
   let query = db
     .from("articles")
-    .select("*")
+    .select(ARTICLE_FEED_ROW_SELECT)
     .eq("category", category)
     .eq("tagged", true)
     .is("deleted_at", null)
@@ -760,7 +773,7 @@ export async function getArticlesForFeed(
     isModerationColumnsAvailable = false;
     let fallbackQuery = db
       .from("articles")
-      .select("*")
+      .select(ARTICLE_FEED_ROW_SELECT)
       .eq("category", category)
       .eq("tagged", true)
       .is("deleted_at", null)
@@ -820,7 +833,7 @@ export async function getUntaggedArticlesForFeed(
 
   let query = db
     .from("articles")
-    .select("*")
+    .select(ARTICLE_FEED_ROW_SELECT)
     .eq("category", category)
     .eq("tagged", false)
     .is("deleted_at", null)
@@ -853,7 +866,7 @@ export async function getUntaggedArticlesForFeed(
     isModerationColumnsAvailable = false;
     let fallbackQuery = db
       .from("articles")
-      .select("*")
+      .select(ARTICLE_FEED_ROW_SELECT)
       .eq("category", category)
       .eq("tagged", false)
       .is("deleted_at", null)
@@ -956,52 +969,45 @@ export async function getRandomAvailableArticles(
   contentKinds?: ArticleContentKind[]
 ): Promise<StoredArticle[]> {
   const effectiveContentKinds = normalizeFeedContentKinds(contentKinds);
-  const cap = Math.min(400, Math.max(40, limit * 12));
-  let query = db
-    .from("articles")
-    .select("*")
-    .is("deleted_at", null)
-    // DESC would otherwise put NULL fetched_at first and crowd out real rows (CI flakes).
-    .not("fetched_at", "is", null)
-    // Prefer recent ingests, then shuffle client-side.
-    .order("fetched_at", { ascending: false })
-    .limit(cap);
-  if (isModerationColumnsAvailable) {
-    query = query.eq("moderation_status", "approved");
-  }
+  const cap = Math.min(120, Math.max(32, limit * 6));
+  const effectiveExcludeIds = excludeIds.slice(-240);
+  const buildQuery = (includeModerationFilter: boolean) => {
+    let query = db
+      .from("articles")
+      .select(ARTICLE_FEED_ROW_SELECT)
+      .is("deleted_at", null)
+      // DESC would otherwise put NULL fetched_at first and crowd out real rows (CI flakes).
+      .not("fetched_at", "is", null)
+      // Prefer recent ingests, then shuffle client-side.
+      .order("fetched_at", { ascending: false })
+      .limit(cap);
+    if (includeModerationFilter) query = query.eq("moderation_status", "approved");
+    if (effectiveExcludeIds.length > 0) query = query.notIn("id", effectiveExcludeIds);
+    if (!isUserSubmittedEnabled) query = query.neq("content_kind", "user_article");
+    if (effectiveContentKinds && effectiveContentKinds.length > 0) {
+      query = query.in("content_kind", effectiveContentKinds);
+    }
+    return query;
+  };
 
-  if (excludeIds.length > 0) {
-    query = query.notIn("id", excludeIds);
-  }
-  if (!isUserSubmittedEnabled) {
-    query = query.neq("content_kind", "user_article");
-  }
-  if (effectiveContentKinds && effectiveContentKinds.length > 0) {
-    query = query.in("content_kind", effectiveContentKinds);
-  }
-
-  let result = await query;
+  let result = await buildQuery(isModerationColumnsAvailable);
   if (
     result.error &&
     isModerationColumnsAvailable &&
     isMissingModerationColumn(result.error.message)
   ) {
     isModerationColumnsAvailable = false;
-    let fallbackQuery = db
-      .from("articles")
-      .select("*")
-      .is("deleted_at", null)
-      .not("fetched_at", "is", null)
-      .order("fetched_at", { ascending: false })
-      .limit(cap);
-    if (excludeIds.length > 0) fallbackQuery = fallbackQuery.notIn("id", excludeIds);
-    if (!isUserSubmittedEnabled) fallbackQuery = fallbackQuery.neq("content_kind", "user_article");
-    if (effectiveContentKinds && effectiveContentKinds.length > 0) {
-      fallbackQuery = fallbackQuery.in("content_kind", effectiveContentKinds);
-    }
-    result = await fallbackQuery;
+    result = await buildQuery(false);
   }
-  if (result.error) throw new Error(`getRandomAvailableArticles: ${result.error.message}`);
+  if (result.error && isTransientDbFetchFailure(result.error.message)) {
+    console.warn("[getRandomAvailableArticles] transient query failure; retrying once:", result.error.message);
+    await sleepMs(75);
+    result = await buildQuery(isModerationColumnsAvailable);
+  }
+  if (result.error) {
+    console.error("[getRandomAvailableArticles] returning empty set after DB error:", result.error.message);
+    return [];
+  }
   const safeRows = filterApprovedModerationRows(filterTestFixtureRows(result.data as ArticleRow[]));
   const rows = await hydrateCreatorAuthorDisplay(safeRows.map(rowToArticle));
   shuffleInPlace(rows);
@@ -1016,45 +1022,41 @@ export async function getRandomArticlesResurfacing(
   contentKinds?: ArticleContentKind[]
 ): Promise<StoredArticle[]> {
   const effectiveContentKinds = normalizeFeedContentKinds(contentKinds);
-  const cap = Math.min(400, Math.max(40, limit * 12));
-  let query = db
-    .from("articles")
-    .select("*")
-    .is("deleted_at", null)
-    .not("fetched_at", "is", null)
-    .order("fetched_at", { ascending: false })
-    .limit(cap);
-  if (isModerationColumnsAvailable) {
-    query = query.eq("moderation_status", "approved");
-  }
-  if (!isUserSubmittedEnabled) {
-    query = query.neq("content_kind", "user_article");
-  }
-  if (effectiveContentKinds && effectiveContentKinds.length > 0) {
-    query = query.in("content_kind", effectiveContentKinds);
-  }
-  let result = await query;
+  const cap = Math.min(120, Math.max(32, limit * 6));
+  const buildQuery = (includeModerationFilter: boolean) => {
+    let query = db
+      .from("articles")
+      .select(ARTICLE_FEED_ROW_SELECT)
+      .is("deleted_at", null)
+      .not("fetched_at", "is", null)
+      .order("fetched_at", { ascending: false })
+      .limit(cap);
+    if (includeModerationFilter) query = query.eq("moderation_status", "approved");
+    if (!isUserSubmittedEnabled) query = query.neq("content_kind", "user_article");
+    if (effectiveContentKinds && effectiveContentKinds.length > 0) {
+      query = query.in("content_kind", effectiveContentKinds);
+    }
+    return query;
+  };
+  let result = await buildQuery(isModerationColumnsAvailable);
   if (
     result.error &&
     isModerationColumnsAvailable &&
     isMissingModerationColumn(result.error.message)
   ) {
     isModerationColumnsAvailable = false;
-    let fallbackQuery = db
-      .from("articles")
-      .select("*")
-      .is("deleted_at", null)
-      .not("fetched_at", "is", null)
-      .order("fetched_at", { ascending: false })
-      .limit(cap);
-    if (!isUserSubmittedEnabled) fallbackQuery = fallbackQuery.neq("content_kind", "user_article");
-    if (effectiveContentKinds && effectiveContentKinds.length > 0) {
-      fallbackQuery = fallbackQuery.in("content_kind", effectiveContentKinds);
-    }
-    result = await fallbackQuery;
+    result = await buildQuery(false);
+  }
+  if (result.error && isTransientDbFetchFailure(result.error.message)) {
+    console.warn("[getRandomArticlesResurfacing] transient query failure; retrying once:", result.error.message);
+    await sleepMs(75);
+    result = await buildQuery(isModerationColumnsAvailable);
   }
 
-  if (result.error) throw new Error(`getRandomArticlesResurfacing: ${result.error.message}`);
+  if (result.error) {
+    console.error("[getRandomArticlesResurfacing] returning empty set after DB error:", result.error.message);
+    return [];
+  }
   const safeRows = filterApprovedModerationRows(filterTestFixtureRows(result.data as ArticleRow[]));
   const rows = await hydrateCreatorAuthorDisplay(safeRows.map(rowToArticle));
   shuffleInPlace(rows);

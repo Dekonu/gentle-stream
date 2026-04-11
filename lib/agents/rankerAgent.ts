@@ -21,7 +21,7 @@ import {
 } from "../db/articles";
 import {
   getOrCreateUserProfile,
-  listRecentlySeenArticleIds,
+  listSeenArticleIdsForExclusion,
   markArticlesSeen,
 } from "../db/users";
 import { getUserAffinityRows } from "../db/engagement";
@@ -35,9 +35,15 @@ import type { Category } from "../constants";
 import { CATEGORIES, DEFAULT_CATEGORY_WEIGHTS, RECIPE_CATEGORY } from "../constants";
 import { buildAffinityIndex, scoreArticleWithEngagement } from "../feed/recommendationScore";
 import { captureException } from "@/lib/observability";
+import { getEnv } from "@/lib/env";
 
 /** Section label when articles come from multiple categories (random backfill). */
 const MIXED_SECTION_LABEL = "Mixed";
+const SOFT_SEEN_TTL_MS = 20 * 60 * 1000;
+const RANDOM_FALLBACK_EXCLUDE_CAP = 240;
+const env = getEnv();
+const hybridSeenEnabled =
+  env.FEED_HYBRID_SEEN_ENABLED == null ? true : env.FEED_HYBRID_SEEN_ENABLED;
 
 export interface RankedFeedResult {
   articles: StoredArticle[];
@@ -125,19 +131,24 @@ export async function collectAcrossBuckets(
     bucketOrderOverride && bucketOrderOverride.length > 0
       ? bucketOrderOverride
       : feedBucketsForTraversal(profile, sectionIndex, contentKinds);
+  if (order.length === 0) return [];
+
+  // Parallel per-bucket fetches: sequential awaits stacked latency across many categories.
+  const perBucketLimit = Math.max(
+    8,
+    Math.ceil(poolSize / order.length) + 8
+  );
+  const batches = await Promise.all(
+    order.map((cat) =>
+      fetchFn(cat, perBucketLimit, excludeIds, contentKinds, userId)
+    )
+  );
+
   const collected: StoredArticle[] = [];
   const collectedIds = new Set<string>();
-
-  for (const cat of order) {
+  for (let i = 0; i < order.length; i++) {
     if (collected.length >= poolSize) break;
-    const remaining = poolSize - collected.length;
-    const batch = await fetchFn(
-      cat,
-      remaining + 8,
-      excludeIds,
-      contentKinds,
-      userId
-    );
+    const batch = batches[i] ?? [];
     for (const article of batch) {
       if (collectedIds.has(article.id)) continue;
       collectedIds.add(article.id);
@@ -209,6 +220,7 @@ function pickRotatedPage(
 export async function getRankedFeed(
   options: RankOptions
 ): Promise<RankedFeedResult> {
+  const startedAtMs = Date.now();
   const {
     userId,
     category,
@@ -245,15 +257,21 @@ export async function getRankedFeed(
 
   // Fetch a candidate pool (fetch more than needed so we can rank and trim)
   const poolSize = pageSize * 5;
+  let candidateQueryCount = 0;
   let candidates = category
-    ? await getArticlesForFeed(
+    ? await (async () => {
+        candidateQueryCount += 1;
+        return getArticlesForFeed(
         category,
         poolSize,
         effectiveExcludeIds,
         contentKinds ?? undefined,
         userId
-      )
-    : await collectAcrossBuckets(
+      );
+      })()
+    : await (async () => {
+        candidateQueryCount += 1;
+        return collectAcrossBuckets(
         profile,
         userId,
         sectionIndex,
@@ -263,18 +281,24 @@ export async function getRankedFeed(
         getArticlesForFeed,
         affinityBucketOrder
       );
+      })();
 
   // If nothing is tagged yet (tagger backlog / 429), still show fresh ingested rows
   if (candidates.length === 0) {
     candidates = category
-      ? await getUntaggedArticlesForFeed(
+      ? await (async () => {
+          candidateQueryCount += 1;
+          return getUntaggedArticlesForFeed(
           category,
           poolSize,
           effectiveExcludeIds,
           contentKinds ?? undefined,
           userId
-        )
-      : await collectAcrossBuckets(
+        );
+        })()
+      : await (async () => {
+          candidateQueryCount += 1;
+          return collectAcrossBuckets(
           profile,
           userId,
           sectionIndex,
@@ -284,6 +308,7 @@ export async function getRankedFeed(
           getUntaggedArticlesForFeed,
           affinityBucketOrder
         );
+        })();
   }
 
   let selectionMode: FeedSelectionMode = "profile_ranked";
@@ -293,14 +318,28 @@ export async function getRankedFeed(
 
   // No profile-based recommendations for this section — pull from the whole catalog
   if (candidates.length === 0) {
+    const recentlySeen = hybridSeenEnabled
+      ? await listSeenArticleIdsForExclusion({
+          userId,
+          limit: RANDOM_FALLBACK_EXCLUDE_CAP,
+          softSeenSource: "ranker_soft",
+          softSeenTtlMs: SOFT_SEEN_TTL_MS,
+        })
+      : await listSeenArticleIdsForExclusion({
+          userId,
+          limit: RANDOM_FALLBACK_EXCLUDE_CAP,
+          softSeenSource: "__unused__",
+          softSeenTtlMs: Number.MAX_SAFE_INTEGER,
+        });
     const randomExcludeIds = Array.from(
-      new Set([...effectiveExcludeIds, ...(await listRecentlySeenArticleIds(userId, 800))])
-    );
+      new Set([...effectiveExcludeIds, ...recentlySeen])
+    ).slice(-RANDOM_FALLBACK_EXCLUDE_CAP);
     candidates = await getRandomAvailableArticles(
       poolSize,
       randomExcludeIds,
       contentKinds ?? undefined
     );
+    candidateQueryCount += 1;
     if (candidates.length > 0) {
       selectionMode = "random_pool";
       sectionCategoryLabel = MIXED_SECTION_LABEL;
@@ -311,6 +350,7 @@ export async function getRankedFeed(
   // Still empty (e.g. user has seen everything in the sampled pool) — allow repeats
   if (candidates.length === 0) {
     candidates = await getRandomArticlesResurfacing(poolSize, contentKinds ?? undefined);
+    candidateQueryCount += 1;
     if (candidates.length > 0) {
       selectionMode = "random_resurface";
       sectionCategoryLabel = MIXED_SECTION_LABEL;
@@ -343,10 +383,22 @@ export async function getRankedFeed(
   // Mark as seen so they don't repeat in this user's feed
   if (markSeen && selected.length > 0) {
     await markArticlesSeen(userId, selected.map((a) => a.id), {
-      source: "ranker",
+      source: hybridSeenEnabled ? "ranker_soft" : "ranker",
       sectionIndex,
+      trustArticleIds: true,
     });
   }
+
+  console.info("[ranker-feed-metrics]", {
+    userId,
+    sectionIndex,
+    pageSize,
+    candidateQueryCount,
+    selectedCount: selected.length,
+    selectionMode,
+    parallelBucketFetch: category == null,
+    durationMs: Date.now() - startedAtMs,
+  });
 
   return {
     articles: selected,

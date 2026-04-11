@@ -250,9 +250,10 @@ export default function ArticleCard({
   const isRecipeCard =
     "contentKind" in article && article.contentKind === "recipe";
   const accentColor = isRecipeCard
-    ? "#1a472a"
+    ? "var(--gs-accent)"
     : CATEGORY_COLORS[article.category as keyof typeof CATEGORY_COLORS] ||
-      "#1a1a1a";
+      "var(--gs-ink-strong)";
+  const accentTextColor = "var(--gs-accent-foreground)";
 
   const isHero = layout === "hero";
   const isWide = layout === "wide";
@@ -273,8 +274,6 @@ export default function ArticleCard({
   const [saveStatusLoaded, setSaveStatusLoaded] = useState(false);
   const [liked, setLiked] = useState(false);
   const [likeBusy, setLikeBusy] = useState(false);
-  /** 401 → hide like (not signed in). */
-  const [showLikeButton, setShowLikeButton] = useState(false);
   const [likeStatusLoaded, setLikeStatusLoaded] = useState(false);
   const [showRecipeRating, setShowRecipeRating] = useState(false);
   const [recipeRatingLoaded, setRecipeRatingLoaded] = useState(false);
@@ -293,6 +292,8 @@ export default function ArticleCard({
   const read30LoggedRef = useRef(false);
   const read75LoggedRef = useRef(false);
   const dwellLoggedRef = useRef(false);
+  const readConfirmedLoggedRef = useRef(false);
+  const readConfirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollMilestonesLoggedRef = useRef<Set<number>>(new Set());
   const visibleSinceRef = useRef<number | null>(null);
   const visibleAccumMsRef = useRef(0);
@@ -592,6 +593,12 @@ export default function ArticleCard({
 
   const canSave = "id" in article && Boolean(article.id);
   const articleId = "id" in article && article.id ? article.id : null;
+  const promptSignIn = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const nextPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    const loginUrl = `/login?next=${encodeURIComponent(nextPath)}`;
+    window.location.assign(loginUrl);
+  }, []);
   const engagementContext = useMemo(
     () => ({
       source: "feed" as const,
@@ -611,7 +618,8 @@ export default function ArticleCard({
         | "scroll_depth"
         | "read_30s"
         | "read_75pct"
-        | "read_dwell",
+        | "read_dwell"
+        | "read_confirmed",
       eventValue?: number
     ) => {
       if (!userApiAllowed) return;
@@ -672,10 +680,32 @@ export default function ArticleCard({
     read30LoggedRef.current = false;
     read75LoggedRef.current = false;
     dwellLoggedRef.current = false;
+    readConfirmedLoggedRef.current = false;
     scrollMilestonesLoggedRef.current = new Set();
     visibleSinceRef.current = null;
     visibleAccumMsRef.current = 0;
   }, [articleId]);
+
+  useEffect(() => {
+    if (readConfirmTimerRef.current != null) {
+      clearTimeout(readConfirmTimerRef.current);
+      readConfirmTimerRef.current = null;
+    }
+    if (!readerOpen || !articleId || readConfirmedLoggedRef.current) return;
+    readConfirmTimerRef.current = setTimeout(() => {
+      readConfirmTimerRef.current = null;
+      if (readConfirmedLoggedRef.current) return;
+      readConfirmedLoggedRef.current = true;
+      emitEngagement("read_confirmed", 3);
+    }, 3000);
+
+    return () => {
+      if (readConfirmTimerRef.current != null) {
+        clearTimeout(readConfirmTimerRef.current);
+        readConfirmTimerRef.current = null;
+      }
+    };
+  }, [articleId, emitEngagement, readerOpen]);
 
   useEffect(() => {
     if (!isRecipeCard) {
@@ -744,13 +774,11 @@ export default function ArticleCard({
 
   useEffect(() => {
     if (!userApiAllowed) {
-      setShowLikeButton(false);
       setLikeStatusLoaded(true);
       setLiked(false);
       return;
     }
     if (!articleId) {
-      setShowLikeButton(false);
       setLikeStatusLoaded(false);
       setLiked(false);
       return;
@@ -766,12 +794,10 @@ export default function ArticleCard({
         if (cancelled) return;
         if (res.status === 401) {
           userApiAllowed = false;
-          setShowLikeButton(false);
           setLikeStatusLoaded(true);
           setLiked(false);
           return;
         }
-        setShowLikeButton(true);
         if (res.ok) {
           const j = (await res.json()) as { liked?: boolean };
           setLiked(Boolean(j.liked));
@@ -780,7 +806,6 @@ export default function ArticleCard({
         }
       } catch {
         if (!cancelled) {
-          setShowLikeButton(true);
           setLiked(false);
         }
       } finally {
@@ -934,7 +959,11 @@ export default function ArticleCard({
   }, [articleId]);
 
   const toggleLike = useCallback(async () => {
-    if (!userApiAllowed || !articleId || likeBusy || !likeStatusLoaded) return;
+    if (!articleId || likeBusy || !likeStatusLoaded) return;
+    if (!userApiAllowed) {
+      promptSignIn();
+      return;
+    }
     setLikeBusy(true);
     try {
       if (liked) {
@@ -944,7 +973,6 @@ export default function ArticleCard({
         );
         if (res.status === 401) {
           userApiAllowed = false;
-          setShowLikeButton(false);
           setLiked(false);
           return;
         }
@@ -961,7 +989,6 @@ export default function ArticleCard({
         });
         if (res.status === 401) {
           userApiAllowed = false;
-          setShowLikeButton(false);
           setLiked(false);
           return;
         }
@@ -970,17 +997,14 @@ export default function ArticleCard({
     } finally {
       setLikeBusy(false);
     }
-  }, [articleId, article.headline, liked, likeBusy, likeStatusLoaded]);
+  }, [articleId, article.headline, liked, likeBusy, likeStatusLoaded, promptSignIn]);
 
   const toggleSave = useCallback(async () => {
-    if (
-      !userApiAllowed ||
-      !canSave ||
-      !("id" in article) ||
-      !article.id ||
-      saveBusy ||
-      !saveStatusLoaded
-    ) {
+    if (!canSave || !("id" in article) || !article.id || saveBusy || !saveStatusLoaded)
+      return;
+    if (!userApiAllowed) {
+      setSaveMsg("Sign in to save articles.");
+      promptSignIn();
       return;
     }
     setSaveBusy(true);
@@ -1066,6 +1090,7 @@ export default function ArticleCard({
     saveBusy,
     saveStatusLoaded,
     sourceUrls,
+    promptSignIn,
   ]);
 
   const rateRecipe = useCallback(
@@ -1348,7 +1373,7 @@ export default function ArticleCard({
           style={{
             display: "inline-block",
             background: accentColor,
-            color: "#fff",
+            color: "var(--gs-surface)",
             fontSize: "0.6rem",
             fontFamily: "'Playfair Display', Georgia, serif",
             letterSpacing: "0.13em",
@@ -1376,7 +1401,7 @@ export default function ArticleCard({
               textDecoration: "none",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.color = accentColor;
+              e.currentTarget.style.color = accentTextColor;
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.color = "var(--gs-text)";
@@ -1506,7 +1531,7 @@ export default function ArticleCard({
               {saved ? <BookmarkFilledIcon /> : <BookmarkOutlineIcon />}
             </button>
           ) : null}
-          {showLikeButton && canSave ? (
+          {Boolean(articleId) ? (
             <button
               className="gs-interactive gs-focus-ring"
               type="button"
@@ -1519,7 +1544,7 @@ export default function ArticleCard({
                 opacity: likeBusy || !likeStatusLoaded ? 0.45 : 1,
                 cursor:
                   likeBusy || !likeStatusLoaded ? "wait" : "pointer",
-                color: liked ? "#b85e76" : "var(--gs-ink-strong)",
+                color: liked ? "var(--gs-like-active)" : "var(--gs-ink-strong)",
               }}
             >
               {liked ? <HeartFilledIcon /> : <HeartOutlineIcon />}
@@ -1557,8 +1582,8 @@ export default function ArticleCard({
                 color:
                   saveMsg.startsWith("Saved") ||
                   saveMsg.startsWith("Removed")
-                    ? "#1a472a"
-                    : "#b07833",
+                ? "var(--gs-success)"
+                : "var(--gs-warning)",
               }}
             >
               {saveMsg}
@@ -1591,7 +1616,7 @@ export default function ArticleCard({
               display: "inline-flex",
               alignItems: "center",
               maxWidth: "100%",
-              filter: "drop-shadow(0 2px 8px rgba(0, 0, 0, 0.07))",
+              filter: "var(--gs-recipe-drop-shadow)",
             }}
           >
             <div
@@ -1600,8 +1625,9 @@ export default function ArticleCard({
                 width: "2.35rem",
                 height: "2.35rem",
                 borderRadius: "50%",
-                background: "linear-gradient(145deg, #6b4c9c 0%, #4a3270 100%)",
-                color: "#fff",
+                background:
+                  "linear-gradient(145deg, var(--gs-recipe-badge-start) 0%, var(--gs-recipe-badge-end) 100%)",
+                color: "var(--gs-surface)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -1611,7 +1637,7 @@ export default function ArticleCard({
                 fontWeight: 700,
                 flexShrink: 0,
                 zIndex: 1,
-                boxShadow: "0 1px 3px rgba(0, 0, 0, 0.12)",
+                boxShadow: "var(--gs-recipe-badge-shadow)",
               }}
               title={recipeRating == null ? "Not rated yet" : `Your rating: ${recipeRating} of 5`}
             >
@@ -1632,7 +1658,7 @@ export default function ArticleCard({
                 background: "var(--gs-surface)",
                 borderRadius: "999px",
                 border: "1px solid var(--gs-border)",
-                boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.65)",
+                boxShadow: "inset 0 1px 0 var(--gs-inset-highlight)",
               }}
             >
               {[1, 2, 3, 4, 5].map((value) => {
@@ -1654,10 +1680,10 @@ export default function ArticleCard({
                         recipeRatingBusy || !recipeRatingLoaded
                           ? "wait"
                           : "pointer",
-                      color: filled ? "#d4a012" : "var(--gs-border)",
-                      opacity: filled ? 1 : 0.42,
+                      opacity: 1,
+                      color: filled ? "var(--gs-rating-filled)" : "var(--gs-icon-muted)",
                       textShadow: filled
-                        ? "0 0.5px 0 rgba(0,0,0,0.06)"
+                        ? "var(--gs-icon-text-shadow)"
                         : undefined,
                     }}
                     aria-label={`Rate ${value} out of 5 stars`}
@@ -1683,7 +1709,8 @@ export default function ArticleCard({
             overflow: "hidden",
             border: "1px solid var(--gs-border)",
             borderRadius: "var(--gs-radius-sm)",
-            background: "linear-gradient(135deg, #e8e4da 0%, #d4cfc4 100%)",
+            background:
+              "linear-gradient(135deg, var(--gs-image-placeholder-start) 0%, var(--gs-image-placeholder-end) 100%)",
           }}
         >
           {heroImageSrc ? (
@@ -1874,10 +1901,8 @@ export default function ArticleCard({
                 WebkitBoxOrient: "vertical",
                 width: "100%",
                 minWidth: 0,
-                WebkitMaskImage:
-                  "linear-gradient(to bottom, rgba(0,0,0,1) 68%, rgba(0,0,0,0.16) 88%, rgba(0,0,0,0) 100%)",
-                maskImage:
-                  "linear-gradient(to bottom, rgba(0,0,0,1) 68%, rgba(0,0,0,0.16) 88%, rgba(0,0,0,0) 100%)",
+                WebkitMaskImage: "var(--gs-text-fade-mask)",
+                maskImage: "var(--gs-text-fade-mask)",
               }}
             >
               {rssPreviewText}
@@ -1888,6 +1913,7 @@ export default function ArticleCard({
                 className="gs-interactive gs-focus-ring gs-read-more-btn"
                 onClick={() => {
                   markOpen();
+                  markClickThrough();
                   setReaderOpen(true);
                 }}
                 style={{
@@ -1925,7 +1951,7 @@ export default function ArticleCard({
             fontStyle: "italic",
             fontSize: "1.02rem",
             fontWeight: 600,
-            color: accentColor,
+            color: accentTextColor,
             borderTop: `2px solid ${accentColor}`,
             borderBottom: `2px solid ${accentColor}`,
             padding: "0.55rem 0.5rem",

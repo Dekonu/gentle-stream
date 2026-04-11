@@ -108,7 +108,7 @@ export default function NewsSection({
             ...hairlineGrid,
           }}
         >
-          <div style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
+          <div className="news-column-shell" style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
             <div style={feedCardStretch}>
               <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "standard"} index={0} sectionIndex={sectionIndex} />
             </div>
@@ -116,7 +116,7 @@ export default function NewsSection({
               <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
             ) : null}
           </div>
-          <div style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
+          <div className="news-column-shell" style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
             <div style={feedCardStretch}>
               <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "standard"} index={1} sectionIndex={sectionIndex} />
             </div>
@@ -140,7 +140,7 @@ export default function NewsSection({
             ...hairlineGrid,
           }}
         >
-          <div style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
+          <div className="news-column-shell" style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
             <div style={feedCardStretch}>
               <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "hero"} index={0} sectionIndex={sectionIndex} />
             </div>
@@ -148,7 +148,7 @@ export default function NewsSection({
               <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
             ) : null}
           </div>
-          <div style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
+          <div className="news-column-shell" style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
             <div style={feedCardStretch}>
               <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "standard"} index={1} sectionIndex={sectionIndex} />
             </div>
@@ -156,7 +156,7 @@ export default function NewsSection({
               <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
             ) : null}
           </div>
-          <div style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
+          <div className="news-column-shell" style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
             <div style={feedCardStretch}>
               <ArticleCard article={articles[2]} layout={plan.layouts[2] ?? "standard"} index={2} sectionIndex={sectionIndex} />
             </div>
@@ -180,7 +180,7 @@ export default function NewsSection({
             ...hairlineGrid,
           }}
         >
-          <div style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
+          <div className="news-column-shell" style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
             <div style={feedCardStretch}>
               <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "standard"} index={0} sectionIndex={sectionIndex} />
             </div>
@@ -188,7 +188,7 @@ export default function NewsSection({
               <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
             ) : null}
           </div>
-          <div style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
+          <div className="news-column-shell" style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
             <div style={feedCardStretch}>
               <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "wide"} index={1} sectionIndex={sectionIndex} />
             </div>
@@ -196,7 +196,7 @@ export default function NewsSection({
               <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
             ) : null}
           </div>
-          <div style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
+          <div className="news-column-shell" style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
             <div style={feedCardStretch}>
               <ArticleCard article={articles[2]} layout={plan.layouts[2] ?? "standard"} index={2} sectionIndex={sectionIndex} />
             </div>
@@ -220,7 +220,7 @@ export default function NewsSection({
           ...hairlineGrid,
         }}
       >
-        <div style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
+        <div className="news-column-shell" style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
           <div style={feedCardStretch}>
             <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "hero"} index={0} sectionIndex={sectionIndex} />
           </div>
@@ -228,7 +228,7 @@ export default function NewsSection({
             <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
           ) : null}
         </div>
-        <div style={{ ...columnShell, display: "flex", flexDirection: "column", gap: "8px", padding: "8px" }}>
+        <div className="news-column-shell" style={{ ...columnShell, display: "flex", flexDirection: "column", gap: "8px", padding: "8px" }}>
           <div style={feedCardStretch}>
             <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "standard"} index={1} sectionIndex={sectionIndex} />
           </div>
