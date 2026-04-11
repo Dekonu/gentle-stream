@@ -220,7 +220,6 @@ export function FeedbackWidget() {
         }}
         aria-expanded={open}
         aria-label={open ? "Close feedback" : "Open feedback"}
-        title={open ? "Close feedback" : "Send feedback"}
       >
         <svg
           width="16"
