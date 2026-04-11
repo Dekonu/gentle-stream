@@ -23,6 +23,9 @@
     "rss:bulk-upsert": "tsx scripts/rss/bulk-upsert-feeds.ts",
     "articles:dedup-cleanup": "tsx -r dotenv/config scripts/articles-dedup-cleanup.ts dotenv_config_path=.env.local",
     "articles:decode-rss-entities": "tsx -r dotenv/config scripts/articles-decode-rss-entities.ts dotenv_config_path=.env.local",
+    "articles:strip-inline-html-tags": "tsx -r dotenv/config scripts/articles-strip-inline-html-tags.ts dotenv_config_path=.env.local",
+    "articles:reflow-rss-bodies": "tsx -r dotenv/config scripts/articles-reflow-rss-bodies.ts dotenv_config_path=.env.local",
+    "articles:backfill-source-body": "tsx -r dotenv/config scripts/articles-backfill-source-body.ts dotenv_config_path=.env.local",
     "articles:remove-test-dedup": "tsx -r dotenv/config scripts/cleanup-test-dedup-articles.ts dotenv_config_path=.env.local",
     "validate:supabase-key": "tsx scripts/validate-supabase-public-key.ts",
     "games:word-pool": "tsx scripts/word-pool-ingest.ts",
@@ -60,8 +63,10 @@
     "validation:route-json-casts": "tsx scripts/check-route-json-casts.ts"
   },
   "dependencies": {
+    "@mozilla/readability": "^0.6.0",
     "@supabase/ssr": "^0.9.0",
     "@supabase/supabase-js": "^2.43.4",
+    "linkedom": "^0.18.12",
     "next": "16.2.1",
     "react": "^18",
     "react-dom": "^18",

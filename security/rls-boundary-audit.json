@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-03-30T07:20:14.690Z",
+  "generatedAt": "2026-04-11T04:04:43.019Z",
   "summary": {
-    "totalTables": 14,
-    "tablesWithRlsEnabled": 6,
-    "tablesWithPolicies": 6,
-    "serviceRoleRouteCount": 9
+    "totalTables": 25,
+    "tablesWithRlsEnabled": 25,
+    "tablesWithPolicies": 13,
+    "serviceRoleRouteCount": 14
   },
   "tableRlsStatus": [
     {
@@ -15,57 +15,97 @@
     {
       "table": "article_likes",
       "rlsEnabled": true,
-      "policyCount": 2
+      "policyCount": 3
     },
     {
       "table": "article_saves",
       "rlsEnabled": true,
-      "policyCount": 2
+      "policyCount": 3
     },
     {
       "table": "article_submissions",
-      "rlsEnabled": false,
-      "policyCount": 0
+      "rlsEnabled": true,
+      "policyCount": 1
     },
     {
       "table": "creator_profiles",
-      "rlsEnabled": false,
-      "policyCount": 0
+      "rlsEnabled": true,
+      "policyCount": 1
     },
     {
       "table": "cron_ingest_category_runs",
-      "rlsEnabled": false,
+      "rlsEnabled": true,
       "policyCount": 0
     },
     {
       "table": "cron_ingest_runs",
-      "rlsEnabled": false,
+      "rlsEnabled": true,
       "policyCount": 0
     },
     {
       "table": "game_completions",
       "rlsEnabled": true,
-      "policyCount": 2
+      "policyCount": 3
     },
     {
       "table": "game_flavor_defaults",
-      "rlsEnabled": false,
+      "rlsEnabled": true,
+      "policyCount": 0
+    },
+    {
+      "table": "game_generation_rate_limits",
+      "rlsEnabled": true,
       "policyCount": 0
     },
     {
       "table": "game_saves",
       "rlsEnabled": true,
-      "policyCount": 2
+      "policyCount": 3
     },
     {
       "table": "game_word_pool",
-      "rlsEnabled": false,
+      "rlsEnabled": true,
       "policyCount": 0
     },
     {
       "table": "games",
-      "rlsEnabled": false,
+      "rlsEnabled": true,
       "policyCount": 0
+    },
+    {
+      "table": "llm_provider_calls",
+      "rlsEnabled": true,
+      "policyCount": 0
+    },
+    {
+      "table": "moderation_events",
+      "rlsEnabled": true,
+      "policyCount": 0
+    },
+    {
+      "table": "rate_limit_windows",
+      "rlsEnabled": true,
+      "policyCount": 0
+    },
+    {
+      "table": "recipe_ratings",
+      "rlsEnabled": true,
+      "policyCount": 3
+    },
+    {
+      "table": "rss_discovery_state",
+      "rlsEnabled": true,
+      "policyCount": 0
+    },
+    {
+      "table": "rss_feeds",
+      "rlsEnabled": true,
+      "policyCount": 0
+    },
+    {
+      "table": "site_feedback",
+      "rlsEnabled": true,
+      "policyCount": 1
     },
     {
       "table": "user_article_affinity",
@@ -73,8 +113,23 @@
       "policyCount": 1
     },
     {
+      "table": "user_daily_todos",
+      "rlsEnabled": true,
+      "policyCount": 1
+    },
+    {
+      "table": "user_seen_articles",
+      "rlsEnabled": true,
+      "policyCount": 1
+    },
+    {
+      "table": "user_spotify_mood_feedback",
+      "rlsEnabled": true,
+      "policyCount": 1
+    },
+    {
       "table": "user_word_search_exposure",
-      "rlsEnabled": false,
+      "rlsEnabled": true,
       "policyCount": 0
     }
   ],
@@ -86,19 +141,37 @@
       ]
     },
     {
+      "route": "/api/articles/search",
+      "authSignals": [
+        "session_user"
+      ]
+    },
+    {
+      "route": "/api/cron/affinity-refresh",
+      "authSignals": [
+        "cron_secret"
+      ]
+    },
+    {
       "route": "/api/cron/engagement-health",
       "authSignals": [
         "cron_secret"
       ]
     },
     {
-      "route": "/api/user/article-engagement",
+      "route": "/api/game/connections",
+      "authSignals": [
+        "none_detected"
+      ]
+    },
+    {
+      "route": "/api/legal/terms-accept",
       "authSignals": [
         "session_user"
       ]
     },
     {
-      "route": "/api/user/spotify-mood-feedback",
+      "route": "/api/user/article-engagement",
       "authSignals": [
         "session_user"
       ]
@@ -122,12 +195,6 @@
       ]
     },
     {
-      "route": "/api/user/connections-daily",
-      "authSignals": [
-        "session_user"
-      ]
-    },
-    {
       "route": "/api/user/game-completion",
       "authSignals": [
         "session_user"
@@ -135,6 +202,18 @@
     },
     {
       "route": "/api/user/game-save",
+      "authSignals": [
+        "session_user"
+      ]
+    },
+    {
+      "route": "/api/user/recipe-images/upload",
+      "authSignals": [
+        "session_user"
+      ]
+    },
+    {
+      "route": "/api/user/recipe-ratings",
       "authSignals": [
         "session_user"
       ]

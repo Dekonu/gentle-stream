@@ -342,6 +342,13 @@ On **Hobby** plan, verify cron behaviour; external schedulers can hit cron URLs 
 
 ---
 
+## Release hygiene references
+
+- Env matrix: [`docs/env-matrix.md`](docs/env-matrix.md)
+- Security model summary: [`docs/security-model.md`](docs/security-model.md)
+- Contributor workflow: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- Typography variation proposal: [`docs/article-typography-variation-plan.md`](docs/article-typography-variation-plan.md)
+
 ## License
 
 MIT

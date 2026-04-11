@@ -12,6 +12,8 @@ export async function GET(request: NextRequest) {
     const category = request.nextUrl.searchParams.get("category");
     const mood = request.nextUrl.searchParams.get("mood");
     const market = request.nextUrl.searchParams.get("market");
+    const refresh = request.nextUrl.searchParams.get("refresh");
+    const skipCache = refresh === "1" || refresh === "true";
     let moodScores: Record<string, number> | null = null;
     const userId = await getSessionUserId();
     if (userId) {
@@ -26,6 +28,7 @@ export async function GET(request: NextRequest) {
       mood,
       market,
       moodScores,
+      skipCache,
     });
     return NextResponse.json({ data });
   } catch {

@@ -1,17 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { SpotifyMoodTileData } from "@/lib/types";
 
 interface SpotifyMoodTileProps {
   data: SpotifyMoodTileData;
   reason: "gap" | "interval" | "singleton";
+  feedCategory?: string;
 }
 
-export default function SpotifyMoodTile({ data, reason }: SpotifyMoodTileProps) {
+export default function SpotifyMoodTile({ data, reason, feedCategory }: SpotifyMoodTileProps) {
+  const [displayData, setDisplayData] = useState(data);
   const [liked, setLiked] = useState(false);
   const [pending, setPending] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDisplayData(data);
+  }, [data]);
 
   async function sendVote(next: "up" | "down") {
     if (pending) return;
@@ -24,7 +31,7 @@ export default function SpotifyMoodTile({ data, reason }: SpotifyMoodTileProps) 
       const res = await fetch("/api/user/spotify-mood-feedback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mood: data.mood, vote: next }),
+        body: JSON.stringify({ mood: displayData.mood, vote: next }),
       });
       if (res.status === 401) {
         setLiked(previousLiked);
@@ -68,13 +75,68 @@ export default function SpotifyMoodTile({ data, reason }: SpotifyMoodTileProps) 
       </svg>
     );
   }
+
+  function RefreshIcon() {
+    return (
+      <svg width={16} height={16} viewBox="0 0 24 24" aria-hidden style={{ flexShrink: 0 }}>
+        <path
+          d="M20 12a8 8 0 1 1-2.34-5.66"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.6}
+          strokeLinecap="round"
+        />
+        <path
+          d="M20 4v5h-5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.6}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+
+  async function refreshTile() {
+    if (refreshing) return;
+    setRefreshing(true);
+    setHint(null);
+    try {
+      const params = new URLSearchParams({
+        mood: displayData.mood,
+        market: displayData.market,
+        refresh: "1",
+      });
+      if (feedCategory) params.set("category", feedCategory);
+      const res = await fetch(`/api/feed/modules/spotify?${params.toString()}`, {
+        cache: "no-store",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        setHint("Could not load more tracks right now.");
+        return;
+      }
+      const body = (await res.json()) as { data?: SpotifyMoodTileData };
+      if (!body.data || body.data.mode === "fallback") {
+        setHint("Could not load more tracks right now.");
+        return;
+      }
+      setDisplayData(body.data);
+    } catch {
+      setHint("Could not load more tracks right now.");
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   const reasonLabel =
     reason === "singleton"
       ? null
       : reason === "gap"
         ? "gap-fill"
         : "interval";
-  const hasBackgroundImage = Boolean(data.imageUrl);
+  const hasBackgroundImage = Boolean(displayData.imageUrl);
 
   return (
     <section
@@ -86,7 +148,7 @@ export default function SpotifyMoodTile({ data, reason }: SpotifyMoodTileProps) 
         borderRight: "1px solid var(--gs-border)",
         borderRadius: "var(--gs-radius-sm)",
         backgroundImage: hasBackgroundImage
-          ? `linear-gradient(rgba(247,243,234,0.9), rgba(247,243,234,0.95)), url("${data.imageUrl}")`
+          ? `linear-gradient(rgba(247,243,234,0.9), rgba(247,243,234,0.95)), url("${displayData.imageUrl}")`
           : undefined,
         backgroundSize: hasBackgroundImage ? "cover" : undefined,
         backgroundPosition: hasBackgroundImage ? "center" : undefined,
@@ -117,21 +179,45 @@ export default function SpotifyMoodTile({ data, reason }: SpotifyMoodTileProps) 
             color: "#1f1f1f",
           }}
         >
-          {data.title}
+          {displayData.title}
         </h3>
-        {reasonLabel ? (
-          <span
+        <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
+          {reasonLabel ? (
+            <span
+              style={{
+                fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+                fontSize: "0.67rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "#746a55",
+              }}
+            >
+              {reasonLabel}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void refreshTile()}
+            disabled={refreshing}
+            title="More like this"
+            aria-label="More like this"
             style={{
-              fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
-              fontSize: "0.67rem",
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-              color: "#746a55",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              minWidth: "1.9rem",
+              minHeight: "1.9rem",
+              borderRadius: "999px",
+              border: "1px solid color-mix(in srgb, var(--gs-border) 65%, transparent)",
+              background: "transparent",
+              color: "#4f463b",
+              cursor: refreshing ? "wait" : "pointer",
+              opacity: refreshing ? 0.65 : 1,
             }}
           >
-            {reasonLabel}
-          </span>
-        ) : null}
+            <RefreshIcon />
+          </button>
+        </div>
       </header>
 
       <p
@@ -143,7 +229,7 @@ export default function SpotifyMoodTile({ data, reason }: SpotifyMoodTileProps) 
           fontSize: "0.9rem",
         }}
       >
-        {data.subtitle}
+        {displayData.subtitle}
       </p>
 
       <div
@@ -164,11 +250,11 @@ export default function SpotifyMoodTile({ data, reason }: SpotifyMoodTileProps) 
             letterSpacing: "0.05em",
           }}
         >
-          Mood: {data.mood}
+          Mood: {displayData.mood}
         </span>
-        {data.playlistUrl ? (
+        {displayData.playlistUrl ? (
           <a
-            href={data.playlistUrl}
+            href={displayData.playlistUrl}
             target="_blank"
             rel="noopener noreferrer"
             style={{
@@ -249,7 +335,7 @@ export default function SpotifyMoodTile({ data, reason }: SpotifyMoodTileProps) 
         ) : null}
       </div>
 
-      {data.tracks.length > 0 ? (
+      {displayData.tracks.length > 0 ? (
         <table
           style={{
             width: "100%",
@@ -295,7 +381,7 @@ export default function SpotifyMoodTile({ data, reason }: SpotifyMoodTileProps) 
             </tr>
           </thead>
           <tbody>
-            {data.tracks.slice(0, 6).map((track) => (
+            {displayData.tracks.slice(0, 6).map((track) => (
               <tr key={track.id}>
                 <td style={{ padding: "0.3rem 0.35rem", borderBottom: "1px solid var(--gs-border)" }}>
                   <a

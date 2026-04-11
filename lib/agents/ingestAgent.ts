@@ -21,12 +21,18 @@ import { captureException, captureMessage, startSpan } from "@/lib/observability
 import { logLlmProviderCall } from "@/lib/db/llmProviderCalls";
 import { checkUpliftPolicy } from "@/lib/agents/upliftPolicyFilter";
 import { discoverCandidatesFromRss } from "@/lib/rss/discovery";
+import { fetchArticlePlainTextFromUrl } from "@/lib/rss/articleContent";
+import {
+  chooseRssNarrativeContent,
+  normalizeRssNarrativeText,
+} from "@/lib/rss/rssNarrativeMerge";
 import {
   resolveIngestDiscoveryProvider,
   type IngestDiscoveryProvider,
 } from "@/lib/agents/ingestDiscoveryProvider";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
+const RSS_FEED_BODY_SKIP_SOURCE_FETCH_CHARS = 2500;
 const env = getEnv();
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -384,8 +390,19 @@ async function runOverhaulIngest(
 
     const acceptedForRewrite: DiscoveryCandidate[] = [];
     for (const candidate of accepted) {
+      const fetchedSourceText =
+        rewriteEnabled || !shouldFetchSourceArticle(candidate)
+          ? null
+          : await fetchArticlePlainTextFromUrl(candidate.sourceUrl);
       const rssArticle =
-        rewriteEnabled ? null : buildArticleFromRssCandidate(candidate, category, targetLocale);
+        rewriteEnabled
+          ? null
+          : buildArticleFromRssCandidate(
+              candidate,
+              category,
+              targetLocale,
+              fetchedSourceText
+            );
       if (!rssArticle) {
         if (discoveryProvider === "rss_seed_only" && !rewriteEnabled) {
           skippedCount += 1;
@@ -989,38 +1006,33 @@ function logIngestCandidateSkip(input: {
   });
 }
 
-function normalizeRssNarrativeText(value: string): string {
-  const blockedLine = /^(share|details|keep exploring|discover more topics|image credit:|editor|contact|related terms)$/i;
-  const cleaned = value
-    .replace(/\r\n/g, "\n")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\t+/g, " ")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .filter((line) => !blockedLine.test(line))
-    .filter((line) => !/^https?:\/\/\S+$/i.test(line))
-    .filter((line) => !/^[-•]{1,2}\s*$/.test(line))
-    .join("\n\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-  return cleaned;
+function shouldFetchSourceArticle(candidate: DiscoveryCandidate): boolean {
+  const sourceUrl = candidate.sourceUrl?.trim() ?? "";
+  if (!sourceUrl) return false;
+  const bodyFromFeed = normalizeRssNarrativeText(candidate.body?.trim() ?? "");
+  return bodyFromFeed.length < RSS_FEED_BODY_SKIP_SOURCE_FETCH_CHARS;
 }
 
 function buildArticleFromRssCandidate(
   candidate: DiscoveryCandidate,
   category: Category,
-  targetLocale: string
+  targetLocale: string,
+  fetchedSourceText?: string | null
 ): RawArticle | null {
   const summary = normalizeRssNarrativeText(candidate.summary?.trim() ?? "");
   const bodyFromFeed = normalizeRssNarrativeText(candidate.body?.trim() ?? "");
-  const content = bodyFromFeed || summary;
+  const bodyFromSource = normalizeRssNarrativeText(fetchedSourceText?.trim() ?? "");
+  const content = chooseRssNarrativeContent({
+    summary,
+    bodyFromFeed,
+    bodyFromSource,
+  });
   if (!content) return null;
 
   const feedLabel = candidate.rationale.replace(/^RSS feed:\s*/i, "").trim();
   const cleanHeadline = stripCitations(candidate.headline).trim() || "Untitled";
   const subheadline = trimToLength(firstSentence(summary || content), 220);
-  const paragraphOne = trimToLength(content, 1200);
+  const paragraphOne = content;
   const paragraphTwo =
     candidate.sourceUrl.trim().length > 0
       ? "This report is sourced directly from the original RSS item and preserved without a full AI rewrite."
@@ -1067,31 +1079,15 @@ function parseSourcePublishedAt(value: unknown): string | null {
 }
 
 function stripCitations(text: string): string {
-  const closeTag = "</cite>";
-  let output = text;
-
-  // Remove opening <cite ...> tags.
-  while (true) {
-    const lower = output.toLowerCase();
-    const start = lower.indexOf("<cite");
-    if (start < 0) break;
-    const end = output.indexOf(">", start);
-    if (end < 0) {
-      output = output.slice(0, start);
-      break;
-    }
-    output = output.slice(0, start) + output.slice(end + 1);
-  }
-
-  // Remove closing </cite> tags.
-  while (true) {
-    const lower = output.toLowerCase();
-    const idx = lower.indexOf(closeTag);
-    if (idx < 0) break;
-    output = output.slice(0, idx) + output.slice(idx + closeTag.length);
-  }
-
-  return output.trim();
+  return text
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<\/?(em|strong|b|i|u|mark|small|sub|sup|code|kbd|samp|var|abbr|dfn|cite|span|time|q|ins|del|a)[^>]*>/gi, "")
+    .replace(/<\/?[^>]+>/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function resolvePipelineMode(

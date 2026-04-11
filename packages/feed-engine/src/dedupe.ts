@@ -1,34 +1,28 @@
 import type { Article } from "@gentle-stream/domain/types";
 
-function stripCiteTags(text: string): string {
+function stripInlineHtmlModifiers(text: string): string {
   if (!text) return "";
-  const lower = text.toLowerCase();
-  let out = "";
-  let i = 0;
-  while (i < text.length) {
-    if (lower.startsWith("</cite>", i)) {
-      i += "</cite>".length;
-      continue;
-    }
-    if (lower.startsWith("<cite", i)) {
-      const close = text.indexOf(">", i + "<cite".length);
-      if (close === -1) break;
-      i = close + 1;
-      continue;
-    }
-    out += text[i];
-    i += 1;
-  }
-  return out.trim();
+  return text
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(
+      /<\/?(em|strong|b|i|u|mark|small|sub|sup|code|kbd|samp|var|abbr|dfn|cite|span|time|q|ins|del|a)[^>]*>/gi,
+      ""
+    )
+    .replace(/<\/?[^>]+>/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 export function cleanArticleForFeed(article: Article): Article {
   return {
     ...article,
-    body: stripCiteTags(article.body ?? ""),
-    pullQuote: stripCiteTags(article.pullQuote ?? ""),
-    subheadline: stripCiteTags(article.subheadline ?? ""),
-    headline: stripCiteTags(article.headline ?? ""),
+    body: stripInlineHtmlModifiers(article.body ?? ""),
+    pullQuote: stripInlineHtmlModifiers(article.pullQuote ?? ""),
+    subheadline: stripInlineHtmlModifiers(article.subheadline ?? ""),
+    headline: stripInlineHtmlModifiers(article.headline ?? ""),
     sourceUrls: article.sourceUrls ?? [],
   };
 }

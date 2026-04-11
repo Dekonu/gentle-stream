@@ -457,6 +457,57 @@ CREATE TABLE IF NOT EXISTS site_feedback (
 
 CREATE INDEX IF NOT EXISTS idx_site_feedback_created_at ON site_feedback (created_at DESC);
 
+-- ─── Row Level Security ────────────────────────────────────────────────────────
+-- Service-role server clients bypass RLS. These policies protect direct anon/auth traffic.
+ALTER TABLE articles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_seen_articles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_spotify_mood_feedback ENABLE ROW LEVEL SECURITY;
+ALTER TABLE creator_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE article_submissions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE game_completions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE game_saves ENABLE ROW LEVEL SECURITY;
+ALTER TABLE game_generation_rate_limits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE article_likes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE article_saves ENABLE ROW LEVEL SECURITY;
+ALTER TABLE recipe_ratings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_daily_todos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rss_feeds ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rss_discovery_state ENABLE ROW LEVEL SECURITY;
+ALTER TABLE llm_provider_calls ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rate_limit_windows ENABLE ROW LEVEL SECURITY;
+ALTER TABLE site_feedback ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "user_seen_articles_own" ON user_seen_articles;
+CREATE POLICY "user_seen_articles_own"
+  ON user_seen_articles FOR ALL TO authenticated
+  USING (user_id = auth.uid()::text)
+  WITH CHECK (user_id = auth.uid()::text);
+
+DROP POLICY IF EXISTS "user_daily_todos_own" ON user_daily_todos;
+CREATE POLICY "user_daily_todos_own"
+  ON user_daily_todos FOR ALL TO authenticated
+  USING (user_id = auth.uid()::text)
+  WITH CHECK (user_id = auth.uid()::text);
+
+DROP POLICY IF EXISTS "creator_profiles_own" ON creator_profiles;
+CREATE POLICY "creator_profiles_own"
+  ON creator_profiles FOR ALL TO authenticated
+  USING (user_id = auth.uid()::text)
+  WITH CHECK (user_id = auth.uid()::text);
+
+DROP POLICY IF EXISTS "article_submissions_author_own" ON article_submissions;
+CREATE POLICY "article_submissions_author_own"
+  ON article_submissions FOR ALL TO authenticated
+  USING (author_user_id = auth.uid()::text)
+  WITH CHECK (author_user_id = auth.uid()::text);
+
+DROP POLICY IF EXISTS "site_feedback_own" ON site_feedback;
+CREATE POLICY "site_feedback_own"
+  ON site_feedback FOR ALL TO authenticated
+  USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+
 -- ─── Cleanup (TTL disabled) ────────────────────────────────────────────────────
 -- Article TTL expiry is disabled; keep this note so old runbooks do not attempt
 -- to delete rows by expires_at.

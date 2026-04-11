@@ -36,15 +36,21 @@ const borderStyles = {
   background: "var(--gs-surface)",
 };
 
-/** Hairline gutters between cells (background shows through as rules). */
+const CARD_GUTTER_PX = 8;
+
+/** Tiny gutters between cells to avoid cramped seams. */
 const hairlineGrid: CSSProperties = {
-  gap: "1px",
-  background: "var(--gs-border)",
+  gap: `${CARD_GUTTER_PX}px`,
+  background: "var(--gs-surface-soft)",
+  padding: `${CARD_GUTTER_PX}px`,
 };
 
 const columnShell: CSSProperties = {
   background: "var(--gs-surface)",
   minWidth: 0,
+  borderRadius: "var(--gs-radius-xs)",
+  overflow: "hidden",
+  border: "1px solid var(--gs-border)",
 };
 
 export default function NewsSection({
@@ -193,9 +199,8 @@ export default function NewsSection({
             <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
           ) : null}
         </div>
-        <div style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
+        <div style={{ ...columnShell, display: "flex", flexDirection: "column", gap: "8px", padding: "8px" }}>
           <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "standard"} index={1} sectionIndex={sectionIndex} />
-          <div style={{ height: "1px", background: "var(--gs-border)", flexShrink: 0 }} />
           <ArticleCard article={articles[2]} layout={plan.layouts[2] ?? "standard"} index={2} sectionIndex={sectionIndex} />
           {inlineModule && inlineModule.targetColumn === 1 ? (
             <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />

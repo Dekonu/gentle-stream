@@ -4,7 +4,7 @@
 
 ### Overview
 
-Gentle Stream is a single Next.js 16 (App Router) project — no monorepo, no Docker. All commands run from the workspace root.
+Gentle Stream currently runs as a root Next.js 16 (App Router) app. The `packages/*` workspace modules are active shared libraries, and `apps/*` is reserved for the planned future split (web/mobile) documented under `docs/mobile-*`. No Docker; run commands from workspace root.
 
 ### Node version
 
