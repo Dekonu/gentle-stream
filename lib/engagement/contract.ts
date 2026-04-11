@@ -47,7 +47,7 @@ function normalizeEventValue(
   if (eventType === "scroll_depth")
     return Math.max(0, Math.min(1, n));
 
-  if (eventType === "read_30s" || eventType === "read_dwell")
+  if (eventType === "read_30s" || eventType === "read_dwell" || eventType === "read_confirmed")
     return Math.max(0, Math.min(1800, n));
 
   if (eventType === "like" || eventType === "save" || eventType === "share")

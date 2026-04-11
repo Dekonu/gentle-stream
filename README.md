@@ -152,6 +152,8 @@ gentle-stream/
 
 The newspaper aesthetic is the product: blackletter masthead, rotating section layouts, drop caps, pull quotes, warm newsprint palette, sticky category bar, hero images (Pollinations + Picsum fallback with graceful degradation), and partial sections when stock is low so the feed never shows an empty hole. Details live in the components and prior design notes in git history.
 
+Dark mode is currently experimental; contrast hardening is actively tracked and iterated in the profile/menu and article-card surfaces.
+
 ---
 
 ## Getting started

@@ -27,6 +27,31 @@ html {
   --gs-border-strong: #b7ae9f;
   --gs-ink-strong: #1a1a1a;
   --gs-accent: #1a472a;
+  --gs-accent-foreground: #1f6a38;
+  --gs-success: #1f6a38;
+  --gs-warning: #8b5a1f;
+  --gs-icon-muted: #7c7468;
+  --gs-inset-highlight: rgba(255, 255, 255, 0.5);
+  --gs-like-active: #b85e76;
+  --gs-rating-filled: #d4a012;
+  --gs-avatar-gradient-start: #4a6741;
+  --gs-avatar-gradient-end: #2c3d28;
+  --gs-recipe-badge-start: #6b4c9c;
+  --gs-recipe-badge-end: #4a3270;
+  --gs-image-placeholder-start: #e8e4da;
+  --gs-image-placeholder-end: #d4cfc4;
+  --gs-shadow-control: 0 2px 8px rgba(0, 0, 0, 0.18);
+  --gs-shadow-control-strong: 0 2px 7px rgba(0, 0, 0, 0.22);
+  --gs-backdrop-scrim: rgba(9, 7, 4, 0.46);
+  --gs-recipe-drop-shadow: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.07));
+  --gs-recipe-badge-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  --gs-icon-text-shadow: 0 0.5px 0 rgba(0, 0, 0, 0.06);
+  --gs-text-fade-mask: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 1) 68%,
+    rgba(0, 0, 0, 0.16) 88%,
+    rgba(0, 0, 0, 0) 100%
+  );
   --gs-radius-xs: 4px;
   --gs-radius-sm: 8px;
   --gs-radius-md: 12px;
@@ -54,6 +79,31 @@ html[data-theme="dark"] {
   --gs-border-strong: #575a64;
   --gs-ink-strong: #f2efe8;
   --gs-accent: #82bd95;
+  --gs-accent-foreground: #b8ddc3;
+  --gs-success: #9ad7ab;
+  --gs-warning: #e8b875;
+  --gs-icon-muted: #9f9a90;
+  --gs-inset-highlight: rgba(255, 255, 255, 0.14);
+  --gs-like-active: #d796a9;
+  --gs-rating-filled: #f0c765;
+  --gs-avatar-gradient-start: #6ea486;
+  --gs-avatar-gradient-end: #3d6d52;
+  --gs-recipe-badge-start: #8d73c2;
+  --gs-recipe-badge-end: #65509b;
+  --gs-image-placeholder-start: #2d3138;
+  --gs-image-placeholder-end: #23262c;
+  --gs-shadow-control: 0 2px 8px rgba(0, 0, 0, 0.36);
+  --gs-shadow-control-strong: 0 2px 7px rgba(0, 0, 0, 0.42);
+  --gs-backdrop-scrim: rgba(2, 3, 6, 0.62);
+  --gs-recipe-drop-shadow: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.28));
+  --gs-recipe-badge-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --gs-icon-text-shadow: 0 0.5px 0 rgba(0, 0, 0, 0.28);
+  --gs-text-fade-mask: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 1) 68%,
+    rgba(0, 0, 0, 0.22) 88%,
+    rgba(0, 0, 0, 0) 100%
+  );
   --gs-shadow-page: 0 18px 46px rgba(0, 0, 0, 0.4);
   --gs-shadow-overlay: 0 22px 68px rgba(0, 0, 0, 0.55);
   --gs-shadow-popover: 0 14px 40px rgba(0, 0, 0, 0.45);
@@ -236,9 +286,11 @@ body {
     border-color var(--gs-motion-fast) var(--gs-ease-standard);
 }
 
-.gs-card-lift:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 14px 30px rgba(18, 13, 8, 0.12);
+@media (hover: hover) and (pointer: fine) {
+  .gs-card-lift:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 14px 30px rgba(18, 13, 8, 0.12);
+  }
 }
 
 .gs-soft-pulse {
@@ -496,11 +548,18 @@ body {
 @media (max-width: 768px) {
   .news-grid {
     grid-template-columns: 1fr !important;
+    gap: 10px !important;
+    padding: 10px !important;
+  }
+
+  .news-grid .news-column-shell {
+    margin: 0 !important;
+    border-radius: var(--gs-radius-sm);
   }
 
   .news-grid article {
     border-right: none !important;
-    border-bottom: 1px solid #d4cfc4;
+    border-bottom: none !important;
   }
 }
 

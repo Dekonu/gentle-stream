@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import Masthead, { MASTHEAD_TOP_BAR_HEIGHT_PX } from "./Masthead";
 import { ProfileMenu } from "./user/ProfileMenu";
 import { GuestProfileMenu } from "./user/GuestProfileMenu";
+import { FeedbackWidget } from "./feedback/FeedbackWidget";
 import CategoryDrawer from "./CategoryDrawer";
 import { MfaChallengeGate } from "./auth/mfa/MfaChallengeGate";
 import NewsSection from "./NewsSection";
@@ -58,6 +59,10 @@ const FORCE_INGEST_RETRY_DELAY_MS = 1_200;
 const FORCE_INGEST_CLIENT_COOLDOWN_MS = 8_000;
 const FEED_CACHE_TTL_MS = 35_000;
 const FEED_STALE_TTL_MS = 120_000;
+const FEED_PERSIST_TTL_MS = 24 * 60 * 60 * 1000;
+const FEED_PERSIST_VERSION = 1;
+const FEED_PERSIST_MAX_SECTIONS_DEFAULT = 48;
+const FEED_PERSIST_MAX_BYTES_DEFAULT = 350_000;
 const GUEST_USER_ID = "anonymous";
 const DEFAULT_GAP_MIN_PX = 180;
 const DEFAULT_INLINE_GAP_MIN_PX = 140;
@@ -86,6 +91,32 @@ interface FeedApiResponse {
 interface FeedCacheEntry {
   data: FeedApiResponse;
   cachedAtMs: number;
+}
+
+interface PersistedFeedSnapshot {
+  version: number;
+  userId: string;
+  createdAtMs: number;
+  sectionCount: number;
+  articleSectionsRendered: number;
+  sections: FeedSection[];
+  renderedArticleKeys: string[];
+  renderedDbArticleIds: string[];
+}
+
+function appendUniqueFeedSections(
+  existing: FeedSection[],
+  incoming: FeedSection[]
+): FeedSection[] {
+  if (incoming.length === 0) return existing;
+  const seenIndexes = new Set(existing.map((section) => section.index));
+  const uniqueIncoming = incoming.filter((section) => {
+    if (seenIndexes.has(section.index)) return false;
+    seenIndexes.add(section.index);
+    return true;
+  });
+  if (uniqueIncoming.length === 0) return existing;
+  return [...existing, ...uniqueIncoming];
 }
 
 function spotifyContentSignature(data: SpotifyMoodTileData | null): string | null {
@@ -222,6 +253,12 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   const feedInFlightRef = useRef<Map<string, Promise<FeedApiResponse>>>(new Map());
   const forceIngestInFlightRef = useRef<Promise<void> | null>(null);
   const forceIngestLockUntilRef = useRef(0);
+  const feedOpenStartedAtRef = useRef<number>(Date.now());
+  const hydratedFromPersistentCacheRef = useRef(false);
+  const firstSectionTelemetryLoggedRef = useRef(false);
+  const persistentCacheHydrateAttemptedRef = useRef(false);
+  const persistentCacheHydrateHitRef = useRef(false);
+  const persistedFeedKey = `gentle_stream_feed_sections_v${FEED_PERSIST_VERSION}:${userId}`;
 
   const fillerEnabled = readTruthyFlag(
     process.env.NEXT_PUBLIC_FEED_GAP_FILL_ENABLED,
@@ -252,6 +289,78 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     process.env.NEXT_PUBLIC_TODO_MODULE_ENABLED,
     false
   );
+  const persistentFeedCacheEnabled = readTruthyFlag(
+    process.env.NEXT_PUBLIC_FEED_PERSISTENT_CACHE_ENABLED,
+    true
+  );
+  const persistentFeedCacheMaxSections = readPositiveInt(
+    process.env.NEXT_PUBLIC_FEED_PERSIST_MAX_SECTIONS,
+    FEED_PERSIST_MAX_SECTIONS_DEFAULT
+  );
+  const persistentFeedCacheMaxBytes = readPositiveInt(
+    process.env.NEXT_PUBLIC_FEED_PERSIST_MAX_BYTES,
+    FEED_PERSIST_MAX_BYTES_DEFAULT
+  );
+
+  const isDefaultFeedView = useCallback(() => {
+    return (
+      activeCategoryRef.current == null &&
+      activeKindFilterRef.current === "all" &&
+      activeSearchQueryRef.current.trim().length === 0
+    );
+  }, []);
+
+  const hydratePersistedSections = useCallback((): boolean => {
+    persistentCacheHydrateAttemptedRef.current = true;
+    persistentCacheHydrateHitRef.current = false;
+    if (!persistentFeedCacheEnabled) return false;
+    if (typeof window === "undefined") return false;
+    if (!isDefaultFeedView()) return false;
+    try {
+      const raw = localStorage.getItem(persistedFeedKey);
+      if (!raw) return false;
+      const parsed = JSON.parse(raw) as PersistedFeedSnapshot;
+      if (
+        !parsed ||
+        parsed.version !== FEED_PERSIST_VERSION ||
+        parsed.userId !== userId ||
+        !Array.isArray(parsed.sections)
+      ) {
+        localStorage.removeItem(persistedFeedKey);
+        return false;
+      }
+      if (Date.now() - parsed.createdAtMs > FEED_PERSIST_TTL_MS) {
+        localStorage.removeItem(persistedFeedKey);
+        return false;
+      }
+      const boundedSections = parsed.sections.slice(-persistentFeedCacheMaxSections);
+      const hydratedSections = appendUniqueFeedSections([], boundedSections);
+      const hydratedMaxIndex = hydratedSections.reduce(
+        (max, section) => Math.max(max, section.index),
+        -1
+      );
+      if (boundedSections.length === 0) return false;
+      setSections(hydratedSections);
+      sectionCountRef.current = Math.max(
+        Math.max(0, Math.trunc(parsed.sectionCount ?? parsed.sections.length)),
+        hydratedMaxIndex + 1
+      );
+      articleSectionsRenderedRef.current = Math.max(0, Math.trunc(parsed.articleSectionsRendered ?? 0));
+      renderedArticleKeysRef.current = new Set(parsed.renderedArticleKeys ?? []);
+      renderedDbArticleIdsRef.current = new Set(parsed.renderedDbArticleIds ?? []);
+      hydratedFromPersistentCacheRef.current = true;
+      persistentCacheHydrateHitRef.current = true;
+      return true;
+    } catch {
+      return false;
+    }
+  }, [
+    isDefaultFeedView,
+    persistedFeedKey,
+    persistentFeedCacheEnabled,
+    persistentFeedCacheMaxSections,
+    userId,
+  ]);
 
   // Sentinel ref — plain IntersectionObserver (no library dependency on stale state)
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -568,8 +677,8 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
               index: currentIndex,
               data: cache.weather,
             };
-            setSections((prev) => [...prev, mod]);
-            sectionCountRef.current += 1;
+            setSections((prev) => appendUniqueFeedSections(prev, [mod]));
+            sectionCountRef.current = Math.max(sectionCountRef.current, mod.index + 1);
             return;
           }
         }
@@ -587,8 +696,8 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
               index: currentIndex,
               data: cache.spotify,
             };
-            setSections((prev) => [...prev, mod]);
-            sectionCountRef.current += 1;
+            setSections((prev) => appendUniqueFeedSections(prev, [mod]));
+            sectionCountRef.current = Math.max(sectionCountRef.current, mod.index + 1);
             return;
           }
         }
@@ -604,8 +713,8 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
               index: currentIndex,
               data: cache.nasa,
             };
-            setSections((prev) => [...prev, mod]);
-            sectionCountRef.current += 1;
+            setSections((prev) => appendUniqueFeedSections(prev, [mod]));
+            sectionCountRef.current = Math.max(sectionCountRef.current, mod.index + 1);
             return;
           }
         }
@@ -964,7 +1073,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         }
       }
 
-      setSections((prev) => [...prev, ...nextSections]);
+      setSections((prev) => appendUniqueFeedSections(prev, nextSections));
       for (const article of uniqueForView) {
         const key = articleUniqKey(article);
         renderedArticleKeysRef.current.add(key);
@@ -977,7 +1086,11 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         }
       }
       articleSectionsRenderedRef.current += 1;
-      sectionCountRef.current += nextSections.length;
+      const nextMaxIndex = nextSections.reduce(
+        (max, section) => Math.max(max, section.index),
+        sectionCountRef.current - 1
+      );
+      sectionCountRef.current = Math.max(sectionCountRef.current, nextMaxIndex + 1);
       // Warm the next section request in cache to reduce visible wait.
       if (searchQuery.length < 2) {
         const prefetchParams = new URLSearchParams();
@@ -1036,6 +1149,15 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     todoModuleEnabled,
     ensureSingletonFeedCached,
   ]); // stable refs + config
+
+  const feedBootstrapFnsRef = useRef({
+    hydratePersistedSections,
+    ensureSingletonFeedCached,
+    loadMore,
+  });
+  feedBootstrapFnsRef.current.hydratePersistedSections = hydratePersistedSections;
+  feedBootstrapFnsRef.current.ensureSingletonFeedCached = ensureSingletonFeedCached;
+  feedBootstrapFnsRef.current.loadMore = loadMore;
 
   const triggerForceIngestOnRetry = useCallback(async () => {
     if (activeSearchQueryRef.current.trim().length >= 2) return;
@@ -1156,6 +1278,12 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     weatherBriefLoadedRef.current = false;
     seenSpotifySignaturesRef.current = new Set();
     recentBreatherMotifsRef.current = [];
+    feedOpenStartedAtRef.current = Date.now();
+    hydratedFromPersistentCacheRef.current = false;
+    firstSectionTelemetryLoggedRef.current = false;
+    persistentCacheHydrateAttemptedRef.current = false;
+    persistentCacheHydrateHitRef.current = false;
+    feedBootstrapFnsRef.current.hydratePersistedSections();
 
     const gen = ++feedBootstrapGenRef.current;
     let cancelled = false;
@@ -1309,18 +1437,79 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
 
       if (cancelled || gen !== feedBootstrapGenRef.current) return;
 
-      await ensureSingletonFeedCached();
+      await feedBootstrapFnsRef.current.ensureSingletonFeedCached();
       if (cancelled || gen !== feedBootstrapGenRef.current) return;
 
       feedReadyRef.current = true;
       setIsFeedReady(true);
-      void loadMore();
+      void feedBootstrapFnsRef.current.loadMore();
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [userId, mfaPassed, loadMore, ensureSingletonFeedCached]);
+  }, [userId, mfaPassed]);
+
+  useEffect(() => {
+    if (firstSectionTelemetryLoggedRef.current) return;
+    if (sections.length === 0) return;
+    firstSectionTelemetryLoggedRef.current = true;
+    const timeToFirstSectionMs = Date.now() - feedOpenStartedAtRef.current;
+    console.info("[feed-open-profile]", {
+      userId,
+      sectionCount: sections.length,
+      timeToFirstSectionMs,
+      hydratedFromPersistentCache: hydratedFromPersistentCacheRef.current,
+      persistentCacheHydrateAttempted: persistentCacheHydrateAttemptedRef.current,
+      persistentCacheHydrateHit: persistentCacheHydrateHitRef.current,
+    });
+  }, [sections, userId]);
+
+  useEffect(() => {
+    if (!persistentFeedCacheEnabled) return;
+    if (typeof window === "undefined") return;
+    if (!isDefaultFeedView()) return;
+    try {
+      if (sections.length === 0) return;
+      const boundedSections = sections.slice(-persistentFeedCacheMaxSections);
+      const snapshot: PersistedFeedSnapshot = {
+        version: FEED_PERSIST_VERSION,
+        userId,
+        createdAtMs: Date.now(),
+        sectionCount: boundedSections.length,
+        articleSectionsRendered: articleSectionsRenderedRef.current,
+        sections: boundedSections,
+        renderedArticleKeys: Array.from(renderedArticleKeysRef.current),
+        renderedDbArticleIds: Array.from(renderedDbArticleIdsRef.current),
+      };
+      let payload = JSON.stringify(snapshot);
+      if (payload.length > persistentFeedCacheMaxBytes) {
+        const minKeep = Math.min(8, boundedSections.length);
+        let keepCount = boundedSections.length;
+        while (payload.length > persistentFeedCacheMaxBytes && keepCount > minKeep) {
+          keepCount -= 4;
+          const trimmedSnapshot: PersistedFeedSnapshot = {
+            ...snapshot,
+            sectionCount: keepCount,
+            sections: boundedSections.slice(-keepCount),
+          };
+          payload = JSON.stringify(trimmedSnapshot);
+        }
+      }
+      if (payload.length <= persistentFeedCacheMaxBytes)
+        localStorage.setItem(persistedFeedKey, payload);
+    } catch {
+      // best-effort cache
+    }
+  }, [
+    isDefaultFeedView,
+    persistedFeedKey,
+    persistentFeedCacheEnabled,
+    persistentFeedCacheMaxBytes,
+    persistentFeedCacheMaxSections,
+    sections,
+    userId,
+  ]);
 
   useEffect(() => {
     setMfaPassed(userId === "dev-local" || isGuestUser);
@@ -1613,17 +1802,20 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     <div style={{ background: "var(--gs-bg)", minHeight: "100vh", color: "var(--gs-text)" }}>
       <Masthead
         accountSlot={
-          userEmail ? (
-            <ProfileMenu
-              userEmail={userEmail}
-              onGameRatioSaved={handleGameRatioSaved}
-              themePreference={themePreference}
-              onThemePreferenceToggle={toggleThemePreference}
-              isAdmin={isAdmin}
-            />
-          ) : (
-            <GuestProfileMenu />
-          )
+          <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
+            {userEmail ? (
+              <ProfileMenu
+                userEmail={userEmail}
+                onGameRatioSaved={handleGameRatioSaved}
+                themePreference={themePreference}
+                onThemePreferenceToggle={toggleThemePreference}
+                isAdmin={isAdmin}
+              />
+            ) : (
+              <GuestProfileMenu />
+            )}
+            <FeedbackWidget />
+          </div>
         }
       />
       <CategoryDrawer

@@ -43,15 +43,15 @@ export function resolveHttpUrlForFetch(raw: string): string | null {
   }
 }
 
-function normalizeArticleNarrative(value: string): string {
+export function normalizeArticleNarrative(value: string, fallbackToOriginal = true): string {
   const normalized = normalizeRssNarrativeText(value);
-  return filterLikelyArticleParagraphs(normalized);
+  return filterLikelyArticleParagraphs(normalized, fallbackToOriginal);
 }
 
-function isLikelyUiChromeParagraph(paragraph: string): boolean {
+export function isLikelyUiChromeParagraph(paragraph: string): boolean {
   const lower = paragraph.toLowerCase();
   if (
-    /^(hide caption|show caption|toggle caption|share|save|subscribe|sign in|log in)\b/.test(
+    /^(hide captions?|show captions?|toggle captions?|share|save|subscribe|sign in|log in)\b/.test(
       lower
     )
   ) {
@@ -67,21 +67,24 @@ function isLikelyUiChromeParagraph(paragraph: string): boolean {
   return false;
 }
 
-function appearsNarrativeParagraph(paragraph: string): boolean {
+export function appearsNarrativeParagraph(paragraph: string): boolean {
   if (paragraph.length < 55) return false;
   const sentenceLikeCount = (paragraph.match(/[.!?](\s|$)/g) ?? []).length;
   const wordCount = paragraph.split(/\s+/).filter(Boolean).length;
-  if (wordCount < 10) return false;
+  if (wordCount < 8) return false;
   if (sentenceLikeCount === 0 && paragraph.length < 140) return false;
   return true;
 }
 
-function filterLikelyArticleParagraphs(text: string): string {
+export function filterLikelyArticleParagraphs(
+  text: string,
+  fallbackToOriginal = true
+): string {
   const paragraphs = text
     .split(/\n{2,}/)
     .map((part) => part.trim())
     .filter(Boolean);
-  if (paragraphs.length === 0) return text;
+  if (paragraphs.length === 0) return fallbackToOriginal ? text : "";
 
   const deduped: string[] = [];
   const seen = new Set<string>();
@@ -96,7 +99,7 @@ function filterLikelyArticleParagraphs(text: string): string {
     (paragraph) =>
       !isLikelyUiChromeParagraph(paragraph) && appearsNarrativeParagraph(paragraph)
   );
-  if (filtered.length === 0) return text;
+  if (filtered.length === 0) return fallbackToOriginal ? text : "";
   return filtered.join("\n\n");
 }
 
@@ -126,7 +129,7 @@ export async function fetchArticlePlainTextFromUrl(url: string): Promise<string 
     const { document } = parseHTML(clippedHtml);
     const article = new Readability(document, { charThreshold: 120 }).parse();
     if (!article?.textContent) return null;
-    const normalized = normalizeArticleNarrative(article.textContent);
+    const normalized = normalizeArticleNarrative(article.textContent, false);
     return normalized || null;
   } catch {
     return null;

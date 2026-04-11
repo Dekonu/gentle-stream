@@ -34,7 +34,6 @@ export async function translateTextsWithDeepL(
 
   const endpoint = `${(env.DEEPL_API_URL || DEFAULT_DEEPL_URL).replace(/\/+$/, "")}/v2/translate`;
   const params = new URLSearchParams();
-  params.set("auth_key", apiKey);
   params.set("target_lang", (input.targetLang || "EN").toUpperCase());
   params.set("preserve_formatting", "1");
   if (input.sourceLang?.trim()) params.set("source_lang", input.sourceLang.trim().toUpperCase());
@@ -44,6 +43,7 @@ export async function translateTextsWithDeepL(
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
+      authorization: `DeepL-Auth-Key ${apiKey}`,
       "content-type": "application/x-www-form-urlencoded",
     },
     body: params.toString(),

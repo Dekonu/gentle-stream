@@ -6,7 +6,7 @@ export const RSS_SOURCE_FETCH_MIN_CHARS = 320;
 
 function stripInlineChromePhrases(line: string): string {
   return line
-    .replace(/\b(hide|show|toggle)\s+caption\b/gi, " ")
+    .replace(/\b(hide|show|toggle)\s+captions?\b/gi, " ")
     .replace(/\b(image\s+credit|photo\s+credit)\s*:\s*/gi, " ")
     .replace(/\s{2,}/g, " ")
     .trim();
@@ -57,7 +57,7 @@ function splitRunOnParagraph(paragraph: string): string[] {
 
 export function normalizeRssNarrativeText(value: string): string {
   const blockedLine =
-    /^(share|details|keep exploring|discover more topics|image credit:|editor|contact|related terms|hide caption|show caption|toggle caption|image article|read more|view more)$/i;
+    /^(share|details|keep exploring|discover more topics|image credit:|editor|contact|related terms|hide captions?|show captions?|toggle captions?|image article|read more|view more)$/i;
   const cleaned = stripInlineHtmlToPlainText(value)
     .replace(/\r\n/g, "\n")
     .replace(/[ \t]+\n/g, "\n")

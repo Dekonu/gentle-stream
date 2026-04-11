@@ -54,26 +54,35 @@ export async function GET(request: NextRequest) {
     new Set((data ?? []).map((row) => row.user_id as string).filter(Boolean))
   ).slice(0, limit);
 
+  const RPC_CHUNK = 16;
   let refreshed = 0;
   let failed = 0;
-  for (const userId of distinctUserIds) {
-    const { error: refreshError } = await db.rpc("refresh_user_article_affinity", {
-      p_user_id: userId,
-    });
-    if (refreshError) {
-      failed += 1;
-      captureException(refreshError, {
-        route: "cron.affinity_refresh",
-        userId,
-        phase: "refresh_user_affinity",
-      });
-      console.error("[affinity-refresh] refresh_user_article_affinity failed", {
-        userId,
-        message: refreshError.message,
-      });
-      continue;
+  for (let i = 0; i < distinctUserIds.length; i += RPC_CHUNK) {
+    const chunk = distinctUserIds.slice(i, i + RPC_CHUNK);
+    const outcomes = await Promise.all(
+      chunk.map(async (userId) => {
+        const { error: refreshError } = await db.rpc("refresh_user_article_affinity", {
+          p_user_id: userId,
+        });
+        return { userId, refreshError };
+      })
+    );
+    for (const { userId, refreshError } of outcomes) {
+      if (refreshError) {
+        failed += 1;
+        captureException(refreshError, {
+          route: "cron.affinity_refresh",
+          userId,
+          phase: "refresh_user_affinity",
+        });
+        console.error("[affinity-refresh] refresh_user_article_affinity failed", {
+          userId,
+          message: refreshError.message,
+        });
+        continue;
+      }
+      refreshed += 1;
     }
-    refreshed += 1;
   }
 
   span.end({

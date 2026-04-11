@@ -56,6 +56,10 @@ const isSeenTableEnabled =
   env.FEED_SEEN_TABLE_READS_ENABLED == null
     ? true
     : env.FEED_SEEN_TABLE_READS_ENABLED;
+const isLegacyProfileDualWriteEnabled =
+  env.SEEN_PROFILE_DUAL_WRITE_ENABLED == null
+    ? true
+    : env.SEEN_PROFILE_DUAL_WRITE_ENABLED;
 
 function isMissingUserSeenArticlesTable(errorMessage: string): boolean {
   return (
@@ -273,11 +277,18 @@ export async function getUserProfileById(userId: string): Promise<UserProfile | 
 export async function markArticlesSeen(
   userId: string,
   articleIds: string[],
-  metadata?: { source?: string; sectionIndex?: number | null }
+  metadata?: {
+    source?: string;
+    sectionIndex?: number | null;
+    /** Callers can set true when IDs are guaranteed to come from `articles.id` selections. */
+    trustArticleIds?: boolean;
+  }
 ): Promise<void> {
   if (articleIds.length === 0) return;
 
-  const existingArticleIds = await filterExistingArticleIds(articleIds);
+  const existingArticleIds = metadata?.trustArticleIds
+    ? Array.from(new Set(articleIds.filter(Boolean)))
+    : await filterExistingArticleIds(articleIds);
   if (existingArticleIds.length === 0) return;
 
   const seenAtIso = new Date().toISOString();
@@ -329,6 +340,21 @@ export async function markArticlesSeen(
     }
   }
 
+  // `ranker_soft` reads from user_seen_articles with TTL logic; skip legacy profile-array write
+  // to reduce per-feed request write amplification.
+  if (!isLegacyProfileDualWriteEnabled && isSeenTableEnabled && isUserSeenArticlesTableAvailable)
+    return;
+  if (source === "ranker_soft" && isSeenTableEnabled && isUserSeenArticlesTableAvailable) return;
+
+  console.info("[mark-articles-seen]", {
+    userId,
+    source,
+    incomingCount: articleIds.length,
+    validCount: existingArticleIds.length,
+    trustArticleIds: Boolean(metadata?.trustArticleIds),
+    dualWriteEnabled: isLegacyProfileDualWriteEnabled,
+  });
+
   // Legacy compatibility window: continue updating profile array while dual-write is enabled.
   const profile = await getOrCreateUserProfile(userId);
   const updated = [...profile.seenArticleIds, ...existingArticleIds];
@@ -341,6 +367,58 @@ export async function markArticlesSeen(
     .eq("user_id", userId);
 
   if (error) throw new Error(`markArticlesSeen: ${error.message}`);
+}
+
+export async function listSeenArticleIdsForExclusion(input: {
+  userId: string;
+  limit?: number;
+  softSeenSource?: string;
+  softSeenTtlMs?: number;
+}): Promise<string[]> {
+  const { userId, softSeenSource = "ranker_soft" } = input;
+  const limit = Math.max(1, Math.min(5000, Math.trunc(input.limit ?? 800)));
+  const softSeenTtlMs = Math.max(1_000, Math.trunc(input.softSeenTtlMs ?? 20 * 60 * 1000));
+
+  if (!isSeenTableEnabled || !isUserSeenArticlesTableAvailable) {
+    const profile = await getOrCreateUserProfile(userId);
+    return profile.seenArticleIds.slice(-limit);
+  }
+
+  const { data, error } = await db
+    .from("user_seen_articles")
+    .select("article_id, seen_at, source")
+    .eq("user_id", userId)
+    .order("seen_at", { ascending: false })
+    .limit(limit);
+  if (error) {
+    if (isMissingUserSeenArticlesTable(error.message)) {
+      isUserSeenArticlesTableAvailable = false;
+      const profile = await getOrCreateUserProfile(userId);
+      return profile.seenArticleIds.slice(-limit);
+    }
+    throw new Error(`listSeenArticleIdsForExclusion: ${error.message}`);
+  }
+
+  const now = Date.now();
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const row of data ?? []) {
+    const articleId = String((row as { article_id: string }).article_id);
+    if (!articleId || seen.has(articleId)) continue;
+    seen.add(articleId);
+
+    const source = String((row as { source?: string | null }).source ?? "feed");
+    const seenAtIso = String((row as { seen_at: string }).seen_at);
+    const seenAtMs = Date.parse(seenAtIso);
+    if (source === softSeenSource) {
+      if (!Number.isFinite(seenAtMs)) continue;
+      if (now - seenAtMs > softSeenTtlMs) continue;
+    }
+    out.push(articleId);
+    if (out.length >= limit) break;
+  }
+
+  return out;
 }
 
 export async function listRecentlySeenArticleIds(
