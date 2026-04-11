@@ -961,6 +961,9 @@ export async function getRandomAvailableArticles(
     .from("articles")
     .select("*")
     .is("deleted_at", null)
+    // Without ordering, LIMIT returns an arbitrary slice; new rows (and integration fixtures)
+    // may never appear. Prefer recent rows, then shuffle client-side.
+    .order("fetched_at", { ascending: false })
     .limit(cap);
   if (isModerationColumnsAvailable) {
     query = query.eq("moderation_status", "approved");
@@ -983,7 +986,12 @@ export async function getRandomAvailableArticles(
     isMissingModerationColumn(result.error.message)
   ) {
     isModerationColumnsAvailable = false;
-    let fallbackQuery = db.from("articles").select("*").is("deleted_at", null).limit(cap);
+    let fallbackQuery = db
+      .from("articles")
+      .select("*")
+      .is("deleted_at", null)
+      .order("fetched_at", { ascending: false })
+      .limit(cap);
     if (excludeIds.length > 0) fallbackQuery = fallbackQuery.notIn("id", excludeIds);
     if (!isUserSubmittedEnabled) fallbackQuery = fallbackQuery.neq("content_kind", "user_article");
     if (effectiveContentKinds && effectiveContentKinds.length > 0) {
@@ -1011,6 +1019,7 @@ export async function getRandomArticlesResurfacing(
     .from("articles")
     .select("*")
     .is("deleted_at", null)
+    .order("fetched_at", { ascending: false })
     .limit(cap);
   if (isModerationColumnsAvailable) {
     query = query.eq("moderation_status", "approved");
@@ -1028,7 +1037,12 @@ export async function getRandomArticlesResurfacing(
     isMissingModerationColumn(result.error.message)
   ) {
     isModerationColumnsAvailable = false;
-    let fallbackQuery = db.from("articles").select("*").is("deleted_at", null).limit(cap);
+    let fallbackQuery = db
+      .from("articles")
+      .select("*")
+      .is("deleted_at", null)
+      .order("fetched_at", { ascending: false })
+      .limit(cap);
     if (!isUserSubmittedEnabled) fallbackQuery = fallbackQuery.neq("content_kind", "user_article");
     if (effectiveContentKinds && effectiveContentKinds.length > 0) {
       fallbackQuery = fallbackQuery.in("content_kind", effectiveContentKinds);

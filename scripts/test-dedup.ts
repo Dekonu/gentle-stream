@@ -17,6 +17,7 @@ import { config } from "dotenv";
 config({ path: ".env.local" });
 
 let insertArticles: typeof import("../lib/db/articles").insertArticles;
+let buildHeadlineFingerprint: typeof import("../lib/db/articles").buildHeadlineFingerprint;
 let db: typeof import("../lib/db/client").db;
 
 /** Unique per process so parallel CI jobs on a shared DB do not share fingerprints. */
@@ -77,7 +78,20 @@ async function initDeps() {
     import("../lib/db/client"),
   ]);
   insertArticles = articlesMod.insertArticles;
+  buildHeadlineFingerprint = articlesMod.buildHeadlineFingerprint;
   db = clientMod.db;
+}
+
+/** Ensures the first insert is visible to fingerprint lookups (read replicas / PostgREST lag). */
+async function waitForFingerprintRow(fp: string, maxWaitMs = 15000): Promise<void> {
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    const { data, error } = await db.from("articles").select("id").eq("fingerprint", fp).limit(1);
+    if (error) throw new Error(error.message);
+    if (data && data.length > 0) return;
+    await sleep(200);
+  }
+  throw new Error(`Timed out waiting for fingerprint row: ${fp}`);
 }
 
 async function preCleanup() {
@@ -162,8 +176,8 @@ async function testWhitespaceVariant() {
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "Clean headline inserted");
 
-  // Read-after-write on shared DBs: wait so fingerprint pre-flight sees the first row.
-  await sleep(500);
+  const fp = buildHeadlineFingerprint(clean.headline, clean.category);
+  await waitForFingerprintRow(fp);
 
   const second = await insertArticles([padded]);
   assert(second.length === 0, "Padded variant blocked (fingerprint collapses whitespace)");
