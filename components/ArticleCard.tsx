@@ -26,6 +26,7 @@ import {
 import { CreatorBylineLink } from "@/components/articles/CreatorBylineLink";
 import { trackArticleEngagement } from "@/lib/engagement/client";
 import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
+import { GuestAuthPromptModal } from "@/components/auth/GuestAuthPromptModal";
 import { ArticleReaderModal } from "@/components/articles/ArticleReaderModal";
 import { ShareMenu } from "@/components/articles/ShareMenu";
 import {
@@ -285,6 +286,8 @@ export default function ArticleCard({
     useState<ArticleTranslationPayload | null>(null);
   const [showOriginalLanguage, setShowOriginalLanguage] = useState(false);
   const [dateInfoOpen, setDateInfoOpen] = useState(false);
+  const [guestAuthPromptOpen, setGuestAuthPromptOpen] = useState(false);
+  const [guestAuthLoginHref, setGuestAuthLoginHref] = useState("/login");
   const dateInfoWrapRef = useRef<HTMLDivElement>(null);
   const dateInfoHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const impressionLoggedRef = useRef(false);
@@ -593,12 +596,14 @@ export default function ArticleCard({
 
   const canSave = "id" in article && Boolean(article.id);
   const articleId = "id" in article && article.id ? article.id : null;
-  const promptSignIn = useCallback(() => {
+  const openGuestAuthPrompt = useCallback(() => {
     if (typeof window === "undefined") return;
     const nextPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-    const loginUrl = `/login?next=${encodeURIComponent(nextPath)}`;
-    window.location.assign(loginUrl);
+    setGuestAuthLoginHref(`/login?next=${encodeURIComponent(nextPath)}`);
+    setGuestAuthPromptOpen(true);
   }, []);
+
+  const closeGuestAuthPrompt = useCallback(() => setGuestAuthPromptOpen(false), []);
   const engagementContext = useMemo(
     () => ({
       source: "feed" as const,
@@ -961,7 +966,7 @@ export default function ArticleCard({
   const toggleLike = useCallback(async () => {
     if (!articleId || likeBusy || !likeStatusLoaded) return;
     if (!userApiAllowed) {
-      promptSignIn();
+      openGuestAuthPrompt();
       return;
     }
     setLikeBusy(true);
@@ -997,14 +1002,13 @@ export default function ArticleCard({
     } finally {
       setLikeBusy(false);
     }
-  }, [articleId, article.headline, liked, likeBusy, likeStatusLoaded, promptSignIn]);
+  }, [articleId, article.headline, liked, likeBusy, likeStatusLoaded, openGuestAuthPrompt]);
 
   const toggleSave = useCallback(async () => {
     if (!canSave || !("id" in article) || !article.id || saveBusy || !saveStatusLoaded)
       return;
     if (!userApiAllowed) {
-      setSaveMsg("Sign in to save articles.");
-      promptSignIn();
+      openGuestAuthPrompt();
       return;
     }
     setSaveBusy(true);
@@ -1090,7 +1094,7 @@ export default function ArticleCard({
     saveBusy,
     saveStatusLoaded,
     sourceUrls,
-    promptSignIn,
+    openGuestAuthPrompt,
   ]);
 
   const rateRecipe = useCallback(
@@ -2015,6 +2019,12 @@ export default function ArticleCard({
           }
         />
       ) : null}
+
+      <GuestAuthPromptModal
+        open={guestAuthPromptOpen}
+        loginHref={guestAuthLoginHref}
+        onClose={closeGuestAuthPrompt}
+      />
 
       {isHero && showHeroGapGame && (
         <div
