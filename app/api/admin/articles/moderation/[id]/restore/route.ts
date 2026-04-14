@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
-import { isAdmin } from "@/lib/auth/admin";
+import { requireAdmin } from "@/lib/api/adminAuth";
 import { restoreModeratedArticle } from "@/lib/db/articleModeration";
 import { parseJsonBody } from "@/lib/validation/http";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
@@ -15,26 +14,8 @@ export async function POST(
   context: { params: Promise<{ id: string }> }
 ) {
   const params = await context.params;
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return apiErrorResponse({
-      request,
-      status: 401,
-      code: API_ERROR_CODES.UNAUTHORIZED,
-      message: "Unauthorized",
-    });
-  }
-  if (!isAdmin({ userId: user.id, email: user.email ?? null })) {
-    return apiErrorResponse({
-      request,
-      status: 403,
-      code: API_ERROR_CODES.FORBIDDEN,
-      message: "Admin access required",
-    });
-  }
+  const admin = await requireAdmin(request);
+  if (!admin.ok) return admin.response;
 
   const parsedBody = await parseJsonBody({ request, schema: bodySchema });
   if (!parsedBody.ok) return parsedBody.response;
@@ -46,7 +27,7 @@ export async function POST(
   try {
     const result = await restoreModeratedArticle({
       articleId: params.id,
-      reviewerUserId: user.id,
+      reviewerUserId: admin.userId,
       note,
     });
     return NextResponse.json(result);

@@ -49,6 +49,7 @@ jobs:
       - run: npm run security:inventory
       - run: npm run security:rls-audit
       - run: npm run validation:route-json-casts
+      - run: npm run lint
       - run: npm run security:audit
         continue-on-error: true
       - run: npx tsc --noEmit

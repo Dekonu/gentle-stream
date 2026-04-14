@@ -31,6 +31,7 @@ import {
   resolveIngestDiscoveryProvider,
   type IngestDiscoveryProvider,
 } from "@/lib/agents/ingestDiscoveryProvider";
+import { parseJsonPayload, stripCodeFences } from "@/lib/agents/ingest/parsing";
 import { stripInlineHtmlToPlainText } from "@gentle-stream/feed-engine";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
@@ -1616,42 +1617,6 @@ async function callClaudeWithWebSearch(input: ClaudeRequestInput): Promise<{
     }
   }
   throw new Error("Claude API exhausted retries");
-}
-
-function parseJsonPayload(text: string): unknown {
-  const cleaned = stripCodeFences(text);
-  if (!cleaned) return null;
-  const objStart = cleaned.indexOf("{");
-  const objEnd = cleaned.lastIndexOf("}");
-  const arrStart = cleaned.indexOf("[");
-  const arrEnd = cleaned.lastIndexOf("]");
-
-  if (objStart !== -1 && objEnd !== -1) {
-    try {
-      return JSON.parse(cleaned.slice(objStart, objEnd + 1));
-    } catch {
-      // keep trying
-    }
-  }
-  if (arrStart !== -1 && arrEnd !== -1) {
-    try {
-      return JSON.parse(cleaned.slice(arrStart, arrEnd + 1));
-    } catch {
-      // keep trying
-    }
-  }
-  return null;
-}
-
-function stripCodeFences(text: string): string {
-  return text
-    .split("```json")
-    .join("")
-    .split("```JSON")
-    .join("")
-    .split("```")
-    .join("")
-    .trim();
 }
 
 function composeImagePromptFallback(

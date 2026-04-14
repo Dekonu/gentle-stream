@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { isAdmin } from "@/lib/auth/admin";
+import { requireAdmin } from "@/lib/api/adminAuth";
 import {
   type ModerationQueueFilter,
   listArticlesForModeration,
@@ -20,26 +19,8 @@ function parseFilter(value: string | null): ModerationQueueFilter {
 }
 
 export async function GET(request: NextRequest) {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return apiErrorResponse({
-      request,
-      status: 401,
-      code: API_ERROR_CODES.UNAUTHORIZED,
-      message: "Unauthorized",
-    });
-  }
-  if (!isAdmin({ userId: user.id, email: user.email ?? null })) {
-    return apiErrorResponse({
-      request,
-      status: 403,
-      code: API_ERROR_CODES.FORBIDDEN,
-      message: "Admin access required",
-    });
-  }
+  const admin = await requireAdmin(request);
+  if (!admin.ok) return admin.response;
 
   const url = new URL(request.url);
   const filter = parseFilter(url.searchParams.get("status"));

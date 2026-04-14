@@ -6,14 +6,14 @@ import type { Provider } from "@supabase/supabase-js";
 import { AppLogo } from "@/components/brand/AppLogo";
 import { createClient } from "@/lib/supabase/client";
 import { CREATOR_LOGIN_ENABLED } from "@/lib/feature-flags/regulatory";
+import {
+  getTurnstileApi,
+  resolveAuthRedirectBase,
+  safeNextPath,
+} from "@/components/auth/login-form-utils";
 
 /** Secondary text on login shell `#faf8f3` — WCAG AA for normal-sized copy (contrast ≥ 4.5:1). */
 const LOGIN_TEXT_MUTED = "#454545";
-
-function safeNextPath(raw: string | null): string {
-  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/";
-  return raw;
-}
 
 /**
  * OAuth / email-verification `redirect_to` must match this tab exactly (scheme + host + port).
@@ -23,40 +23,6 @@ function safeNextPath(raw: string | null): string {
  *
  * In the browser we always use `window.location.origin` so the address bar wins.
  */
-interface CloudflareTurnstileApi {
-  render: (
-    container: HTMLElement | string,
-    options: {
-      sitekey: string;
-      theme?: "light" | "dark" | "auto";
-      callback?: (token: string) => void;
-      "expired-callback"?: () => void;
-      "error-callback"?: () => void;
-    }
-  ) => string;
-  reset: (widgetId: string) => void;
-  remove: (widgetId: string) => void;
-}
-
-function getTurnstileApi(): CloudflareTurnstileApi | undefined {
-  if (typeof window === "undefined") return undefined;
-  return (window as unknown as { turnstile?: CloudflareTurnstileApi }).turnstile;
-}
-
-function resolveAuthRedirectBase(serverHint: string): string {
-  if (typeof window !== "undefined") {
-    const origin = window.location?.origin ?? "";
-    if (origin) return origin.replace(/\/$/, "");
-  }
-
-  const trimmed = serverHint.trim().replace(/\/$/, "");
-  if (trimmed) return trimmed;
-  const fromEnv =
-    process.env.NEXT_PUBLIC_AUTH_REDIRECT_ORIGIN?.trim().replace(/\/$/, "") ??
-    "";
-  if (fromEnv) return fromEnv;
-  return "";
-}
 
 export interface LoginFormProps {
   /** From server: OAuth/email-verification return origin (dev defaults to http://localhost:3000). */

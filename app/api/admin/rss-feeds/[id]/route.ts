@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
-import { isAdmin } from "@/lib/auth/admin";
+import { requireAdmin } from "@/lib/api/adminAuth";
 import { deleteRssFeed, updateRssFeed } from "@/lib/db/rssFeeds";
 import { parseJsonBody } from "@/lib/validation/http";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
@@ -20,43 +19,11 @@ const patchFeedSchema = z.object({
   toneRiskScore: z.number().int().min(0).max(10).optional(),
 });
 
-async function assertAdmin(request: NextRequest): Promise<
-  { ok: true } | { ok: false; response: NextResponse }
-> {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return {
-      ok: false,
-      response: apiErrorResponse({
-        request,
-        status: 401,
-        code: API_ERROR_CODES.UNAUTHORIZED,
-        message: "Unauthorized",
-      }),
-    };
-  }
-  if (!isAdmin({ userId: user.id, email: user.email ?? null })) {
-    return {
-      ok: false,
-      response: apiErrorResponse({
-        request,
-        status: 403,
-        code: API_ERROR_CODES.FORBIDDEN,
-        message: "Admin access required",
-      }),
-    };
-  }
-  return { ok: true };
-}
-
 export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
-  const admin = await assertAdmin(request);
+  const admin = await requireAdmin(request);
   if (!admin.ok) return admin.response;
   const params = paramsSchema.safeParse(await context.params);
   if (!params.success)
@@ -90,7 +57,7 @@ export async function DELETE(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
-  const admin = await assertAdmin(request);
+  const admin = await requireAdmin(request);
   if (!admin.ok) return admin.response;
   const params = paramsSchema.safeParse(await context.params);
   if (!params.success)
