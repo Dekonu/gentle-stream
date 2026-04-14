@@ -3,6 +3,7 @@ import { isAuthorizedCronRequest } from "@/lib/cron/verifyRequest";
 import { db } from "@/lib/db/client";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 import { captureException, captureMessage, flushOnShutdown, startSpan } from "@/lib/observability";
+import { logInfo, logWarning } from "@/lib/observability/logger";
 import { getEnv } from "@/lib/env";
 
 const WINDOW_HOURS = 24;
@@ -130,14 +131,22 @@ export async function GET(request: NextRequest) {
       checkedAt: new Date().toISOString(),
     };
     if (!status.ok) {
-      console.error("[EngagementHealth] Alerts:", alerts, metrics);
+      logWarning("cron.engagement_health.alerts_detected", {
+        alertCount: alerts.length,
+        sinceIso,
+      });
       captureMessage({
         level: "warning",
         message: "cron.engagement_health.alerts",
         context: { alertCount: alerts.length, sinceIso },
       });
     } else {
-      console.log("[EngagementHealth] OK", metrics);
+      logInfo("cron.engagement_health.ok", {
+        sinceIso,
+        totalEvents24h: metrics.totalEvents24h,
+        affinityRows24h: metrics.affinityRows24h,
+        uniqueCategoriesAvailable: metrics.uniqueCategoriesAvailable,
+      });
     }
     span.end({ ok: status.ok, alertCount: alerts.length });
     await flushOnShutdown();

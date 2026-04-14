@@ -507,6 +507,7 @@ export default function CrosswordCard({
     state.elapsedSecs,
     state.fullGridReveal,
     state.revealed.size,
+    puzzleSignature,
   ]);
 
   useEffect(() => {

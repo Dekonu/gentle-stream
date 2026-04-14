@@ -68,7 +68,7 @@ export function AvatarInput({
       setCropOpen(true);
       onError("");
     },
-    [onError, onProfileUpdate]
+    [onError]
   );
 
   const uploadCropped = useCallback(

@@ -366,6 +366,8 @@ See [`docs/versioning-policy.md`](docs/versioning-policy.md) for full release ru
 
 - Env matrix: [`docs/env-matrix.md`](docs/env-matrix.md)
 - Security model summary: [`docs/security-model.md`](docs/security-model.md)
+- Dependency audit policy: [`docs/dependency-audit-policy.md`](docs/dependency-audit-policy.md)
+- API route index: [`API.md`](API.md)
 - Security policy: [`SECURITY.md`](SECURITY.md)
 - Community conduct: [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
 - Contributor workflow: [`CONTRIBUTING.md`](CONTRIBUTING.md)

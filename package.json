@@ -64,6 +64,7 @@
     "security:inventory": "tsx scripts/security-route-inventory.ts",
     "security:rls-audit": "tsx scripts/security-rls-boundary-audit.ts",
     "security:audit": "npm audit --audit-level=high --omit=dev",
+    "security:audit:full": "npm audit --audit-level=low",
     "env:check": "tsx scripts/check-env.ts",
     "validation:route-json-casts": "tsx scripts/check-route-json-casts.ts"
   },

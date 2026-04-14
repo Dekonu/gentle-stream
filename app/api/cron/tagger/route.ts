@@ -13,6 +13,7 @@ import { isAuthorizedCronRequest } from "@/lib/cron/verifyRequest";
 import { runTaggerAgent } from "@/lib/agents/taggerAgent";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 import { captureException, flushOnShutdown, startSpan } from "@/lib/observability";
+import { logError } from "@/lib/observability/logger";
 
 export async function GET(request: NextRequest) {
   if (!isAuthorizedCronRequest(request)) {
@@ -34,7 +35,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: true, ranAt: new Date().toISOString() });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    console.error("[/api/cron/tagger] Error:", error);
+    logError("cron.tagger.error", {
+      route: "cron.tagger",
+      traceId: request.headers.get("x-trace-id") ?? undefined,
+      message,
+    }, error);
     captureException(error, {
       route: "cron.tagger",
       traceId: request.headers.get("x-trace-id") ?? undefined,

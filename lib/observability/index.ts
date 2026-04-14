@@ -1,3 +1,5 @@
+import { createRequire } from "node:module";
+
 interface ObservabilityContext {
   [key: string]: string | number | boolean | null | undefined;
 }
@@ -23,6 +25,7 @@ type SentryLike = {
 
 let cachedSentry: SentryLike | null = null;
 let sentryResolved = false;
+const requireFromHere = createRequire(import.meta.url);
 
 function toSerializableContext(context: ObservabilityContext | undefined): Record<string, unknown> {
   if (!context) return {};
@@ -46,8 +49,7 @@ function resolveSentry(): SentryLike | null {
   sentryResolved = true;
   // Keep Sentry optional to avoid runtime hard-fail when not installed/configured.
   try {
-    const dynamicRequire = eval("require") as (id: string) => unknown;
-    const mod = dynamicRequire("@sentry/nextjs") as Partial<SentryLike>;
+    const mod = requireFromHere("@sentry/nextjs") as Partial<SentryLike>;
     if (
       mod &&
       typeof mod.captureException === "function" &&

@@ -35,6 +35,7 @@ import {
   rateLimitExceededResponse,
 } from "@/lib/security/rateLimit";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
+import { logError, logInfo, logWarning } from "@/lib/observability/logger";
 
 const ANONYMOUS_USER_ID = "anonymous";
 const COLD_START_DEDUPE_MS = 45_000;
@@ -115,7 +116,11 @@ function startColdStartInBackground(input: {
     try {
       runId = await createCronIngestRun("feed-cold-start-async");
     } catch (error) {
-      console.warn("[/api/feed] Could not create async cold-start ingest run:", error);
+      logWarning(
+        "api.feed.cold_start.create_run_failed",
+        { route: "api.feed", category: input.category, userId: input.userId },
+        error
+      );
     }
 
     let ingestResult: Awaited<ReturnType<typeof runIngestAgent>> | null = null;
@@ -163,7 +168,11 @@ function startColdStartInBackground(input: {
             notes: `trigger=feed-cold-start-async; category=${input.category}; user=${input.userId}`,
           });
         } catch (logError) {
-          console.warn("[/api/feed] Could not persist async cold-start ingest logs:", logError);
+          logWarning(
+            "api.feed.cold_start.persist_logs_failed",
+            { route: "api.feed", category: input.category, userId: input.userId },
+            logError
+          );
         }
       }
     } catch (error: unknown) {
@@ -183,10 +192,18 @@ function startColdStartInBackground(input: {
             notes: `trigger=feed-cold-start-async; category=${input.category}; user=${input.userId}`,
           });
         } catch (logError) {
-          console.warn("[/api/feed] Could not finalize async cold-start ingest log:", logError);
+          logWarning(
+            "api.feed.cold_start.finalize_logs_failed",
+            { route: "api.feed", category: input.category, userId: input.userId },
+            logError
+          );
         }
       }
-      console.error("[/api/feed] Async cold-start failed:", error);
+      logError(
+        "api.feed.cold_start.failed",
+        { route: "api.feed", category: input.category, userId: input.userId },
+        error
+      );
     } finally {
       // Keep key briefly to avoid bursty requeues from many clients.
       setTimeout(() => {
@@ -253,13 +270,13 @@ export async function GET(request: NextRequest) {
     });
 
     if (result.articles.length >= pageSize) {
-      console.info("[/api/feed][profile]", {
+      logInfo("api.feed.profile", {
         requestId,
         userId: userId === ANONYMOUS_USER_ID ? "anonymous" : userId,
         sectionIndex,
         pageSize,
         category,
-        contentKinds,
+        contentKinds: contentKinds ? contentKinds.join(",") : "all",
         resultCount: result.articles.length,
         selectionMode: result.selectionMode,
         outcome: "db_full_page",
@@ -270,13 +287,13 @@ export async function GET(request: NextRequest) {
 
     // Partial page: serve what we have — do not block the UI on live ingest
     if (result.articles.length > 0) {
-      console.info("[/api/feed][profile]", {
+      logInfo("api.feed.profile", {
         requestId,
         userId: userId === ANONYMOUS_USER_ID ? "anonymous" : userId,
         sectionIndex,
         pageSize,
         category,
-        contentKinds,
+        contentKinds: contentKinds ? contentKinds.join(",") : "all",
         resultCount: result.articles.length,
         selectionMode: result.selectionMode,
         outcome: "db_partial_page",
@@ -287,16 +304,18 @@ export async function GET(request: NextRequest) {
 
     // `npm run dev-light` sets DEV_LIGHT=1 — never run ingest/tagger from this route
     if (isDevLight()) {
-      console.log(
-        `[/api/feed] DEV_LIGHT: skipping live ingest (no rows for "${result.category}")`
-      );
-      console.info("[/api/feed][profile]", {
+      logInfo("api.feed.dev_light_skip_ingest", {
+        requestId,
+        userId: userId === ANONYMOUS_USER_ID ? "anonymous" : userId,
+        category: result.category,
+      });
+      logInfo("api.feed.profile", {
         requestId,
         userId: userId === ANONYMOUS_USER_ID ? "anonymous" : userId,
         sectionIndex,
         pageSize,
         category,
-        contentKinds,
+        contentKinds: contentKinds ? contentKinds.join(",") : "all",
         resultCount: 0,
         outcome: "dev_light_skip_ingest",
         durationMs: Date.now() - startedAtMs,
@@ -306,13 +325,13 @@ export async function GET(request: NextRequest) {
 
     const canIngestNews = !contentKinds || contentKinds.includes("news");
     if (!canIngestNews) {
-      console.info("[/api/feed][profile]", {
+      logInfo("api.feed.profile", {
         requestId,
         userId: userId === ANONYMOUS_USER_ID ? "anonymous" : userId,
         sectionIndex,
         pageSize,
         category,
-        contentKinds,
+        contentKinds: contentKinds ? contentKinds.join(",") : "all",
         resultCount: 0,
         outcome: "non_news_filter_no_ingest",
         durationMs: Date.now() - startedAtMs,
@@ -321,9 +340,12 @@ export async function GET(request: NextRequest) {
     }
 
     // ── 2. True cold start (zero articles) — enqueue async refill ─────────────
-    console.log(
-      `[/api/feed] No articles for this request ("${result.category}") — queueing async ingest`
-    );
+    logInfo("api.feed.cold_start.queued", {
+      requestId,
+      userId: userId === ANONYMOUS_USER_ID ? "anonymous" : userId,
+      category: result.category,
+      sectionIndex,
+    });
 
     const resolvedCategory = (result.category || category || CATEGORIES[sectionIndex % CATEGORIES.length]) as Category;
     const coldStartQueued = startColdStartInBackground({
@@ -332,13 +354,13 @@ export async function GET(request: NextRequest) {
       pageSize,
     });
 
-    console.info("[/api/feed][profile]", {
+    logInfo("api.feed.profile", {
       requestId,
       userId: userId === ANONYMOUS_USER_ID ? "anonymous" : userId,
       sectionIndex,
       pageSize,
       category: resolvedCategory,
-      contentKinds,
+      contentKinds: contentKinds ? contentKinds.join(",") : "all",
       resultCount: 0,
       outcome: "cold_start_queued",
       coldStartQueued,
@@ -352,17 +374,20 @@ export async function GET(request: NextRequest) {
     });
   } catch (error: unknown) {
     const err = error instanceof Error ? error : new Error(String(error));
-    console.error("[/api/feed] Error", {
-      requestId,
-      userId: userId === ANONYMOUS_USER_ID ? "anonymous" : userId,
-      category,
-      sectionIndex,
-      pageSize,
-      contentKinds,
-      excludeCount: excludeArticleIds.length,
-      message: err.message,
-      stack: err.stack,
-    });
+    logError(
+      "api.feed.error",
+      {
+        requestId,
+        userId: userId === ANONYMOUS_USER_ID ? "anonymous" : userId,
+        category,
+        sectionIndex,
+        pageSize,
+        contentKinds: contentKinds ? contentKinds.join(",") : "all",
+        excludeCount: excludeArticleIds.length,
+        message: err.message,
+      },
+      err
+    );
     return apiErrorResponse({
       request,
       status: 500,

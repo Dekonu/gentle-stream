@@ -623,7 +623,14 @@ export default function SudokuCard({
         credentials: "include",
       });
     }
-  }, [metricsEnabled, cloudSaveEnabled, embedded, state.completed, state.elapsedSecs]);
+  }, [
+    metricsEnabled,
+    cloudSaveEnabled,
+    embedded,
+    state.completed,
+    state.elapsedSecs,
+    puzzleSignature,
+  ]);
 
   // Keyboard input (Shift+digit = toggle note without turning Notes mode on)
   useEffect(() => {

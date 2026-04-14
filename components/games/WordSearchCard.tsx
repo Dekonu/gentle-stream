@@ -313,6 +313,21 @@ export default function WordSearchCard({
   const stateRef = useRef(state);
   stateRef.current = state;
   const completionLogged = useRef(false);
+  const hydratedSliceKeyRef = useRef<string | null>(null);
+  const initialCloudSliceKey = useMemo(() => {
+    if (!initialCloudSlice) return null;
+    return JSON.stringify({
+      elapsedSecs: initialCloudSlice.elapsedSecs,
+      startedAt: initialCloudSlice.startedAt,
+      words: initialCloudSlice.words.map((word) => ({
+        row: word.row,
+        col: word.col,
+        direction: word.direction,
+        found: word.found,
+        word: word.word,
+      })),
+    });
+  }, [initialCloudSlice]);
 
   // Timer
   useEffect(() => {
@@ -321,19 +336,25 @@ export default function WordSearchCard({
     return () => clearInterval(id);
   }, [state.completed, state.startedAt, dispatch]);
 
-  // Reset + optional cloud hydrate
+  // Reset on puzzle change only (avoid accidental resets from slice identity churn)
   useEffect(() => {
     dispatch({ type: "RESET", puzzle });
-    if (initialCloudSlice) {
-      dispatch({
-        type: "HYDRATE",
-        words: initialCloudSlice.words,
-        elapsedSecs: initialCloudSlice.elapsedSecs,
-        startedAt: initialCloudSlice.startedAt,
-      });
-    }
     completionLogged.current = false;
-  }, [puzzle, initialCloudSlice, dispatch]);
+    hydratedSliceKeyRef.current = null;
+  }, [puzzle, dispatch]);
+
+  // Hydrate at most once per unique slice payload
+  useEffect(() => {
+    if (!initialCloudSlice || !initialCloudSliceKey) return;
+    if (hydratedSliceKeyRef.current === initialCloudSliceKey) return;
+    dispatch({
+      type: "HYDRATE",
+      words: initialCloudSlice.words,
+      elapsedSecs: initialCloudSlice.elapsedSecs,
+      startedAt: initialCloudSlice.startedAt,
+    });
+    hydratedSliceKeyRef.current = initialCloudSliceKey;
+  }, [dispatch, initialCloudSlice, initialCloudSliceKey]);
 
   useEffect(() => {
     if (!cloudSaveEnabled) return;
@@ -389,7 +410,13 @@ export default function WordSearchCard({
         credentials: "include",
       });
     }
-  }, [metricsEnabled, cloudSaveEnabled, state.completed, state.elapsedSecs]);
+  }, [
+    metricsEnabled,
+    cloudSaveEnabled,
+    state.completed,
+    state.elapsedSecs,
+    puzzleSignature,
+  ]);
 
   // ── Cell highlighting ────────────────────────────────────────────────────────
 
