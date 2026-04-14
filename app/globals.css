@@ -279,6 +279,62 @@ body {
   transform: translateY(0) scale(0.98);
 }
 
+/* Guest auth prompt (like / save while logged out) */
+.gs-guest-auth-cta-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 0.62rem 1rem;
+  border-radius: var(--gs-radius-pill);
+  border: 1px solid color-mix(in srgb, var(--gs-accent) 50%, var(--gs-ink-strong));
+  background: var(--gs-accent);
+  color: var(--gs-surface-elevated);
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-decoration: none;
+  text-align: center;
+  box-shadow: var(--gs-shadow-control);
+  cursor: pointer;
+  transition:
+    filter var(--gs-motion-fast) var(--gs-ease-standard),
+    box-shadow var(--gs-motion-fast) var(--gs-ease-standard);
+}
+
+html[data-theme="dark"] .gs-guest-auth-cta-primary {
+  color: var(--gs-bg);
+}
+
+.gs-guest-auth-cta-primary:hover {
+  filter: brightness(1.07);
+}
+
+.gs-guest-auth-cta-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 0.56rem 1rem;
+  border-radius: var(--gs-radius-pill);
+  border: 1px solid color-mix(in srgb, var(--gs-border-strong) 70%, transparent);
+  background: color-mix(in srgb, var(--gs-surface-elevated) 58%, transparent);
+  color: var(--gs-muted);
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: 0.76rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background var(--gs-motion-fast) var(--gs-ease-standard);
+}
+
+.gs-guest-auth-cta-secondary:hover {
+  background: color-mix(in srgb, var(--gs-surface-elevated) 78%, transparent);
+}
+
 .gs-card-lift {
   transition:
     transform var(--gs-motion-normal) var(--gs-ease-standard),

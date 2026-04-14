@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Masthead, { MASTHEAD_TOP_BAR_HEIGHT_PX } from "./Masthead";
 import { ProfileMenu } from "./user/ProfileMenu";
 import { GuestProfileMenu } from "./user/GuestProfileMenu";
@@ -135,6 +135,58 @@ function spotifyContentSignature(data: SpotifyMoodTileData | null): string | nul
   ].join("::");
 }
 
+/**
+ * Persistent feed restore rehydrates article rows (including reading-rail weather) before refs are set.
+ * Without syncing, `loadMore` treats weather as not yet placed and inserts the singleton row again.
+ */
+export function deriveSingletonPlacementFromHydratedSections(sections: FeedSection[]): {
+  weatherBriefLoaded: boolean;
+  singletonPlaced: { weather: boolean; spotify: boolean; nasa: boolean };
+  nasaSurfaceUsed: boolean;
+  spotifySignatures: string[];
+} {
+  let weatherBriefLoaded = false;
+  let spotifyPlaced = false;
+  let nasaPlaced = false;
+  const spotifySignatures: string[] = [];
+
+  for (const section of sections) {
+    if (section.sectionType === "module" || section.sectionType === "filler") {
+      if (section.moduleType === "weather") weatherBriefLoaded = true;
+      if (section.moduleType === "spotify") spotifyPlaced = true;
+      if (section.moduleType === "nasa") nasaPlaced = true;
+      if (section.moduleType === "spotify") {
+        const sig = spotifyContentSignature(section.data as SpotifyMoodTileData);
+        if (sig) spotifySignatures.push(sig);
+      }
+    }
+    if (section.sectionType !== "articles") continue;
+    const rail = section.newspaperLayout?.readingRail;
+    if (!rail?.enabled) continue;
+    for (const mod of [rail.primary, rail.secondary]) {
+      if (!mod) continue;
+      if (mod.kind === "weather") weatherBriefLoaded = true;
+      if (mod.kind === "spotify") {
+        spotifyPlaced = true;
+        const sig = spotifyContentSignature(mod.data);
+        if (sig) spotifySignatures.push(sig);
+      }
+      if (mod.kind === "nasa") nasaPlaced = true;
+    }
+  }
+
+  return {
+    weatherBriefLoaded,
+    singletonPlaced: {
+      weather: weatherBriefLoaded,
+      spotify: spotifyPlaced,
+      nasa: nasaPlaced,
+    },
+    nasaSurfaceUsed: nasaPlaced,
+    spotifySignatures,
+  };
+}
+
 function buildEditorialBreatherData(input: {
   sectionIndex: number;
   category?: string;
@@ -171,9 +223,19 @@ export interface NewsFeedProps {
   userId: string;
   userEmail?: string | null;
   isAdmin?: boolean;
+  /**
+   * Mirrors `FEED_INCLUDE_USER_SUBMITTED`. When false, the feed excludes creator
+   * submissions and the "User articles" kind chip is not shown.
+   */
+  feedIncludeUserSubmitted?: boolean;
 }
 
-export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFeedProps) {
+export default function NewsFeed({
+  userId,
+  userEmail,
+  isAdmin = false,
+  feedIncludeUserSubmitted = true,
+}: NewsFeedProps) {
   const isGuestUser = userId === GUEST_USER_ID;
   const [mfaPassed, setMfaPassed] = useState(userId === "dev-local" || isGuestUser);
   const [sections, setSections] = useState<FeedSection[]>([]);
@@ -340,6 +402,15 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         -1
       );
       if (boundedSections.length === 0) return false;
+
+      const placement = deriveSingletonPlacementFromHydratedSections(hydratedSections);
+      if (placement.weatherBriefLoaded) weatherBriefLoadedRef.current = true;
+      singletonPlacedRef.current = placement.singletonPlaced;
+      if (placement.nasaSurfaceUsed) nasaSurfaceUsedRef.current = true;
+      for (const sig of placement.spotifySignatures) {
+        seenSpotifySignaturesRef.current.add(sig);
+      }
+
       setSections(hydratedSections);
       sectionCountRef.current = Math.max(
         Math.max(0, Math.trunc(parsed.sectionCount ?? parsed.sections.length)),
@@ -1794,6 +1865,27 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     resetFeedAndLoad();
   }, [searchInput, resetFeedAndLoad]);
 
+  const kindFilterChipOptions = useMemo(
+    () =>
+      (
+        [
+          { value: "all" as const, label: "All" },
+          { value: "news" as const, label: "News" },
+          { value: "user_article" as const, label: "User articles" },
+          { value: "recipe" as const, label: "Recipes" },
+        ] as const
+      ).filter((option) =>
+        feedIncludeUserSubmitted ? true : option.value !== "user_article"
+      ),
+    [feedIncludeUserSubmitted]
+  );
+
+  useEffect(() => {
+    if (feedIncludeUserSubmitted) return;
+    if (activeKindFilterRef.current !== "user_article") return;
+    handleKindFilterSelect("all");
+  }, [feedIncludeUserSubmitted, handleKindFilterSelect]);
+
   if (!mfaPassed) {
     return <MfaChallengeGate onPassed={() => setMfaPassed(true)} />;
   }
@@ -1840,14 +1932,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           boxShadow: "0 8px 24px rgba(22, 15, 8, 0.06)",
         }}
       >
-        {(
-          [
-            { value: "all", label: "All" },
-            { value: "news", label: "News" },
-            { value: "user_article", label: "User articles" },
-            { value: "recipe", label: "Recipes" },
-          ] as const
-        ).map((option) => {
+        {kindFilterChipOptions.map((option) => {
           const active = activeKindFilter === option.value;
           return (
             <button
