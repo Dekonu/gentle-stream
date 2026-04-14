@@ -135,6 +135,58 @@ function spotifyContentSignature(data: SpotifyMoodTileData | null): string | nul
   ].join("::");
 }
 
+/**
+ * Persistent feed restore rehydrates article rows (including reading-rail weather) before refs are set.
+ * Without syncing, `loadMore` treats weather as not yet placed and inserts the singleton row again.
+ */
+export function deriveSingletonPlacementFromHydratedSections(sections: FeedSection[]): {
+  weatherBriefLoaded: boolean;
+  singletonPlaced: { weather: boolean; spotify: boolean; nasa: boolean };
+  nasaSurfaceUsed: boolean;
+  spotifySignatures: string[];
+} {
+  let weatherBriefLoaded = false;
+  let spotifyPlaced = false;
+  let nasaPlaced = false;
+  const spotifySignatures: string[] = [];
+
+  for (const section of sections) {
+    if (section.sectionType === "module" || section.sectionType === "filler") {
+      if (section.moduleType === "weather") weatherBriefLoaded = true;
+      if (section.moduleType === "spotify") spotifyPlaced = true;
+      if (section.moduleType === "nasa") nasaPlaced = true;
+      if (section.moduleType === "spotify") {
+        const sig = spotifyContentSignature(section.data as SpotifyMoodTileData);
+        if (sig) spotifySignatures.push(sig);
+      }
+    }
+    if (section.sectionType !== "articles") continue;
+    const rail = section.newspaperLayout?.readingRail;
+    if (!rail?.enabled) continue;
+    for (const mod of [rail.primary, rail.secondary]) {
+      if (!mod) continue;
+      if (mod.kind === "weather") weatherBriefLoaded = true;
+      if (mod.kind === "spotify") {
+        spotifyPlaced = true;
+        const sig = spotifyContentSignature(mod.data);
+        if (sig) spotifySignatures.push(sig);
+      }
+      if (mod.kind === "nasa") nasaPlaced = true;
+    }
+  }
+
+  return {
+    weatherBriefLoaded,
+    singletonPlaced: {
+      weather: weatherBriefLoaded,
+      spotify: spotifyPlaced,
+      nasa: nasaPlaced,
+    },
+    nasaSurfaceUsed: nasaPlaced,
+    spotifySignatures,
+  };
+}
+
 function buildEditorialBreatherData(input: {
   sectionIndex: number;
   category?: string;
@@ -350,6 +402,15 @@ export default function NewsFeed({
         -1
       );
       if (boundedSections.length === 0) return false;
+
+      const placement = deriveSingletonPlacementFromHydratedSections(hydratedSections);
+      if (placement.weatherBriefLoaded) weatherBriefLoadedRef.current = true;
+      singletonPlacedRef.current = placement.singletonPlaced;
+      if (placement.nasaSurfaceUsed) nasaSurfaceUsedRef.current = true;
+      for (const sig of placement.spotifySignatures) {
+        seenSpotifySignaturesRef.current.add(sig);
+      }
+
       setSections(hydratedSections);
       sectionCountRef.current = Math.max(
         Math.max(0, Math.trunc(parsed.sectionCount ?? parsed.sections.length)),
