@@ -25,6 +25,39 @@ async function initDeps() {
 let passed = 0;
 let failed = 0;
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function findAffinityRow(
+  rows: { category: string; affinity_score?: number | null; interactions?: number | null }[],
+  categoryLabel: string
+) {
+  const want = categoryLabel.trim().toLowerCase();
+  return rows.find((r) => (r.category ?? "").trim().toLowerCase() === want);
+}
+
+/** Follow-up reads can hit a lagging replica right after `refresh_user_article_affinity`. */
+async function readAffinityRowsAfterRefresh(
+  userId: string,
+  expectAtLeast: number,
+  maxWaitMs = process.env.CI ? 20_000 : 8_000
+): Promise<{ category: string; affinity_score: number | null; interactions: number | null }[]> {
+  const deadline = Date.now() + maxWaitMs;
+  let last: { category: string; affinity_score: number | null; interactions: number | null }[] = [];
+  while (Date.now() < deadline) {
+    const { data, error: affErr } = await db
+      .from("user_article_affinity")
+      .select("category, affinity_score, interactions")
+      .eq("user_id", userId);
+    if (affErr) throw new Error(affErr.message);
+    last = data ?? [];
+    if (last.length >= expectAtLeast) return last;
+    await sleep(250);
+  }
+  return last;
+}
+
 function assert(condition: boolean, label: string, detail?: string) {
   if (condition) {
     console.log(`  ✓  ${label}`);
@@ -123,7 +156,8 @@ async function testAffinityWeightingAndDecay() {
 
   const now = Date.now();
   const recent = new Date(now - 1 * 24 * 60 * 60 * 1000).toISOString();
-  const oldOutsideWindow = new Date(now - 45 * 24 * 60 * 60 * 1000).toISOString();
+  // Well outside the RPC's 30d window; avoid ~45d if client/server clocks differ materially.
+  const oldOutsideWindow = new Date(now - 120 * 24 * 60 * 60 * 1000).toISOString();
 
   const { error: insertEvtErr } = await db.from("article_engagement_events").insert([
     {
@@ -150,29 +184,42 @@ async function testAffinityWeightingAndDecay() {
   ]);
   assert(!insertEvtErr, "Inserted engagement events", insertEvtErr?.message);
 
+  const { count: evtCount, error: evtCountErr } = await db
+    .from("article_engagement_events")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", testUserId);
+  assert(!evtCountErr, "Count engagement events for test user", evtCountErr?.message);
+  assert(
+    evtCount === 3,
+    "Three engagement events inserted for test user",
+    `count=${evtCount ?? "null"}`
+  );
+
   const { error: rpcErr } = await db.rpc("refresh_user_article_affinity", {
     p_user_id: testUserId,
   });
   assert(!rpcErr, "refresh_user_article_affinity RPC succeeds", rpcErr?.message);
 
-  const { data: affinityRows, error: affErr } = await db
-    .from("user_article_affinity")
-    .select("category, affinity_score, interactions")
-    .eq("user_id", testUserId);
+  const rows = await readAffinityRowsAfterRefresh(testUserId, 2);
+  assert(
+    rows.length >= 2,
+    "User affinity has at least two category rows after refresh",
+    rows.length === 0 ? "no rows (check replica lag / RPC / articles.deleted_at)" : JSON.stringify(rows)
+  );
 
-  assert(!affErr, "Read user affinity rows", affErr?.message);
-  const rows = affinityRows ?? [];
-  const science = rows.find((r) => r.category === "Science & Discovery");
-  const education = rows.find((r) => r.category === "Education");
-  assert(Boolean(science), "Science affinity row exists");
-  assert(Boolean(education), "Education affinity row exists");
+  const science = findAffinityRow(rows, "Science & Discovery");
+  const education = findAffinityRow(rows, "Education");
+  assert(Boolean(science), "Science affinity row exists", JSON.stringify(rows));
+  assert(Boolean(education), "Education affinity row exists", JSON.stringify(rows));
   assert(
     (science?.affinity_score ?? 0) > (education?.affinity_score ?? 0),
-    "Save-weighted science score outranks impression-only education score"
+    "Save-weighted science score outranks impression-only education score",
+    `science=${science?.affinity_score} education=${education?.affinity_score}`
   );
   assert(
     (education?.interactions ?? 0) === 1,
-    "Events older than 30d excluded from interactions"
+    "Events older than 30d excluded from interactions",
+    `education.interactions=${education?.interactions} (expected only recent impression + in-window events)`
   );
 }
 
