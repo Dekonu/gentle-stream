@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { Component } from "react";
-import { captureException } from "@/lib/observability";
+import { captureException } from "@/lib/observability/client";
 
 interface InlineErrorBoundaryProps {
   children: ReactNode;

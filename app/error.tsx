@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { captureException } from "@/lib/observability";
+import { captureException } from "@/lib/observability/client";
 
 interface ErrorPageProps {
   error: Error & { digest?: string };
