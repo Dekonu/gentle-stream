@@ -160,7 +160,7 @@ Dark mode is currently experimental; contrast hardening is actively tracked and 
 
 ### Prerequisites
 
-- **Node.js 22+** (CI uses 22; see `.nvmrc`)
+- **Node.js 22+** (CI uses 24; see `.nvmrc`)
 - A [Supabase](https://supabase.com) project
 - An [Anthropic](https://console.anthropic.com) API key (for ingest / tagger)
 
