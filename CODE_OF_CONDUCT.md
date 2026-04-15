@@ -36,7 +36,7 @@ individual is representing the project or its community.
 
 To report unacceptable behavior, contact the maintainers at:
 
-- `NEXT_PUBLIC_SUPPORT_EMAIL` (project support mailbox)
+- `admin@gentle-stream.org` (project support mailbox)
 
 Include relevant context, links, and screenshots where possible. Reports will be reviewed
 promptly and handled confidentially to the extent possible.
