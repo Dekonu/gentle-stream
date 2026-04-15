@@ -29,12 +29,23 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Match editorial categories across minor string differences (whitespace, ampersand forms). */
+function normalizeCategoryForMatch(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .replace(/\uFF06/g, "&") // fullwidth ampersand (rare DB / copy-paste)
+    .replace(/\s*&\s*/g, " & ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function findAffinityRow(
   rows: { category: string; affinity_score?: number | null; interactions?: number | null }[],
   categoryLabel: string
 ) {
-  const want = categoryLabel.trim().toLowerCase();
-  return rows.find((r) => (r.category ?? "").trim().toLowerCase() === want);
+  const want = normalizeCategoryForMatch(categoryLabel);
+  return rows.find((r) => normalizeCategoryForMatch(r.category ?? "") === want);
 }
 
 /** Follow-up reads can hit a lagging replica right after `refresh_user_article_affinity`. */
@@ -200,6 +211,22 @@ async function testAffinityWeightingAndDecay() {
   });
   assert(!rpcErr, "refresh_user_article_affinity RPC succeeds", rpcErr?.message);
 
+  // Ground-truth categories from `articles` (must match RPC JOIN); avoids literal drift vs DB.
+  const { data: articleCats, error: artCatErr } = await db
+    .from("articles")
+    .select("id, category, deleted_at")
+    .in("id", [scienceId, educationId]);
+  assert(!artCatErr, "Load categories for seed articles", artCatErr?.message);
+  const scienceArticle = articleCats?.find((r) => String(r.id) === String(scienceId));
+  const educationArticle = articleCats?.find((r) => String(r.id) === String(educationId));
+  assert(Boolean(scienceArticle?.category), "Science seed article has category");
+  assert(Boolean(educationArticle?.category), "Education seed article has category");
+  assert(
+    scienceArticle?.deleted_at == null && educationArticle?.deleted_at == null,
+    "Seed articles not soft-deleted (refresh RPC filters deleted_at)",
+    JSON.stringify({ scienceArticle, educationArticle })
+  );
+
   const rows = await readAffinityRowsAfterRefresh(testUserId, 2);
   assert(
     rows.length >= 2,
@@ -207,8 +234,11 @@ async function testAffinityWeightingAndDecay() {
     rows.length === 0 ? "no rows (check replica lag / RPC / articles.deleted_at)" : JSON.stringify(rows)
   );
 
-  const science = findAffinityRow(rows, "Science & Discovery");
-  const education = findAffinityRow(rows, "Education");
+  const scienceCat = scienceArticle?.category as string;
+  const educationCat = educationArticle?.category as string;
+
+  const science = findAffinityRow(rows, scienceCat);
+  const education = findAffinityRow(rows, educationCat);
   assert(Boolean(science), "Science affinity row exists", JSON.stringify(rows));
   assert(Boolean(education), "Education affinity row exists", JSON.stringify(rows));
   assert(
