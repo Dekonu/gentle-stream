@@ -266,7 +266,7 @@ export function LoginForm({
         resetTurnstileWidget();
         return;
       }
-      window.location.assign("/");
+      window.location.assign(nextPath || "/");
     } finally {
       setGuestBusy(false);
     }

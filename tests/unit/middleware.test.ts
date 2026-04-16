@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { GUEST_ACCESS_COOKIE } from "@/lib/auth/guest-access";
 
@@ -22,6 +22,10 @@ vi.mock("@/lib/supabase/response-client", () => ({
 }));
 
 describe("updateSession middleware", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("passes through when auth disabled in non-production", async () => {
     const mutableEnv = process.env as Record<string, string | undefined>;
     mutableEnv.NODE_ENV = "development";
@@ -98,5 +102,40 @@ describe("updateSession middleware", () => {
     });
     const res = await updateSession(req);
     expect(res.status).toBe(200);
+  });
+
+  it("allows anonymous access to public article pages", async () => {
+    const mutableEnv = process.env as Record<string, string | undefined>;
+    mutableEnv.NODE_ENV = "development";
+    delete mutableEnv.AUTH_DISABLED;
+    mutableEnv.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+    mutableEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY = "fake-anon-key";
+    getUserMock.mockResolvedValueOnce({ data: { user: null } });
+
+    const { updateSession } = await import("@/lib/supabase/middleware");
+    const req = new NextRequest(
+      "http://localhost:3000/article/00000000-0000-4000-8000-000000000000"
+    );
+    const res = await updateSession(req);
+    expect(res.status).toBe(200);
+  });
+
+  it("logs out signed-in users when session start cookie is missing", async () => {
+    const mutableEnv = process.env as Record<string, string | undefined>;
+    mutableEnv.NODE_ENV = "development";
+    delete mutableEnv.AUTH_DISABLED;
+    mutableEnv.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+    mutableEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY = "fake-anon-key";
+    getUserMock.mockResolvedValueOnce({ data: { user: { id: "user-1" } } });
+
+    const { updateSession } = await import("@/lib/supabase/middleware");
+    const req = new NextRequest("http://localhost:3000/profile");
+    const res = await updateSession(req);
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toContain(
+      "/login?reason=session_expired&next=%2Fprofile"
+    );
+    expect(signOutMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -434,24 +434,39 @@ async function fetchExistingFingerprints(fps: string[]): Promise<Set<string>> {
     unique.push(fp);
   }
   if (unique.length === 0) return new Set();
+  const found = new Set<string>();
+  const maxAttempts = 3;
 
-  const rows = await Promise.all(
-    unique.map(async (fp) => {
-      const { data, error } = await db
-        .from("articles")
-        .select("fingerprint")
-        .eq("fingerprint", fp)
-        .limit(1);
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const pending = unique.filter((fp) => !found.has(fp));
+    if (pending.length === 0) break;
 
-      if (error) {
-        throw new Error(`insertArticles: fingerprint lookup: ${error.message}`);
-      }
-      const row = data?.[0] as { fingerprint: string } | undefined;
-      return row?.fingerprint;
-    })
-  );
+    const rows = await Promise.all(
+      pending.map(async (fp) => {
+        const { data, error } = await db
+          .from("articles")
+          .select("fingerprint")
+          .eq("fingerprint", fp)
+          .limit(1);
 
-  return new Set(rows.filter((fp): fp is string => fp != null));
+        if (error) {
+          throw new Error(`insertArticles: fingerprint lookup: ${error.message}`);
+        }
+        const row = data?.[0] as { fingerprint: string } | undefined;
+        return row?.fingerprint;
+      })
+    );
+
+    rows
+      .filter((fp): fp is string => fp != null)
+      .forEach((fp) => found.add(fp));
+
+    if (found.size === unique.length || attempt === maxAttempts - 1) break;
+
+    await sleepMs(120 * (attempt + 1));
+  }
+
+  return found;
 }
 
 // ─── Public DB helpers ────────────────────────────────────────────────────────

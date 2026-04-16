@@ -15,13 +15,15 @@ export interface SentryLike {
 let cachedSentry: SentryLike | null = null;
 let sentryResolved = false;
 const requireFromHere = createRequire(import.meta.url);
+const SENTRY_NEXTJS_PACKAGE = ["@sentry", "nextjs"].join("/");
 
 export function resolveSentry(): SentryLike | null {
   if (sentryResolved) return cachedSentry;
   sentryResolved = true;
   // Keep Sentry optional to avoid runtime hard-fail when not installed/configured.
   try {
-    const mod = requireFromHere("@sentry/nextjs") as Partial<SentryLike>;
+    // Keep module id non-literal so Next doesn't hard-resolve optional dependency at build time.
+    const mod = requireFromHere(SENTRY_NEXTJS_PACKAGE) as Partial<SentryLike>;
     if (
       mod &&
       typeof mod.captureException === "function" &&
