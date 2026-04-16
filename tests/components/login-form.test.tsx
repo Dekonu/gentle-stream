@@ -4,7 +4,8 @@ import { LoginForm } from "@/components/auth/LoginForm";
 
 const createClientMock = vi.fn();
 vi.mock("next/image", () => ({
-  default: (props: React.ImgHTMLAttributes<HTMLImageElement>) => <img {...props} />,
+  default: (props: React.ImgHTMLAttributes<HTMLImageElement>) =>
+    React.createElement("img", { ...props, alt: props.alt ?? "" }),
 }));
 vi.mock("next/script", () => ({
   default: (props: Record<string, unknown>) => {

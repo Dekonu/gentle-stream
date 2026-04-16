@@ -143,29 +143,17 @@ async function waitUntilFingerprintQueryable(fingerprint: string): Promise<void>
 async function preCleanup() {
   // These integration tests run against a shared Supabase DB, so older runs can
   // leave behind rows that would make "first insert" assertions fail.
-  console.log("\n🧽 Pre-cleaning leftover test rows (fingerprint collisions)...");
+  console.log("\n🧽 Pre-cleaning this run's leftover test rows (fingerprint collisions)...");
 
   const { data: byHeadline, error: e1 } = await db
     .from("articles")
     .delete()
-    .or("headline.ilike.%TEST_DEDUP%,headline.ilike.%TEST_URL_DEDUP%")
+    .or(`headline.ilike.%TEST_DEDUP_${runTag}%,headline.ilike.%TEST_URL_DEDUP_${runTag}%`)
     .select("id");
 
   if (e1) throw new Error(e1.message);
-
-  const { data: byFixture, error: e2 } = await db
-    .from("articles")
-    .delete()
-    .ilike("byline", "%Test Runner%")
-    .ilike("location", "%Testland%")
-    .ilike("subheadline", "%test subheadline%")
-    .select("id");
-
-  if (e2) throw new Error(e2.message);
-
   const n1 = byHeadline?.length ?? 0;
-  const n2 = byFixture?.length ?? 0;
-  console.log(`🧹 Removed ${n1 + n2} leftover row(s) before assertions`);
+  console.log(`🧹 Removed ${n1} leftover row(s) before assertions`);
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

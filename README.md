@@ -108,8 +108,8 @@ The ingest agent tracks real `usage.input_tokens` against a conservative per-min
 | Layer | What runs |
 |-------|-----------|
 | **Typecheck & build** | `tsc --noEmit` and `next build` with placeholder public env vars (no secrets on fork PRs). |
-| **Unit / generator tests** | `scripts/test-citations.ts`, `test-sudoku.ts`, `test-word-search.ts`, `test-killer-nonogram.ts` — no DB. |
-| **DB integration** | `test-dedup.ts`, `test-url-dedup.ts` — real Supabase; tagged test rows cleaned up in `finally`. |
+| **Unit / generator tests** | `tests/unit/articleDedupKeys.test.ts` (pure fingerprint + URL key normalization), `scripts/test-citations.ts`, `test-sudoku.ts`, `test-word-search.ts`, `test-killer-nonogram.ts` — no DB dependency for dedup key semantics. |
+| **DB integration** | `test-dedup.ts`, `test-url-dedup.ts` — real Supabase integration smoke checks (overlap queries + constraints); tagged test rows cleaned up in `finally`. |
 | **Security weekly audits** | Scheduled GitHub workflow `/.github/workflows/security-weekly.yml` runs `npm run security:inventory`, `npm run security:rls-audit`, and `npm run security:audit` weekly. |
 | **GitHub Actions** | Reusable workflow: **CI** on pull requests and pushes to `develop` (unit + component + Storybook tests, Playwright smoke, and DB integration when secrets are available). Additional workflows run **cross-browser E2E** on `develop` pushes/manual dispatch and a **nightly full E2E matrix**. |
 | **Vercel** | `vercel.json` currently enables Git deployments on `main` and disables them on `develop`/`feature/*`; production can still be promoted via `deploy.yml`. |

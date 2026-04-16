@@ -5,6 +5,9 @@ import type { ArticleContentKind, ArticleModerationStatus, StoredArticle } from 
 import { RECIPE_CATEGORY, type ArticleStorageCategory, type Category } from "../constants";
 import { v4 as uuidv4 } from "uuid";
 import { getEnv } from "@/lib/env";
+import { buildHeadlineFingerprint, normaliseUrl } from "@/lib/articles/dedup-keys";
+
+export { buildHeadlineFingerprint, normaliseUrl };
 
 const NON_EXPIRING_EXPIRES_AT = "2100-01-01T00:00:00.000Z";
 const env = getEnv();
@@ -15,6 +18,10 @@ const isSeenTableReadsEnabled =
 const isUserSubmittedEnabled = env.FEED_INCLUDE_USER_SUBMITTED ?? true;
 let isFeedSeenRpcAvailable = true;
 let isModerationColumnsAvailable = true;
+const shouldFailOnUrlOverlapError =
+  process.env.CI === "true" ||
+  process.env.CI === "1" ||
+  process.env.DEDUP_STRICT_URL_OVERLAP === "1";
 
 function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -312,20 +319,6 @@ function mergeTags(explicitTags: string[], inferredTags: string[]): string[] {
 
 // ─── Deduplication helpers ────────────────────────────────────────────────────
 
-/**
- * Compute a headline fingerprint: lowercase, whitespace-collapsed,
- * with punctuation stripped so "Bull Sharks' Social Lives" and
- * "Bull Sharks Social Lives" hash identically.
- */
-export function buildHeadlineFingerprint(headline: string, category: string): string {
-  const normalised = headline
-    .toLowerCase()
-    .replace(/['''"",.:;!?()[\]]/g, "")  // strip punctuation
-    .replace(/\s+/g, " ")
-    .trim();
-  return `${normalised}|${category.toLowerCase()}`;
-}
-
 export interface IngestConflictRecord {
   id: string;
   headline: string;
@@ -340,32 +333,6 @@ export interface IngestPrecheckResult {
   fingerprint: string;
   normalizedUrls: string[];
   conflict: IngestConflictRecord | null;
-}
-
-/**
- * Normalise a URL so that http/https, www, trailing slashes, and common
- * tracking query params don't create false negatives.
- *
- * Examples that resolve to the same key:
- *   https://www.bbc.com/news/article-123?source=rss   →  bbc.com/news/article-123
- *   http://bbc.com/news/article-123/                  →  bbc.com/news/article-123
- */
-export function normaliseUrl(url: string): string {
-  try {
-    const u = new URL(url);
-    // Strip scheme, www., query string, and hash
-    const host = u.hostname.replace(/^www\./, "");
-    // Keep only the path, removing trailing slash
-    const path = u.pathname.replace(/\/$/, "");
-    return `${host}${path}`.toLowerCase();
-  } catch {
-    // If URL parsing fails, fall back to simple lowercasing
-    return url
-      .replace(/^https?:\/\/(www\.)?/, "")
-      .replace(/[?#].*$/, "")
-      .replace(/\/$/, "")
-      .toLowerCase();
-  }
 }
 
 /**
@@ -386,8 +353,12 @@ async function findUrlConflict(
     .limit(20);
 
   if (error) {
-    // Don't hard-fail — URL check is best-effort
-    console.warn("[insertArticles] URL overlap check failed:", error.message);
+    const detail = `insertArticles: URL overlap check failed for [${normalisedUrls.join(", ")}]: ${error.message}`;
+    if (shouldFailOnUrlOverlapError) {
+      throw new Error(detail);
+    }
+    // Non-CI environments can continue in best-effort mode.
+    console.warn(`[insertArticles] ${detail}`);
     return null;
   }
 
@@ -417,6 +388,24 @@ async function findUrlConflict(
     fetchedAt: top.fetched_at,
     matchedUrl,
   };
+}
+
+function logDedupDecision(input: {
+  reason: "fingerprint" | "url_overlap" | "batch_duplicate" | "none";
+  headline: string;
+  fingerprint: string;
+  normalizedUrls: string[];
+  conflictId?: string;
+}) {
+  const summary = {
+    reason: input.reason,
+    headline: input.headline,
+    fingerprint: input.fingerprint,
+    normalizedUrlCount: input.normalizedUrls.length,
+    normalizedUrls: input.normalizedUrls,
+    conflictId: input.conflictId ?? null,
+  };
+  console.log(`[insertArticles][dedup] ${JSON.stringify(summary)}`);
 }
 
 /**
@@ -506,6 +495,12 @@ export async function insertArticles(
 
   for (const candidate of candidates) {
     if (existingFps.has(candidate.fp)) {
+      logDedupDecision({
+        reason: "fingerprint",
+        headline: candidate.article.headline,
+        fingerprint: candidate.fp,
+        normalizedUrls: candidate.normUrls,
+      });
       console.log(
         `[insertArticles] Headline fingerprint match — skipping: "${candidate.article.headline}"`
       );
@@ -513,6 +508,12 @@ export async function insertArticles(
     }
 
     if (seenFpInBatch.has(candidate.fp)) {
+      logDedupDecision({
+        reason: "batch_duplicate",
+        headline: candidate.article.headline,
+        fingerprint: candidate.fp,
+        normalizedUrls: candidate.normUrls,
+      });
       console.log(
         `[insertArticles] Batch duplicate fingerprint — skipping: "${candidate.article.headline}"`
       );
@@ -521,12 +522,25 @@ export async function insertArticles(
 
     const conflict = await findUrlConflict(candidate.normUrls);
     if (conflict) {
+      logDedupDecision({
+        reason: "url_overlap",
+        headline: candidate.article.headline,
+        fingerprint: candidate.fp,
+        normalizedUrls: candidate.normUrls,
+        conflictId: conflict.id,
+      });
       console.log(
         `[insertArticles] URL overlap with "${conflict.headline}" (${conflict.id}) — skipping: "${candidate.article.headline}"`
       );
       continue;
     }
 
+    logDedupDecision({
+      reason: "none",
+      headline: candidate.article.headline,
+      fingerprint: candidate.fp,
+      normalizedUrls: candidate.normUrls,
+    });
     seenFpInBatch.add(candidate.fp);
     novel.push(candidate);
   }
