@@ -1726,6 +1726,7 @@ export default function ArticleCard({
                 style={{ display: "block", width: "100%", height: "100%" }}
                 aria-label={`Open source article: ${displayHeadline}`}
               >
+                {/* eslint-disable-next-line @next/next/no-img-element -- hero image source is dynamic (AI/picsum/source URL) and not restricted to a fixed host allowlist */}
                 <img
                   src={heroImageSrc}
                   alt={article.imagePrompt}
@@ -1748,6 +1749,7 @@ export default function ArticleCard({
                 />
               </a>
             ) : (
+              // eslint-disable-next-line @next/next/no-img-element -- hero image source is dynamic (AI/picsum/source URL) and not restricted to a fixed host allowlist
               <img
                 src={heroImageSrc}
                 alt={article.imagePrompt}
@@ -1811,6 +1813,7 @@ export default function ArticleCard({
             {("recipeImages" in article && (article.recipeImages?.length ?? 0) > 0) ? (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "0.35rem" }}>
                 {(article.recipeImages ?? []).slice(0, 3).map((src, i) => (
+                  // eslint-disable-next-line @next/next/no-img-element -- recipe image URLs are creator/user-provided external assets
                   <img
                     key={`${src}-${i}`}
                     src={src}

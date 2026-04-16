@@ -70,6 +70,7 @@ export default function NasaApodCard({ data, reason = "singleton" }: NasaApodCar
 
       {data.imageUrl ? (
         <div style={{ marginBottom: "0.65rem" }}>
+          {/* eslint-disable-next-line @next/next/no-img-element -- APOD image URLs are external and not guaranteed to stay on a fixed host list */}
           <img
             src={data.imageUrl}
             alt=""

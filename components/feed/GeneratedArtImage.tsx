@@ -70,7 +70,7 @@ export default function GeneratedArtImage({
   }
 
   return (
-    // eslint-disable-next-line @next/next/no-img-element
+    // eslint-disable-next-line @next/next/no-img-element -- generated art URLs can come from arbitrary external providers at runtime
     <img
       src={activeSrc}
       alt={alt}

@@ -64,6 +64,7 @@ export default async function CreatorPublicProfilePage({
         >
           <div style={{ display: "flex", gap: "1rem", alignItems: "flex-start", flexWrap: "wrap" }}>
             {userPublic?.avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- creator avatar URLs are user-provided external sources
               <img
                 src={userPublic.avatarUrl}
                 alt=""

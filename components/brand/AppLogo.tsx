@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { APP_LOGO_SRC } from "@/lib/brand/logo";
 
 export interface AppLogoProps {
@@ -9,15 +10,12 @@ export interface AppLogoProps {
 
 export function AppLogo({ heightPx = 44, priority = true }: AppLogoProps) {
   return (
-    // Local SVG in /public (square); CSS height + width:auto scales crisply at any DPR.
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
+    <Image
       src={APP_LOGO_SRC}
       alt="Gentle Stream"
       width={heightPx}
       height={heightPx}
-      loading={priority ? "eager" : "lazy"}
-      decoding="async"
+      priority={priority}
       style={{
         height: heightPx,
         width: "auto",

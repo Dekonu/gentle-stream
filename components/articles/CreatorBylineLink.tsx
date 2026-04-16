@@ -60,6 +60,7 @@ export function CreatorBylineLink({
       }}
     >
       {authorAvatarUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element -- author avatars are user-provided external URLs
         <img
           src={authorAvatarUrl}
           alt=""

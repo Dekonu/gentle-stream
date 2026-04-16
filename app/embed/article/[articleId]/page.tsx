@@ -63,6 +63,7 @@ export default async function EmbedArticlePage({
         }}
       >
         {"recipeImages" in article && (article.recipeImages?.[0] ?? "").trim() ? (
+          // eslint-disable-next-line @next/next/no-img-element -- embed recipe image URL is content-provided and can be any external host
           <img
             src={article.recipeImages?.[0]}
             alt={article.headline}

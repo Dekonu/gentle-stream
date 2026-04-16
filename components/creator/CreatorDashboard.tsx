@@ -926,6 +926,7 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                               borderRadius: "6px",
                             }}
                           >
+                            {/* eslint-disable-next-line @next/next/no-img-element -- recipe preview URLs are uploaded/user-provided external assets */}
                             <img
                               src={url}
                               alt={`Recipe image ${idx + 1}`}
