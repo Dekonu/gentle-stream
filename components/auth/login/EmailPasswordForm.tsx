@@ -217,7 +217,7 @@ export function EmailPasswordForm({
             </p>
           ) : null}
           <div
-            ref={turnstileContainerRef}
+            ref={turnstileContainerRef as unknown as RefObject<HTMLDivElement>}
             style={{ marginBottom: "0.85rem", minHeight: "70px" }}
             aria-live="polite"
           />
@@ -235,7 +235,7 @@ export function EmailPasswordForm({
         }}
       >
         {emailBusy
-          ? "Working�"
+          ? "Working..."
           : isCreatorLogin
             ? "Sign in to creator account"
             : emailMode === "sign_up"
