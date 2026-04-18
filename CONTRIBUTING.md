@@ -4,7 +4,7 @@ Thanks for helping improve Gentle Stream.
 
 ## Local setup
 
-- Use Node.js **22+** (see `.nvmrc`; run `nvm use`).
+- Use Node.js **24** (minimum in `package.json` is `>=24`). `.nvmrc` and `.node-version` pin **24** to match CI (`actions/setup-node`); run `nvm use` or `fnm use` before installs.
 - Install deps from repo root: `npm install`.
 - Copy `.env.example` to `.env.local`.
 - For auth-free local dev:
@@ -32,6 +32,12 @@ Important: optional feed modules are opt-in. If a module flag is not set, treat 
 - Do not commit secrets or local `.env` files.
 - For feed rendering/UI work, verify both light and dark themes.
 
+## Versioning
+
+- This project follows semver with pre-1.0 rules; see `docs/versioning-policy.md`.
+- User-visible bug fixes increment patch (`0.1.0` -> `0.1.1`).
+- Backward-compatible features and pre-1.0 breaking changes increment minor (`0.1.0` -> `0.2.0`).
+
 ## Package status
 
 Workspace packages under `packages/*` have mixed maturity:
@@ -39,4 +45,12 @@ Workspace packages under `packages/*` have mixed maturity:
 - Stable: `@gentle-stream/domain`
 - Active extraction: `@gentle-stream/feed-engine`, `@gentle-stream/games-engine`
 - Experimental: `@gentle-stream/api-client`, `@gentle-stream/platform-adapters`, `@gentle-stream/storage-adapters`
+
+## Shared import policy
+
+- Prefer app-facing re-exports for shared domain data in route/component code:
+  - `@/lib/types`
+  - `@/lib/constants`
+  - `@/lib/games/types`
+- Use direct `@gentle-stream/domain/*` imports when authoring package-layer code under `packages/*`.
 

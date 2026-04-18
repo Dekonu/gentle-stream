@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 const hasTrustedOriginMock = vi.fn();
@@ -36,6 +36,10 @@ vi.mock("@/lib/db/users", () => ({
 }));
 
 describe("/api/auth/email-password", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("returns 403 for untrusted origin", async () => {
     hasTrustedOriginMock.mockReturnValueOnce(false);
     const { POST } = await import("@/app/api/auth/email-password/route");
@@ -131,5 +135,55 @@ describe("/api/auth/email-password", () => {
       ok: true,
       requiresEmailVerification: false,
     });
+  });
+
+  it("returns 400 when Turnstile validation fails", async () => {
+    hasTrustedOriginMock.mockReturnValueOnce(true);
+    consumeRateLimitMock.mockReturnValue({ allowed: true });
+    verifyTurnstileTokenMock.mockResolvedValueOnce({
+      success: false,
+      error: "Captcha verification failed.",
+    });
+
+    const { POST } = await import("@/app/api/auth/email-password/route");
+    const req = new NextRequest("http://localhost:3000/api/auth/email-password", {
+      method: "POST",
+      body: JSON.stringify({
+        email: "person@example.com",
+        password: "password123",
+        mode: "sign_in",
+        redirectTo: "http://localhost:3000/login",
+        turnstileToken: "bad-token",
+      }),
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      error: "Captcha verification failed.",
+    });
+  });
+
+  it("returns 429 when email rate limit is exceeded after IP pass", async () => {
+    hasTrustedOriginMock.mockReturnValueOnce(true);
+    consumeRateLimitMock
+      .mockReturnValueOnce({ allowed: true })
+      .mockReturnValueOnce({ allowed: false, retryAfterSec: 60 });
+
+    const { POST } = await import("@/app/api/auth/email-password/route");
+    const req = new NextRequest("http://localhost:3000/api/auth/email-password", {
+      method: "POST",
+      body: JSON.stringify({
+        email: "person@example.com",
+        password: "password123",
+        mode: "sign_in",
+        redirectTo: "http://localhost:3000/login",
+        turnstileToken: "token",
+      }),
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(429);
+    expect(verifyTurnstileTokenMock).not.toHaveBeenCalled();
   });
 });

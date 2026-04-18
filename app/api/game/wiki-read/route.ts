@@ -62,6 +62,8 @@ export async function GET(request: NextRequest) {
   }
 
   const raw = await res.text();
+  // Contract for RabbitHoleCard: sanitize on the server before returning any HTML-ish payload.
+  // This strips all tags to plain text, so client render with dangerouslySetInnerHTML is inert.
   const html = stripUnsafeWikiHtmlFragment(raw);
 
   return NextResponse.json({

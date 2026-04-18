@@ -35,6 +35,7 @@ import {
 import type { Category } from "@/lib/constants";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 import { captureException, captureMessage, flushOnShutdown, startSpan } from "@/lib/observability";
+import { logError, logInfo, logWarning } from "@/lib/observability/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -181,14 +182,20 @@ export async function GET(request: NextRequest) {
       const elapsedMs = Date.now() - runStartedAt;
       if (elapsedMs >= runtimeBudgetMs) {
         stoppedByRuntimeBudget = true;
-        console.warn(
-          `[Scheduler] Runtime budget hit (${elapsedMs}ms/${runtimeBudgetMs}ms). Ending run early.`
-        );
+        logWarning("cron.scheduler.runtime_budget_hit", {
+          runId,
+          elapsedMs,
+          runtimeBudgetMs,
+          traceId,
+        });
         break;
       }
       if (remainingExpansionBudget <= 0) {
         stoppedByExpansionBudget = true;
-        console.warn("[Scheduler] Expansion budget exhausted. Ending run early.");
+        logWarning("cron.scheduler.expansion_budget_exhausted", {
+          runId,
+          traceId,
+        });
         break;
       }
 
@@ -257,11 +264,17 @@ export async function GET(request: NextRequest) {
       report[cat].requested = cappedIngestCount;
       report[cat].targetLocale = targetLocale;
 
-      console.log(
-        reason === "threshold"
-          ? `[Scheduler] "${cat}" has ${available} articles (threshold: ${STOCK_THRESHOLD}, target: ${STOCK_TARGET}) — ingesting ${cappedIngestCount}`
-          : `[Scheduler] "${cat}" stock is healthy (${available}) but stale (>${stalenessHours}h) — ingesting freshness refill (${cappedIngestCount})`
-      );
+      logInfo("cron.scheduler.ingest_decision", {
+        runId,
+        traceId,
+        category: cat,
+        available,
+        requested: cappedIngestCount,
+        reason,
+        threshold: STOCK_THRESHOLD,
+        target: STOCK_TARGET,
+        stalenessHours,
+      });
 
       const categoryStartedAt = Date.now();
       try {
@@ -337,7 +350,11 @@ export async function GET(request: NextRequest) {
           pipelineMode: result.pipelineMode,
         });
       } catch (e) {
-        console.error(`[Scheduler] Ingest failed for "${cat}":`, e);
+        logError(
+          "cron.scheduler.ingest_category_failed",
+          { runId, traceId, category: cat },
+          e
+        );
         captureException(e, {
           route: "cron.scheduler",
           runId,
@@ -422,7 +439,7 @@ export async function GET(request: NextRequest) {
         notes,
       });
     } catch (e) {
-      console.error("[Scheduler] Could not finish ingest run:", e);
+      logError("cron.scheduler.finish_run_failed", { runId, traceId }, e);
       captureException(e, { route: "cron.scheduler", runId, phase: "finish_run", traceId });
     }
     captureMessage({

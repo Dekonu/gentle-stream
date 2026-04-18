@@ -443,8 +443,8 @@ export default function RabbitHoleCard({
                 lineHeight: 1.48,
                 wordBreak: "break-word",
               }}
-              // Wikipedia HTML is fetched server-side and stripped of scripts/styles; links stay in-app when possible.
-              // eslint-disable-next-line react/no-danger
+              // Safe-by-construction: `/api/game/wiki-read` runs `stripUnsafeWikiHtmlFragment`, which removes all tags
+              // (including script/style/event handlers) before this content reaches the browser.
               dangerouslySetInnerHTML={{ __html: currentReader.html }}
             />
           ) : null}

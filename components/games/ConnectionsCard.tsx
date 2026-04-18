@@ -235,7 +235,14 @@ export default function ConnectionsCard({
         },
       }),
     });
-  }, [metricsEnabled, state.completed, state.elapsedSecs, state.solved.length, state.mistakesLeft]);
+  }, [
+    metricsEnabled,
+    state.completed,
+    state.elapsedSecs,
+    state.solved.length,
+    state.mistakesLeft,
+    puzzleSignature,
+  ]);
 
   useEffect(() => {
     if (state.completed || !state.startedAt) return;

@@ -1,7 +1,51 @@
 {
-  "generatedAt": "2026-03-30T07:20:04.333Z",
-  "totalRoutes": 32,
+  "generatedAt": "2026-04-16T23:36:41.694Z",
+  "totalRoutes": 59,
   "items": [
+    {
+      "route": "/api/admin/articles/moderation/[id]/approve",
+      "methods": [
+        "POST"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
+      "route": "/api/admin/articles/moderation/[id]/reject",
+      "methods": [
+        "POST"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
+      "route": "/api/admin/articles/moderation/[id]/restore",
+      "methods": [
+        "POST"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
+      "route": "/api/admin/articles/moderation",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
     {
       "route": "/api/admin/cron/ingest-logs",
       "methods": [
@@ -12,11 +56,44 @@
       "p0Flags": []
     },
     {
+      "route": "/api/admin/feedback",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/admin/rss-feeds/[id]",
+      "methods": [
+        "PATCH",
+        "DELETE"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
+      "route": "/api/admin/rss-feeds",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
       "route": "/api/admin/submissions/[id]/approve",
       "methods": [
         "POST"
       ],
-      "authModel": "admin_guard",
+      "authModel": "public",
       "usesServiceRoleDbClient": false,
       "p0Flags": [
         "raw-error-message-exposed"
@@ -27,7 +104,7 @@
       "methods": [
         "POST"
       ],
-      "authModel": "admin_guard",
+      "authModel": "public",
       "usesServiceRoleDbClient": false,
       "p0Flags": [
         "raw-error-message-exposed"
@@ -38,7 +115,7 @@
       "methods": [
         "POST"
       ],
-      "authModel": "admin_guard",
+      "authModel": "public",
       "usesServiceRoleDbClient": false,
       "p0Flags": [
         "raw-error-message-exposed"
@@ -49,18 +126,70 @@
       "methods": [
         "GET"
       ],
-      "authModel": "admin_guard",
+      "authModel": "public",
       "usesServiceRoleDbClient": false,
       "p0Flags": []
     },
     {
+      "route": "/api/articles/search",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": true,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
+      "route": "/api/articles/translate",
+      "methods": [
+        "POST"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
       "route": "/api/auth/email-link",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/auth/email-password",
       "methods": [
         "POST"
       ],
       "authModel": "public",
       "usesServiceRoleDbClient": false,
       "p0Flags": []
+    },
+    {
+      "route": "/api/auth/guest-access",
+      "methods": [
+        "POST"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/creator/assist",
+      "methods": [
+        "POST"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
     },
     {
       "route": "/api/creator/onboarding",
@@ -69,6 +198,15 @@
         "POST"
       ],
       "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/creator/recipe-import",
+      "methods": [
+        "POST"
+      ],
+      "authModel": "session_user",
       "usesServiceRoleDbClient": false,
       "p0Flags": []
     },
@@ -91,6 +229,15 @@
       ],
       "authModel": "session_user",
       "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/cron/affinity-refresh",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "cron_secret",
+      "usesServiceRoleDbClient": true,
       "p0Flags": []
     },
     {
@@ -131,7 +278,9 @@
       ],
       "authModel": "cron_secret",
       "usesServiceRoleDbClient": false,
-      "p0Flags": []
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
     },
     {
       "route": "/api/cron/tagger",
@@ -145,9 +294,9 @@
       ]
     },
     {
-      "route": "/api/feed",
+      "route": "/api/feed/force-ingest",
       "methods": [
-        "GET"
+        "POST"
       ],
       "authModel": "session_user",
       "usesServiceRoleDbClient": false,
@@ -156,12 +305,83 @@
       ]
     },
     {
-      "route": "/api/game/connections",
+      "route": "/api/feed/modules/apod",
       "methods": [
         "GET"
       ],
       "authModel": "public",
       "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/feed/modules/spotify",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/feed/modules/todo",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
+      "route": "/api/feed/modules/weather",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/feed/related",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
+      "route": "/api/feed",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "public-expensive-ingest-path",
+        "raw-error-message-exposed"
+      ]
+    },
+    {
+      "route": "/api/feedback",
+      "methods": [
+        "POST"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/game/connections",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": true,
       "p0Flags": []
     },
     {
@@ -196,6 +416,17 @@
       ]
     },
     {
+      "route": "/api/game/rabbit-hole",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
       "route": "/api/game/sudoku",
       "methods": [
         "GET"
@@ -205,6 +436,15 @@
       "p0Flags": [
         "raw-error-message-exposed"
       ]
+    },
+    {
+      "route": "/api/game/wiki-read",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
     },
     {
       "route": "/api/game/word-search",
@@ -218,6 +458,15 @@
       ]
     },
     {
+      "route": "/api/legal/terms-accept",
+      "methods": [
+        "POST"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": true,
+      "p0Flags": []
+    },
+    {
       "route": "/api/news",
       "methods": [
         "GET"
@@ -228,15 +477,6 @@
     },
     {
       "route": "/api/user/article-engagement",
-      "methods": [
-        "POST"
-      ],
-      "authModel": "session_user",
-      "usesServiceRoleDbClient": true,
-      "p0Flags": []
-    },
-    {
-      "route": "/api/user/spotify-mood-feedback",
       "methods": [
         "POST"
       ],
@@ -271,15 +511,6 @@
       "methods": [
         "POST",
         "DELETE"
-      ],
-      "authModel": "session_user",
-      "usesServiceRoleDbClient": true,
-      "p0Flags": []
-    },
-    {
-      "route": "/api/user/connections-daily",
-      "methods": [
-        "GET"
       ],
       "authModel": "session_user",
       "usesServiceRoleDbClient": true,
@@ -334,6 +565,46 @@
         "PATCH"
       ],
       "authModel": "session_user",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/user/recipe-images/upload",
+      "methods": [
+        "POST"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": true,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/user/recipe-ratings",
+      "methods": [
+        "GET",
+        "PUT"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": true,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/user/spotify-mood-feedback",
+      "methods": [
+        "POST"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
+      "route": "/api/webhooks/twilio/status",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "authModel": "public",
       "usesServiceRoleDbClient": false,
       "p0Flags": []
     }

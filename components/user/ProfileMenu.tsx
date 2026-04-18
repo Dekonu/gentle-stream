@@ -671,6 +671,7 @@ export function ProfileMenu({
                 aria-hidden
               />
             )}
+            {/* eslint-disable-next-line @next/next/no-img-element -- profile avatar URL is runtime/user-provided and may be on any host */}
             <img
               src={headerAvatarSrc}
               alt=""

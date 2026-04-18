@@ -108,11 +108,11 @@ The ingest agent tracks real `usage.input_tokens` against a conservative per-min
 | Layer | What runs |
 |-------|-----------|
 | **Typecheck & build** | `tsc --noEmit` and `next build` with placeholder public env vars (no secrets on fork PRs). |
-| **Unit / generator tests** | `scripts/test-citations.ts`, `test-sudoku.ts`, `test-word-search.ts`, `test-killer-nonogram.ts` — no DB. |
-| **DB integration** | `test-dedup.ts`, `test-url-dedup.ts` — real Supabase; tagged test rows cleaned up in `finally`. |
+| **Unit / generator tests** | `tests/unit/articleDedupKeys.test.ts` (pure fingerprint + URL key normalization), `scripts/test-citations.ts`, `test-sudoku.ts`, `test-word-search.ts`, `test-killer-nonogram.ts` — no DB dependency for dedup key semantics. |
+| **DB integration** | `test-dedup.ts`, `test-url-dedup.ts` — real Supabase integration smoke checks (overlap queries + constraints); tagged test rows cleaned up in `finally`. |
 | **Security weekly audits** | Scheduled GitHub workflow `/.github/workflows/security-weekly.yml` runs `npm run security:inventory`, `npm run security:rls-audit`, and `npm run security:audit` weekly. |
 | **GitHub Actions** | Reusable workflow: **CI** on pull requests and pushes to `develop` (unit + component + Storybook tests, Playwright smoke, and DB integration when secrets are available). Additional workflows run **cross-browser E2E** on `develop` pushes/manual dispatch and a **nightly full E2E matrix**. |
-| **Vercel** | `vercel.json` sets `git.deploymentEnabled: false` so **only** the deploy workflow promotes production (no duplicate Git-triggered prod builds); crons still defined for scheduler/tagger/cleanup. |
+| **Vercel** | `vercel.json` currently enables Git deployments on `main` and disables them on `develop`/`feature/*`; production can still be promoted via `deploy.yml`. |
 
 ---
 
@@ -138,7 +138,7 @@ gentle-stream/
 
 | Layer | Choice | Why |
 |-------|--------|-----|
-| Framework | Next.js 14 (App Router) | SSR, colocated API routes, Vercel-friendly |
+| Framework | Next.js 16 (App Router) | SSR, colocated API routes, Vercel-friendly |
 | Language | TypeScript (strict) | End-to-end types for articles, profiles, games |
 | Database | Supabase (PostgreSQL) | Postgres + GIN on arrays; Auth + Storage |
 | AI | Anthropic Claude | Structured JSON + web search for ingest |
@@ -160,14 +160,14 @@ Dark mode is currently experimental; contrast hardening is actively tracked and 
 
 ### Prerequisites
 
-- **Node.js 22+** (CI uses 22; see `.nvmrc`)
+- **Node.js 24** (use `.nvmrc` / `.node-version`; matches GitHub Actions `node-version`)
 - A [Supabase](https://supabase.com) project
 - An [Anthropic](https://console.anthropic.com) API key (for ingest / tagger)
 
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/your-username/gentle-stream.git
+git clone https://github.com/<your-org-or-username>/gentle-stream.git
 cd gentle-stream
 nvm use
 npm install
@@ -193,8 +193,10 @@ See `.env.example` for documented variables. At minimum for a full local run:
 - `ANTHROPIC_API_KEY`
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
 - `CRON_SECRET`
-- `NEXT_PUBLIC_TURNSTILE_ENABLED=1` + `NEXT_PUBLIC_TURNSTILE_SITE_KEY` (client widget; optional)
-- `TURNSTILE_ENABLED=1` + `TURNSTILE_SECRET_KEY` (server verification; optional, required only when Turnstile is enabled)
+- `NEXT_PUBLIC_TURNSTILE_ENABLED=0` and `TURNSTILE_ENABLED=0` for local auth-friendly development (recommended)
+- If enabling Turnstile, set:
+  - `NEXT_PUBLIC_TURNSTILE_ENABLED=1` + `NEXT_PUBLIC_TURNSTILE_SITE_KEY`
+  - `TURNSTILE_ENABLED=1` + `TURNSTILE_SECRET_KEY`
 - `NEXT_PUBLIC_SUPPORT_EMAIL` (shown on `/data-deletion` and used for privacy contact mailto)
 - `NEXT_PUBLIC_LEGAL_LAST_UPDATED` (label used on `/privacy`, `/terms`, `/data-deletion`, `/sms-consent`)
 
@@ -273,9 +275,12 @@ Header: `x-cron-secret: <CRON_SECRET>` (or configured equivalent).
 
 | Route | Schedule (vercel.json) | Role |
 |-------|-------------------------|------|
-| `GET /api/cron/scheduler` | Every 15 min | Stock check → ingest when low or stale |
+| `GET /api/cron/scheduler` | Every 10 min | Stock check → ingest when low or stale |
 | `GET /api/cron/tagger` | Every 3 min | Tag untagged articles |
 | `GET /api/cron/cleanup` | Daily 03:00 UTC | No-op (TTL cleanup disabled) |
+| `GET /api/cron/games` | Every 6 hours | Maintains game pools |
+| `GET /api/cron/engagement-health` | Every 15 min | Engagement freshness and guardrail checks |
+| `GET /api/cron/affinity-refresh` | Every 15 min | Refreshes user-category affinity features |
 
 ### Ingest log inspection
 
@@ -315,9 +320,22 @@ Set GitHub **repository or environment secrets** as required by the workflow (Ve
 
 ### Vercel project
 
-Add the same env vars as production. **`git.deploymentEnabled: false`** in `vercel.json` means Git pushes do **not** auto-deploy; the Action is the source of truth for production builds.
+Add the same env vars as production. `vercel.json` currently allows Git-triggered deployment on `main`, so if you want Action-only promotion, disable Git deployment for `main` in Vercel project settings (or set `git.deploymentEnabled.main` to `false`).
 
 On **Hobby** plan, verify cron behaviour; external schedulers can hit cron URLs with the secret if needed.
+
+---
+
+## Versioning
+
+Gentle Stream follows semantic versioning with a pre-1.0 policy:
+
+- Bug fixes: patch bump (`0.1.0` -> `0.1.1`)
+- Backward-compatible features: minor bump (`0.1.0` -> `0.2.0`)
+- Pre-1.0 breaking changes: minor bump (`0.2.0` -> `0.3.0`)
+- Post-1.0 breaking changes: major bump (`1.4.0` -> `2.0.0`)
+
+See [`docs/versioning-policy.md`](docs/versioning-policy.md) for full release rules and examples.
 
 ---
 
@@ -348,7 +366,12 @@ On **Hobby** plan, verify cron behaviour; external schedulers can hit cron URLs 
 
 - Env matrix: [`docs/env-matrix.md`](docs/env-matrix.md)
 - Security model summary: [`docs/security-model.md`](docs/security-model.md)
+- Dependency audit policy: [`docs/dependency-audit-policy.md`](docs/dependency-audit-policy.md)
+- API route index: [`API.md`](API.md)
+- Security policy: [`SECURITY.md`](SECURITY.md)
+- Community conduct: [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
 - Contributor workflow: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- Versioning policy: [`docs/versioning-policy.md`](docs/versioning-policy.md)
 - Typography variation proposal: [`docs/article-typography-variation-plan.md`](docs/article-typography-variation-plan.md)
 
 ## License

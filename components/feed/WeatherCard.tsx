@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { WeatherFillerData } from "@/lib/types";
 import { picsumFallbackUrl } from "@/lib/article-image";
@@ -241,9 +242,11 @@ export default function WeatherCard({
             char.toUpperCase()
           )}
         </p>
-        <img
+        <Image
           src={weatherIllustrationPath(weatherData.condition)}
           alt={weatherData.condition ? `${weatherData.condition} illustration` : "Weather illustration"}
+          width={70}
+          height={70}
           style={{
             marginTop: "0.35rem",
             width: "4.4rem",
@@ -848,6 +851,7 @@ export default function WeatherCard({
       ) : (
         <div>
           {(imgSrc || fallbackSrc) && (
+            // eslint-disable-next-line @next/next/no-img-element -- generated/weather fallback URLs are dynamic external hosts
             <img
               src={imgSrc ?? fallbackSrc}
               alt={weatherData.locationLabel ? `Generated weather illustration for ${weatherData.locationLabel}` : "Generated weather illustration"}

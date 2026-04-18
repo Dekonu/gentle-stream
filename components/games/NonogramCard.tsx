@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useEffect, useReducer, useRef } from "react";
 import type { NonogramPuzzle, Difficulty } from "@/lib/games/types";
 import {
   GAME_HOW_TO_URL,
@@ -213,7 +213,7 @@ export default function NonogramCard({
         metadata: { rows: p.rows, cols: p.cols, puzzleSignature },
       }),
     });
-  }, [metricsEnabled, state.completed, state.elapsedSecs]);
+  }, [metricsEnabled, state.completed, state.elapsedSecs, puzzleSignature]);
 
   useEffect(() => {
     if (state.completed || !state.startedAt) return;

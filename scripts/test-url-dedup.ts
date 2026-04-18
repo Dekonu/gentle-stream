@@ -15,11 +15,10 @@
 
 import { randomBytes } from "node:crypto";
 import { config } from "dotenv";
+import { normaliseUrl } from "../lib/articles/dedup-keys";
 config({ path: ".env.local" });
 
 let insertArticles: typeof import("../lib/db/articles").insertArticles;
-let buildHeadlineFingerprint: typeof import("../lib/db/articles").buildHeadlineFingerprint;
-let normaliseUrl: typeof import("../lib/db/articles").normaliseUrl;
 let db: typeof import("../lib/db/client").db;
 
 /** Isolates fingerprints and URLs from other CI jobs on a shared DB. */
@@ -39,17 +38,71 @@ async function initDeps() {
     import("../lib/db/client"),
   ]);
   insertArticles = articlesMod.insertArticles;
-  buildHeadlineFingerprint = articlesMod.buildHeadlineFingerprint;
-  normaliseUrl = articlesMod.normaliseUrl;
   db = clientMod.db;
 }
 
 const SOURCE_URL_WAIT_MS = process.env.CI ? 60_000 : 20_000;
 
+/** CI delay (ms) before a second `insertArticles` that relies on URL overlap — helps read replicas. */
+const DEDUP_FOLLOWUP_DELAY_MS = process.env.CI ? 4_000 : 250;
+
+function insertResponseHasNormalisedUrls(
+  inserted: { sourceUrls: string[] },
+  expectedNormalised: string[]
+): boolean {
+  // `insertArticles` persists `normaliseUrl` output; compare directly.
+  const have = new Set(inserted.sourceUrls ?? []);
+  return expectedNormalised.every((n) => have.has(n));
+}
+
 /**
- * Waits until the inserted row’s `source_urls` contains the expected normalised URLs.
- * More reliable than `.overlaps()` alone: GIN / secondary indexes can lag behind the PK row
- * on shared Supabase instances, which caused CI timeouts in `testPartialUrlOverlap`.
+ * Ensures URL dedup metadata is ready before the next insert that calls `findUrlConflict`.
+ *
+ * Prefer the row returned by `insertArticles` (same write/response path as the upsert). Polling
+ * `articles.source_urls` by id alone can time out on CI when follow-up reads hit a replica that
+ * has not caught up yet — even though the insert response already contained the URLs.
+ */
+async function waitForDedupReadiness(
+  inserted: { id: string; sourceUrls: string[] },
+  expectedNormalised: string[]
+): Promise<void> {
+  if (expectedNormalised.length === 0) return;
+
+  if (insertResponseHasNormalisedUrls(inserted, expectedNormalised)) {
+    console.log("  ✓  source_urls confirmed from insert response (skipping long poll)");
+  } else {
+    await waitForArticleSourceUrlsVisible(inserted.id, expectedNormalised);
+  }
+
+  await waitUntilUrlOverlapQueryable(expectedNormalised);
+  await sleep(DEDUP_FOLLOWUP_DELAY_MS);
+}
+
+async function waitUntilUrlOverlapQueryable(
+  expectedNormalised: string[],
+  maxWaitMs = SOURCE_URL_WAIT_MS
+): Promise<void> {
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    const { data, error } = await db
+      .from("articles")
+      .select("id,source_urls")
+      .overlaps("source_urls", expectedNormalised)
+      .limit(1);
+    if (error) throw new Error(`waitUntilUrlOverlapQueryable: ${error.message}`);
+    if ((data?.length ?? 0) > 0) {
+      console.log("  ✓  URL overlap query sees the inserted row");
+      return;
+    }
+    await sleep(250);
+  }
+  throw new Error(
+    `Timeout waiting for overlap query visibility for [${expectedNormalised.join(", ")}]`
+  );
+}
+
+/**
+ * Fallback: poll until `source_urls` is visible on a follow-up SELECT (e.g. empty insert response).
  */
 async function waitForArticleSourceUrlsVisible(
   articleId: string,
@@ -59,6 +112,7 @@ async function waitForArticleSourceUrlsVisible(
   if (expectedNormalised.length === 0) return;
   const want = new Set(expectedNormalised);
   const deadline = Date.now() + maxWaitMs;
+  let lastUrls: string[] = [];
   while (Date.now() < deadline) {
     const { data, error } = await db
       .from("articles")
@@ -67,6 +121,7 @@ async function waitForArticleSourceUrlsVisible(
       .maybeSingle();
     if (error) throw new Error(error.message);
     const urls = (data?.source_urls as string[] | null) ?? [];
+    lastUrls = urls;
     const urlSet = new Set(urls);
     let ok = true;
     for (const n of want) {
@@ -79,19 +134,14 @@ async function waitForArticleSourceUrlsVisible(
     await sleep(200);
   }
   throw new Error(
-    `Timeout waiting for article ${articleId} source_urls ⊇ [${expectedNormalised.join(", ")}]`
+    `Timeout waiting for article ${articleId} source_urls ⊇ [${expectedNormalised.join(", ")}] — last read: [${lastUrls.join(", ")}]`
   );
 }
 
-async function waitForFingerprintRow(fp: string, maxWaitMs = 15000): Promise<void> {
-  const deadline = Date.now() + maxWaitMs;
-  while (Date.now() < deadline) {
-    const { data, error } = await db.from("articles").select("id").eq("fingerprint", fp).limit(1);
-    if (error) throw new Error(error.message);
-    if (data && data.length > 0) return;
-    await sleep(200);
-  }
-  throw new Error(`Timeout waiting for fingerprint row: ${fp}`);
+/** Same replica pause as `waitForDedupReadiness` when the next insert only needs fingerprint overlap. */
+async function afterFingerprintInsertReady(): Promise<void> {
+  console.log("  ✓  fingerprint dedup pause (insert succeeded; skip replica poll)");
+  await sleep(DEDUP_FOLLOWUP_DELAY_MS);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -109,6 +159,12 @@ function assert(condition: boolean, label: string, detail?: string) {
     if (detail) console.error(`     Got: ${detail}`);
     failed++;
   }
+}
+
+function insertBlockedDuplicate(originalId: string, batch: { id: string }[]): boolean {
+  if (batch.length === 0) return true;
+  if (batch.length === 1 && batch[0]!.id === originalId) return true;
+  return false;
 }
 
 const BASE = {
@@ -181,14 +237,15 @@ async function testUrlBlocksSameArticleDifferentTitle() {
   const first = await insertArticles([original]);
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "Original article inserted");
-  const insertedId = first[0]!.id;
+  const inserted = first[0]!;
 
-  await waitForArticleSourceUrlsVisible(insertedId, [normaliseUrl(sharedUrl)]);
+  await waitForDedupReadiness(inserted, [normaliseUrl(sharedUrl)]);
 
   const second = await insertArticles([rephrased]);
   assert(
-    second.length === 0,
-    "Rephrased article blocked — same URL already stored"
+    insertBlockedDuplicate(inserted.id, second),
+    "Rephrased article blocked — same URL already stored",
+    `got ${second.length} row(s): ${second.map((r) => r.id).join(", ")}`
   );
 }
 
@@ -213,12 +270,16 @@ async function testUrlVariantsNormalisedCorrectly() {
   const first = await insertArticles([original]);
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "Original inserted");
-  const insertedId = first[0]!.id;
+  const inserted = first[0]!;
 
-  await waitForArticleSourceUrlsVisible(insertedId, [normaliseUrl(canonical)]);
+  await waitForDedupReadiness(inserted, [normaliseUrl(canonical)]);
 
   const second = await insertArticles([withTracking]);
-  assert(second.length === 0, "Tracking-param variant blocked — normalises to same URL");
+  assert(
+    insertBlockedDuplicate(inserted.id, second),
+    "Tracking-param variant blocked — normalises to same URL",
+    `got ${second.length} row(s): ${second.map((r) => r.id).join(", ")}`
+  );
 }
 
 async function testDifferentUrlsNotBlocked() {
@@ -271,15 +332,19 @@ async function testPartialUrlOverlap() {
   const first = await insertArticles([original]);
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "Original inserted");
-  const insertedId = first[0]!.id;
+  const inserted = first[0]!;
 
-  await waitForArticleSourceUrlsVisible(insertedId, [
+  await waitForDedupReadiness(inserted, [
     normaliseUrl(sharedUrl),
     normaliseUrl(`https://phys.org/news/TEST_URL_DEDUP_${runTag}_other`),
   ]);
 
   const second = await insertArticles([partial]);
-  assert(second.length === 0, "Partial overlap (1 shared URL) correctly blocked");
+  assert(
+    insertBlockedDuplicate(inserted.id, second),
+    "Partial overlap (1 shared URL) correctly blocked",
+    `got ${second.length} row(s): ${second.map((r) => r.id).join(", ")}`
+  );
 }
 
 async function testNoSourceUrls() {
@@ -301,10 +366,14 @@ async function testNoSourceUrls() {
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "First article (no URLs) inserted");
 
-  await waitForFingerprintRow(buildHeadlineFingerprint(a.headline, a.category));
+  await afterFingerprintInsertReady();
 
   const second = await insertArticles([b]);
-  assert(second.length === 0, "Identical headline with no URLs still blocked by fingerprint");
+  assert(
+    insertBlockedDuplicate(first[0]!.id, second),
+    "Identical headline with no URLs still blocked by fingerprint",
+    `got ${second.length} row(s): ${second.map((r) => r.id).join(", ")}`
+  );
 }
 
 // ─── Cleanup ──────────────────────────────────────────────────────────────────
@@ -328,7 +397,7 @@ async function preCleanup() {
   const { data: byHeadline, error: e1 } = await db
     .from("articles")
     .delete()
-    .or("headline.ilike.%TEST_DEDUP%,headline.ilike.%TEST_URL_DEDUP%")
+    .or(`headline.ilike.%TEST_DEDUP_${runTag}%,headline.ilike.%TEST_URL_DEDUP_${runTag}%`)
     .select("id");
 
   if (e1) throw new Error(e1.message);

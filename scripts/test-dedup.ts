@@ -42,14 +42,43 @@ function sleep(ms: number): Promise<void> {
 let passed = 0;
 let failed = 0;
 
-function assert(condition: boolean, label: string) {
+function assert(condition: boolean, label: string, detail?: string) {
   if (condition) {
     console.log(`  ✓  ${label}`);
     passed++;
   } else {
     console.error(`  ✗  ${label}`);
+    if (detail) console.error(`     ${detail}`);
     failed++;
   }
+}
+
+/**
+ * `insertArticles` usually returns [] when a duplicate is skipped, but PostgREST can still
+ * return the existing row for `upsert(..., { ignoreDuplicates: true }).select()` — same `id`,
+ * no second physical insert. Treat that as blocked.
+ */
+function insertBlockedDuplicate(originalId: string, batch: { id: string }[]): boolean {
+  if (batch.length === 0) return true;
+  if (batch.length === 1 && batch[0]!.id === originalId) return true;
+  return false;
+}
+
+async function insertUntilBlocked(
+  originalId: string,
+  article: Omit<typeof BASE, never> & { headline: string; category: typeof BASE.category },
+  fingerprint: string,
+  maxAttempts = 4
+): Promise<{ id: string }[]> {
+  let latest: { id: string }[] = [];
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    latest = await insertArticles([article]);
+    insertedIds.push(...latest.map((row) => row.id));
+    if (insertBlockedDuplicate(originalId, latest)) return latest;
+    await waitUntilFingerprintQueryable(fingerprint);
+    await sleep(350);
+  }
+  return latest;
 }
 
 const BASE = {
@@ -82,44 +111,49 @@ async function initDeps() {
   db = clientMod.db;
 }
 
-/** Ensures the first insert is visible to fingerprint lookups (read replicas / PostgREST lag). */
-async function waitForFingerprintRow(fp: string, maxWaitMs = 15000): Promise<void> {
-  const deadline = Date.now() + maxWaitMs;
+/**
+ * `insertArticles` preflight uses `SELECT ... WHERE fingerprint = $fp` (same as this poll).
+ * On Supabase, that read can lag the primary write; without waiting, the next insert may
+ * miss Layer 1 and rely on upsert behaviour alone (see `test-url-dedup.ts` URL polling).
+ */
+const FINGERPRINT_REPLICA_MAX_WAIT_MS = process.env.CI ? 45_000 : 8_000;
+
+async function waitUntilFingerprintQueryable(fingerprint: string): Promise<void> {
+  const deadline = Date.now() + FINGERPRINT_REPLICA_MAX_WAIT_MS;
+  let lastCount = 0;
   while (Date.now() < deadline) {
-    const { data, error } = await db.from("articles").select("id").eq("fingerprint", fp).limit(1);
-    if (error) throw new Error(error.message);
-    if (data && data.length > 0) return;
-    await sleep(200);
+    const { data, error } = await db
+      .from("articles")
+      .select("fingerprint")
+      .eq("fingerprint", fingerprint)
+      .limit(1);
+    if (error) throw new Error(`waitUntilFingerprintQueryable: ${error.message}`);
+    lastCount = data?.length ?? 0;
+    if (lastCount > 0) {
+      console.log("  ✓  fingerprint visible for preflight (replica caught up)");
+      return;
+    }
+    await sleep(250);
   }
-  throw new Error(`Timed out waiting for fingerprint row: ${fp}`);
+  throw new Error(
+    `Timeout: fingerprint not visible after ${FINGERPRINT_REPLICA_MAX_WAIT_MS}ms (last query returned ${lastCount} row(s)): ${fingerprint}`
+  );
 }
 
 async function preCleanup() {
   // These integration tests run against a shared Supabase DB, so older runs can
   // leave behind rows that would make "first insert" assertions fail.
-  console.log("\n🧽 Pre-cleaning leftover test rows (fingerprint collisions)...");
+  console.log("\n🧽 Pre-cleaning this run's leftover test rows (fingerprint collisions)...");
 
   const { data: byHeadline, error: e1 } = await db
     .from("articles")
     .delete()
-    .or("headline.ilike.%TEST_DEDUP%,headline.ilike.%TEST_URL_DEDUP%")
+    .or(`headline.ilike.%TEST_DEDUP_${runTag}%,headline.ilike.%TEST_URL_DEDUP_${runTag}%`)
     .select("id");
 
   if (e1) throw new Error(e1.message);
-
-  const { data: byFixture, error: e2 } = await db
-    .from("articles")
-    .delete()
-    .ilike("byline", "%Test Runner%")
-    .ilike("location", "%Testland%")
-    .ilike("subheadline", "%test subheadline%")
-    .select("id");
-
-  if (e2) throw new Error(e2.message);
-
   const n1 = byHeadline?.length ?? 0;
-  const n2 = byFixture?.length ?? 0;
-  console.log(`🧹 Removed ${n1 + n2} leftover row(s) before assertions`);
+  console.log(`🧹 Removed ${n1} leftover row(s) before assertions`);
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -132,10 +166,11 @@ async function testExactDuplicate() {
   const first = await insertArticles([article]);
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "First insert returns 1 row");
+  const firstId = first[0]!.id;
 
   const second = await insertArticles([article]);
   insertedIds.push(...second.map((a) => a.id));
-  if (second.length === 0) {
+  if (insertBlockedDuplicate(firstId, second)) {
     assert(true, "Second insert returns 0 rows (blocked)");
     return;
   }
@@ -145,7 +180,11 @@ async function testExactDuplicate() {
   await new Promise((resolve) => setTimeout(resolve, 500));
   const third = await insertArticles([article]);
   insertedIds.push(...third.map((a) => a.id));
-  assert(third.length === 0, "Duplicate insert is eventually blocked");
+  assert(
+    insertBlockedDuplicate(firstId, third),
+    "Duplicate insert is eventually blocked",
+    third.map((r) => r.id).join(",") || undefined
+  );
 }
 
 async function testCasingVariant() {
@@ -158,16 +197,24 @@ async function testCasingVariant() {
   const first = await insertArticles([lower]);
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "Lowercase version inserted");
+  const firstId = first[0]!.id;
 
-  // Same as whitespace variant: shared DBs / read paths can lag; preflight must see the row.
   const fp = buildHeadlineFingerprint(lower.headline, lower.category);
-  await waitForFingerprintRow(fp);
+  await waitUntilFingerprintQueryable(fp);
 
-  const second = await insertArticles([upper]);
-  assert(second.length === 0, "Uppercase variant blocked (fingerprint normalises case)");
+  const second = await insertUntilBlocked(firstId, upper, fp);
+  assert(
+    insertBlockedDuplicate(firstId, second),
+    "Uppercase variant blocked (fingerprint normalises case)",
+    `got ${second.length} row(s): ${second.map((r) => r.id).join(", ")}`
+  );
 
-  const third = await insertArticles([mixed]);
-  assert(third.length === 0, "Mixed-case variant blocked");
+  const third = await insertUntilBlocked(firstId, mixed, fp);
+  assert(
+    insertBlockedDuplicate(firstId, third),
+    "Mixed-case variant blocked",
+    `got ${third.length} row(s): ${third.map((r) => r.id).join(", ")}`
+  );
 }
 
 async function testWhitespaceVariant() {
@@ -179,12 +226,17 @@ async function testWhitespaceVariant() {
   const first = await insertArticles([clean]);
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "Clean headline inserted");
+  const firstId = first[0]!.id;
 
   const fp = buildHeadlineFingerprint(clean.headline, clean.category);
-  await waitForFingerprintRow(fp);
+  await waitUntilFingerprintQueryable(fp);
 
-  const second = await insertArticles([padded]);
-  assert(second.length === 0, "Padded variant blocked (fingerprint collapses whitespace)");
+  const second = await insertUntilBlocked(firstId, padded, fp);
+  assert(
+    insertBlockedDuplicate(firstId, second),
+    "Padded variant blocked (fingerprint collapses whitespace)",
+    `got ${second.length} row(s): ${second.map((r) => r.id).join(", ")}`
+  );
 }
 
 async function testDifferentCategory() {

@@ -25,7 +25,7 @@ export function isAllowedEnglishWikipediaHost(hostname: string): boolean {
   return WIKI_HOSTS.has(hostname.trim().toLowerCase());
 }
 
-/** Strip all HTML tags so no active content can execute. */
+/** Strip all HTML tags to plain text so no active content can execute client-side. */
 export function stripUnsafeWikiHtmlFragment(html: string): string {
   if (!html) return "";
   let out = "";

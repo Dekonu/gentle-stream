@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ArticleSubmission } from "@/lib/types";
 import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
+import { InlineErrorBoundary } from "@/components/error/InlineErrorBoundary";
 
 type AdminFilter =
   | "pending"
@@ -22,7 +23,7 @@ export function AdminSubmissionsPanel() {
   const [adminNote, setAdminNote] = useState("");
   const [rejectionReason, setRejectionReason] = useState("");
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     const query = filter === "all" ? "" : `?status=${encodeURIComponent(filter)}`;
     try {
@@ -39,11 +40,11 @@ export function AdminSubmissionsPanel() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [filter]);
 
   useEffect(() => {
     void load();
-  }, [filter]);
+  }, [load]);
 
   async function review(id: string, action: "approve" | "reject") {
     setBusyId(id);
@@ -198,11 +199,16 @@ export function AdminSubmissionsPanel() {
                       paddingTop: "0.55rem",
                     }}
                   >
-                    <ArticleBodyMarkdown
-                      markdown={submission.body}
-                      variant="admin"
-                      fontPreset="classic"
-                    />
+                    <InlineErrorBoundary
+                      fallbackTitle="Submission preview failed"
+                      fallbackMessage="This submission body could not be rendered. You can still moderate it."
+                    >
+                      <ArticleBodyMarkdown
+                        markdown={submission.body}
+                        variant="admin"
+                        fontPreset="classic"
+                      />
+                    </InlineErrorBoundary>
                   </div>
 
                   {submission.status === "pending" ? (

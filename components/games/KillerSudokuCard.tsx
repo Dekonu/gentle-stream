@@ -622,7 +622,13 @@ export default function KillerSudokuCard({
         metadata: { difficulty: p.difficulty, puzzleSignature },
       }),
     });
-  }, [metricsEnabled, state.completed, state.failed, state.elapsedSecs]);
+  }, [
+    metricsEnabled,
+    state.completed,
+    state.failed,
+    state.elapsedSecs,
+    puzzleSignature,
+  ]);
 
   // Keyboard
   useEffect(() => {

@@ -7,19 +7,21 @@
     "packages/*"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
-  "packageManager": "npm@10.8.2",
+  "packageManager": "npm@11.6.1",
   "overrides": {
     "elliptic": "6.6.1"
   },
   "scripts": {
     "clean": "node scripts/clean-next.mjs",
-    "dev": "next dev",
-    "dev-light": "cross-env DEV_LIGHT=1 next dev",
+    "dev": "next dev --webpack",
+    "dev:turbo": "next dev",
+    "dev:clean": "node scripts/clean-next.mjs && next dev --webpack",
+    "dev-light": "cross-env DEV_LIGHT=1 next dev --webpack",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint . --ext .js,.ts,.tsx --max-warnings=9999",
+    "lint": "eslint . --ext .js,.ts,.tsx --max-warnings=50",
     "ingest": "tsx scripts/ingest/run.ts",
     "ingest:all": "tsx scripts/ingest/run.ts --all",
     "ingest:tag": "tsx scripts/ingest/run.ts --tag-only",
@@ -64,6 +66,7 @@
     "security:inventory": "tsx scripts/security-route-inventory.ts",
     "security:rls-audit": "tsx scripts/security-rls-boundary-audit.ts",
     "security:audit": "npm audit --audit-level=high --omit=dev",
+    "security:audit:full": "npm audit --audit-level=low",
     "env:check": "tsx scripts/check-env.ts",
     "validation:route-json-casts": "tsx scripts/check-route-json-casts.ts"
   },
@@ -73,6 +76,7 @@
     "@supabase/supabase-js": "^2.43.4",
     "linkedom": "^0.18.12",
     "next": "16.2.3",
+    "p-limit": "^7.3.0",
     "react": "^18",
     "react-dom": "^18",
     "react-intersection-observer": "^9.10.3",

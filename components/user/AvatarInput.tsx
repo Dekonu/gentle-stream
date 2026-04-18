@@ -68,7 +68,7 @@ export function AvatarInput({
       setCropOpen(true);
       onError("");
     },
-    [onError, onProfileUpdate]
+    [onError]
   );
 
   const uploadCropped = useCallback(
@@ -327,7 +327,7 @@ export function AvatarInput({
                 }}
                 title="Use this avatar"
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
+                {/* eslint-disable-next-line @next/next/no-img-element -- preset avatar URLs are configured externally and not limited to Next image allowlist hosts */}
                 <img
                   src={url}
                   alt=""

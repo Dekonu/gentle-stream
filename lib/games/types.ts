@@ -1,1 +1,1 @@
-export * from "../../packages/domain/src/games/types";
+export * from "@gentle-stream/domain/games/types";

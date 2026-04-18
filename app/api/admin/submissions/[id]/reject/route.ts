@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
-import { isAdmin } from "@/lib/auth/admin";
+import { requireAdmin } from "@/lib/api/adminAuth";
 import { reviewSubmission } from "@/lib/db/creator";
 import { parseJsonBody } from "@/lib/validation/http";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
@@ -16,26 +15,8 @@ export async function POST(
   context: { params: Promise<{ id: string }> }
 ) {
   const params = await context.params;
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return apiErrorResponse({
-      request,
-      status: 401,
-      code: API_ERROR_CODES.UNAUTHORIZED,
-      message: "Unauthorized",
-    });
-  }
-  if (!isAdmin({ userId: user.id, email: user.email ?? null })) {
-    return apiErrorResponse({
-      request,
-      status: 403,
-      code: API_ERROR_CODES.FORBIDDEN,
-      message: "Admin access required",
-    });
-  }
+  const admin = await requireAdmin(request);
+  if (!admin.ok) return admin.response;
 
   const parsedBody = await parseJsonBody({
     request,
@@ -55,7 +36,7 @@ export async function POST(
   try {
     const reviewed = await reviewSubmission({
       submissionId: params.id,
-      reviewerUserId: user.id,
+      reviewerUserId: admin.userId,
       action: "reject",
       adminNote,
       rejectionReason,

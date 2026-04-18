@@ -8,6 +8,7 @@ import NonogramCard from "./NonogramCard";
 import CrosswordCard from "./CrosswordCard";
 import ConnectionsCard from "./ConnectionsCard";
 import RabbitHoleCard from "./RabbitHoleCard";
+import { InlineErrorBoundary } from "@/components/error/InlineErrorBoundary";
 import type {
   SudokuPuzzle,
   KillerSudokuPuzzle,
@@ -156,6 +157,10 @@ const LOADING_MESSAGES: Partial<Record<GameType, string>> = {
   connections:   "Building the groups…",
   rabbit_hole:   "Opening the rabbit hole…",
 };
+
+function gameBoundaryTitle(gameType: GameType): string {
+  return `${gameType.replace("_", " ")} module failed`;
+}
 
 export default function GameSlot({
   gameType,
@@ -530,84 +535,119 @@ export default function GameSlot({
 
   if (gameType === "sudoku") {
     return (
-      <SudokuCard
-        puzzle={puzzle as SudokuPuzzle}
-        onNewPuzzle={handleNewPuzzle}
-        embedded={embedded}
-        initialCloudSlice={sudokuCloud}
-        cloudSaveEnabled={cloudOn}
-        metricsEnabled={metricsOn}
-        puzzleSignature={puzzleSignature}
-      />
+      <InlineErrorBoundary
+        fallbackTitle={gameBoundaryTitle(gameType)}
+        fallbackMessage="This puzzle encountered an error. Try loading another puzzle."
+      >
+        <SudokuCard
+          puzzle={puzzle as SudokuPuzzle}
+          onNewPuzzle={handleNewPuzzle}
+          embedded={embedded}
+          initialCloudSlice={sudokuCloud}
+          cloudSaveEnabled={cloudOn}
+          metricsEnabled={metricsOn}
+          puzzleSignature={puzzleSignature}
+        />
+      </InlineErrorBoundary>
     );
   }
 
   if (gameType === "word_search") {
     return (
-      <WordSearchCard
-        puzzle={puzzle as WordSearchPuzzle}
-        onNewPuzzle={handleNewPuzzle}
-        initialCloudSlice={wordCloud}
-        cloudSaveEnabled={cloudOn}
-        metricsEnabled={metricsOn}
-        puzzleSignature={puzzleSignature}
-      />
+      <InlineErrorBoundary
+        fallbackTitle={gameBoundaryTitle(gameType)}
+        fallbackMessage="This puzzle encountered an error. Try loading another puzzle."
+      >
+        <WordSearchCard
+          puzzle={puzzle as WordSearchPuzzle}
+          onNewPuzzle={handleNewPuzzle}
+          initialCloudSlice={wordCloud}
+          cloudSaveEnabled={cloudOn}
+          metricsEnabled={metricsOn}
+          puzzleSignature={puzzleSignature}
+        />
+      </InlineErrorBoundary>
     );
   }
 
   if (gameType === "killer_sudoku") {
     return (
-      <KillerSudokuCard
-        puzzle={puzzle as KillerSudokuPuzzle}
-        onNewPuzzle={handleNewPuzzle}
-        metricsEnabled={metricsOn}
-        puzzleSignature={puzzleSignature}
-      />
+      <InlineErrorBoundary
+        fallbackTitle={gameBoundaryTitle(gameType)}
+        fallbackMessage="This puzzle encountered an error. Try loading another puzzle."
+      >
+        <KillerSudokuCard
+          puzzle={puzzle as KillerSudokuPuzzle}
+          onNewPuzzle={handleNewPuzzle}
+          metricsEnabled={metricsOn}
+          puzzleSignature={puzzleSignature}
+        />
+      </InlineErrorBoundary>
     );
   }
 
   if (gameType === "nonogram") {
     return (
-      <NonogramCard
-        puzzle={puzzle as NonogramPuzzle}
-        onNewPuzzle={handleNewPuzzle}
-        metricsEnabled={metricsOn}
-        puzzleSignature={puzzleSignature}
-      />
+      <InlineErrorBoundary
+        fallbackTitle={gameBoundaryTitle(gameType)}
+        fallbackMessage="This puzzle encountered an error. Try loading another puzzle."
+      >
+        <NonogramCard
+          puzzle={puzzle as NonogramPuzzle}
+          onNewPuzzle={handleNewPuzzle}
+          metricsEnabled={metricsOn}
+          puzzleSignature={puzzleSignature}
+        />
+      </InlineErrorBoundary>
     );
   }
 
   if (gameType === "crossword") {
     return (
-      <CrosswordCard
-        puzzle={puzzle as CrosswordPuzzle}
-        onNewPuzzle={handleNewPuzzle}
-        metricsEnabled={metricsOn}
-        puzzleSignature={puzzleSignature}
-      />
+      <InlineErrorBoundary
+        fallbackTitle={gameBoundaryTitle(gameType)}
+        fallbackMessage="This puzzle encountered an error. Try loading another puzzle."
+      >
+        <CrosswordCard
+          puzzle={puzzle as CrosswordPuzzle}
+          onNewPuzzle={handleNewPuzzle}
+          metricsEnabled={metricsOn}
+          puzzleSignature={puzzleSignature}
+        />
+      </InlineErrorBoundary>
     );
   }
 
   if (gameType === "connections") {
     return (
-      <ConnectionsCard
-        puzzle={puzzle as ConnectionsPuzzle}
-        onNewPuzzle={connectionsDaily ? undefined : handleNewPuzzle}
-        metricsEnabled={metricsOn}
-        puzzleSignature={puzzleSignature}
-        dailyPuzzle={connectionsDaily}
-      />
+      <InlineErrorBoundary
+        fallbackTitle={gameBoundaryTitle(gameType)}
+        fallbackMessage="This puzzle encountered an error. Try loading another puzzle."
+      >
+        <ConnectionsCard
+          puzzle={puzzle as ConnectionsPuzzle}
+          onNewPuzzle={connectionsDaily ? undefined : handleNewPuzzle}
+          metricsEnabled={metricsOn}
+          puzzleSignature={puzzleSignature}
+          dailyPuzzle={connectionsDaily}
+        />
+      </InlineErrorBoundary>
     );
   }
 
   if (gameType === "rabbit_hole") {
     return (
-      <RabbitHoleCard
-        puzzle={puzzle as RabbitHolePuzzle}
-        onNewPuzzle={handleNewPuzzle}
-        metricsEnabled={metricsOn}
-        puzzleSignature={puzzleSignature}
-      />
+      <InlineErrorBoundary
+        fallbackTitle={gameBoundaryTitle(gameType)}
+        fallbackMessage="This puzzle encountered an error. Try loading another puzzle."
+      >
+        <RabbitHoleCard
+          puzzle={puzzle as RabbitHolePuzzle}
+          onNewPuzzle={handleNewPuzzle}
+          metricsEnabled={metricsOn}
+          puzzleSignature={puzzleSignature}
+        />
+      </InlineErrorBoundary>
     );
   }
 

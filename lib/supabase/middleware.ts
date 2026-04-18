@@ -5,7 +5,6 @@ import {
   parseSessionStart,
   SESSION_MAX_AGE_SEC,
   SESSION_START_COOKIE,
-  sessionStartCookieOptions,
 } from "@/lib/auth/session-policy";
 import { createSupabaseResponseClient } from "@/lib/supabase/response-client";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
@@ -19,6 +18,8 @@ const PUBLIC_PREFIXES = [
   "/",
   "/login",
   "/creator/login",
+  "/article",
+  "/embed",
   "/auth/callback",
   "/auth/auth-code-error",
   "/api/auth/email-password",
@@ -121,10 +122,7 @@ export async function updateSession(request: NextRequest, traceId?: string) {
   const started = parseSessionStart(startRaw);
 
   if (user) {
-    if (
-      started !== null &&
-      nowSec - started > SESSION_MAX_AGE_SEC
-    ) {
+    if (started === null || nowSec - started > SESSION_MAX_AGE_SEC) {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.pathname = "/login";
       redirectUrl.searchParams.set("reason", "session_expired");
@@ -136,19 +134,6 @@ export async function updateSession(request: NextRequest, traceId?: string) {
       await signOutClient.auth.signOut();
       r.cookies.delete(SESSION_START_COOKIE);
       return finish(r);
-    }
-
-    if (startRaw && started === null) {
-      supabaseResponse.cookies.delete(SESSION_START_COOKIE);
-    }
-    const hasValidStart =
-      started !== null && nowSec - started <= SESSION_MAX_AGE_SEC;
-    if (!hasValidStart) {
-      supabaseResponse.cookies.set(
-        SESSION_START_COOKIE,
-        String(nowSec),
-        sessionStartCookieOptions()
-      );
     }
   }
 
