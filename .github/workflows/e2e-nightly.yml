@@ -32,6 +32,9 @@ jobs:
           npm --version
           node --version
           npm ci || npm ci --legacy-peer-deps
+      # test-storybook uses Playwright (headless Chromium); browsers are not bundled with npm.
+      - name: Install Playwright Chromium for Storybook
+        run: npx playwright install --with-deps chromium
       - name: Run unit/component/storybook suites
         run: |
           npm run test:unit
